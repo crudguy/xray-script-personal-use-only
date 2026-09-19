@@ -1,0 +1,25 @@
+# 行尾统一: shell 脚本强制 LF。
+#
+# 为什么必须显式写这里 —— 开发机 (Windows) 的全局 git 配置是 core.autocrlf=true, 会把
+# 工作区还原成 CRLF; 而 CRLF 的 shebang 在 Linux 上直接执行 `./install.sh` 会报
+# "bad interpreter" (env 会去找名为 `bash\r` 的程序), 从 Windows 工作区打包分发时也会
+# 把 CRLF 带出去。本文件让 .gitattributes 覆盖 core.autocrlf, 且与 .editorconfig 的
+# `end_of_line = lf` 保持一致。
+#
+# 只针对 shell 脚本: 其它文本文件在索引里本来就是 LF, 且由 core.autocrlf 兜底, 无需在此
+# 重复声明 (声明了反而会让未归一化的工作区文件反复出现 "CRLF will be replaced" 提示)。
+*.sh text eol=lf
+*.bash text eol=lf
+
+# 二进制/图形资源: 禁止任何行尾或编码转换
+*.drawio binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.gz binary
+*.xz binary
+*.tar binary

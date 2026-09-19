@@ -1,0 +1,885 @@
+{
+  "title": {
+    "tip": "Tips",
+    "info": "Info",
+    "warn": "Warning",
+    "error": "Error",
+    "config": "Config",
+    "route": "Route",
+    "pass": "Pass",
+    "fail": "Fail",
+    "test": "Test",
+    "hint": "Hint",
+    "multiple_values": "Multiple values separated by commas"
+  },
+  "main": {
+    "not_support": "Current script configuration type is not SNI, this feature is not available",
+    "handler_failed": "Operation failed; exited safely to avoid configuration or environment contamination",
+    "lock_busy": "Another xray-script-personal-use-only instance is already running; exited to avoid concurrent configuration changes. Wait for it to finish and retry. If you are sure no other instance exists, remove ~/.xray-script-personal-use-only/.xray-script-personal-use-only.lock or set XRAY_SCRIPT_NO_LOCK=1.",
+    "backup_input_path": "Backup archive path (e.g. /root/.xray-script-personal-use-only/backup/xxx.tar.gz): ",
+    "backup_ipath_required": "No backup archive path given; import cancelled",
+    "usage": "Usage: xray-script-personal-use-only.sh [options]\n  (no args)          interactive management menu\n  --vision | --xhttp | --fallback   one-click quick install of the protocol\n  --health | --net-status | --bbr | --net-tune | --nofile-limit   read-only check/tune (cron-safe)\n  --export-config | --import-config   config backup & migration (scriptable)\n  --subscription   generate subscription config\n  --help, -h   show this help"
+  },
+  "menu": {
+    "choose": "Please choose an option",
+    "choose_invalid": "Invalid input; treated as \"not selected\" (only numbers 0-255 are accepted; press Enter for the default)",
+    "status": {
+      "default": "Default",
+      "not_installed": "Not Installed",
+      "not_configured": "Not Configured",
+      "enabled": "Enabled",
+      "disabled": "Disabled"
+    },
+    "index": {
+      "description": "Xray Management Script",
+      "installation": "Installation",
+      "operation": "Operation",
+      "configuration": "Configuration",
+      "option1": "Full Installation",
+      "option2": "Install/Update Only",
+      "option3": "Uninstall",
+      "option4": "Start",
+      "option5": "Stop",
+      "option6": "Restart",
+      "option7": "Share Link & QR Code",
+      "option8": "Traffic Statistics",
+      "option9": "Manage Configuration",
+      "option0": "Exit",
+      "diagnostic": "Diagnostics",
+      "option10": "Full health check",
+      "subscription": "Subscription",
+      "option11": "Generate subscription (base64/Clash/sing-box)"
+    },
+    "uninstall": {
+      "title": "Uninstall",
+      "option1": "Uninstall Xray",
+      "option2": "Uninstall Nginx",
+      "info1": "Remove Xray core and project traces (Nginx/acme.sh/certs/Docker kept)",
+      "info2": "Remove only the project-built Nginx (refuses distro builds to protect other sites)",
+      "option0": "Exit"
+    },
+    "full_installation": {
+      "title": "Installation Flow",
+      "option1": "One-click Install",
+      "option2": "Custom Configuration",
+      "info1": "Stable version, Vision+Reality, block bt, cn, ads, enable geodata auto-update",
+      "info2": "Custom version, custom config",
+      "confirm_default": "Pressing Enter runs the one-click install (Vision), which is irreversible. Confirm? [y/N]: "
+    },
+    "xray_version": {
+      "title": "Xray Version",
+      "option1": "Latest",
+      "option2": "Stable",
+      "option3": "Custom",
+      "info1": "Includes pre-release versions",
+      "info2": "Latest official release",
+      "info3": "Custom versions may have config compatibility issues"
+    },
+    "protocol_config": {
+      "title": "Protocol Config",
+      "option1": "VLESS+mKCP+seed",
+      "option2": "VLESS+Vision+REALITY",
+      "option3": "VLESS+XHTTP+REALITY",
+      "option4": "Trojan+XHTTP+REALITY",
+      "option5": "Dual Protocol Composite",
+      "option6": "SNI Split Composite",
+      "info1": "mKCP sacrifices bandwidth to reduce latency.",
+      "info2": "XTLS(Vision) solves TLS in TLS issue",
+      "info3": "XHTTP supports all scenarios",
+      "info3_1": "XHTTP has multiplexing by default, lower latency than Vision",
+      "info3_2": "v2rayN&G clients have global mux.cool settings, disable before using XHTTP",
+      "info3_3": "Under current DPI, prefer XHTTP and move the listening port off 443 (e.g. 8443): 443 is the primary probing target; keep 443 when it is a CDN origin",
+      "info4": "Replace VLESS with Trojan",
+      "info5": "Use VLESS+Vision+REALITY fallback to VLESS+XHTTP on port 443",
+      "info6": "SNI-based split through Nginx on port 443, supports CDN and direct connection"
+    },
+    "web_config": {
+      "title": "Web Config",
+      "option1": "Nginx Default Page"
+    },
+    "ca_vendor": {
+      "title": "CA Vendor",
+      "option1": "ZeroSSL",
+      "option2": "Let's Encrypt",
+      "info1": "The script defaults to ZeroSSL as the CA server, which may sometimes cause certificate issuance to stay at: Pending, The CA is processing your order, please just wait.",
+      "info2": "Let's Encrypt no longer supports OCSP stapling, but this does not affect REALITY usage"
+    },
+    "config_management": {
+      "title": "Configuration Management",
+      "option1": "Update Configuration",
+      "option2": "Route Management",
+      "option3": "SNI Configuration",
+      "option4": "Change Xray Port",
+      "option5": "Enable/Disable geodata auto-update",
+      "option6": "Language",
+      "option7": "BBR & kernel network tuning",
+      "option8": "Backup & Migration",
+      "info1": "Full config update",
+      "info2": "Manage blocking or WARP routing",
+      "info3": "Includes Nginx update, domain change, web config",
+      "info4": "(Non-SNI) Change Xray listen port and restart service",
+      "info5": "geodata provided by  https://github.com/Loyalsoldier/v2ray-rules-dat ",
+      "info6": "Enable/repair BBR, read-only health check, kernel net tuning and nofile limit",
+      "info7": "Export config and certificates into a single archive, or restore from one (migration / DR)"
+    },
+    "route_management": {
+      "title": "Custom Routing",
+      "option1": "Enable/Disable WARP Proxy",
+      "option2": "Reset WARP Proxy",
+      "option3": "Add block IP route",
+      "option4": "Add block domain route",
+      "option5": "Add WARP IP route",
+      "option6": "Add WARP domain route",
+      "info1": "WARP Proxy is deployed via Docker, Docker will be auto-installed.",
+      "info2": "WARP Proxy details: https://github.com/haoel/haoel.github.io?tab=readme-ov-file#1043-docker-proxy",
+      "info3": "Re-applying WARP account frequently may get IP banned by Cloudflare.",
+      "info4": "Clear WARP container log files and reset the container.",
+      "info5": "Add IP-based block route to ruleTag block-ip.",
+      "info6": "Add domain-based block route to ruleTag block-domain.",
+      "info7": "(WARP must be enabled) Add WARP IP route to ruleTag warp-ip.",
+      "info8": "(WARP must be enabled) Add WARP domain route to ruleTag warp-domain."
+    },
+    "sni_config": {
+      "title": "SNI Configuration",
+      "option1": "Change default domain",
+      "option2": "Change CDN domain",
+      "option3": "Force certificates renew",
+      "option4": "Update nginx",
+      "option5": "Enable/Disable nginx auto-update",
+      "option6": "Modify web config",
+      "option7": "Switch CA vendor",
+      "option8": "Manage custom domains and reverse proxy apps",
+      "option9": "Remove certificate",
+      "info1": "Domain for REALITY",
+      "info2": "Domain for CDN",
+      "info3": "Switching CA updates config and affects subsequent certificate issuance",
+      "info4": "List, add, edit, or delete extra HTTPS reverse proxy sites",
+      "info5": "Remove a domain’s certificate (its HTTPS will break)"
+    },
+    "custom_sites": {
+      "title": "Custom Site Management",
+      "option1": "List sites",
+      "option2": "Add site",
+      "option3": "Edit/Update site",
+      "option4": "Delete site",
+      "info1": "Show index, domain, proxy target, and UDS name",
+      "info2": "Add an independent certificate and reverse proxy site",
+      "info3": "Modify the domain or upstream target",
+      "info4": "Delete site config, certificate, and renew record"
+    },
+    "backup": {
+      "title": "Backup & Migration",
+      "option1": "Export configuration backup",
+      "option2": "Restore from backup archive",
+      "option0": "Exit",
+      "info1": "Packages script config, Xray config, Nginx sites and certificates; contains private keys, keep it safe",
+      "info2": "Auto-backs up the current state before import; rolls back on failure without leaving a half-applied state"
+    },
+    "bbr": {
+      "title": "BBR & Kernel Network",
+      "option1": "Enable / repair BBR",
+      "option2": "BBR & kernel network health check",
+      "option3": "Kernel network tuning",
+      "option4": "File descriptor limit (nofile)",
+      "option0": "Back to management",
+      "info1": "Idempotent: changes no file when already active",
+      "info2": "Read-only: module, params, persist files, live connections",
+      "info3": "Host-wide TCP buffers and queues (asks for confirmation)",
+      "info4": "limits.d and systemd limits (asks; affects all users)",
+      "state_on": "on",
+      "state_off": "off",
+      "state_unknown": "unknown"
+    }
+  },
+  "handler": {
+    "unknown_option": "Unknown or unsupported option",
+    "script": {
+      "config_update": "Updating script configuration"
+    },
+    "xray": {
+      "config_update": "Updating Xray configuration"
+    },
+    "purge": {
+      "scope_notice": "This operation removes Xray (including its configuration and logs), and cleans up the cron jobs and Nginx site configuration written by this project. Nginx, acme.sh (including issued certificates) and Docker containers are left untouched.",
+      "fail": "Xray removal did not complete (it may not be installed); the subsequent cleanup was skipped.",
+      "cron_removed": "Removed the cron jobs written by this project.",
+      "cron_empty": "No cron jobs written by this project were found; nothing to clean.",
+      "nginx_rollback_fail": "The Nginx configuration rollback did not complete; please check the output above."
+    },
+    "persist": {
+      "invalid_json": "The Xray configuration is not valid JSON; the write was refused and the existing configuration is untouched.",
+      "write_failed": "Failed to write the Xray configuration; the existing configuration is untouched.",
+      "verify_failed": "The Xray configuration failed syntax verification; it has been rolled back to the previous working copy."
+    },
+    "restart": {
+      "verify_failed": "Xray did not become active after restart; please check the Xray logs or port conflicts."
+    },
+    "start": {
+      "verify_failed": "Xray did not become active after start; please check the Xray logs or port conflicts."
+    },
+    "install": {
+      "fail_download": "Failed to download or verify the Xray installation script, please check your network and retry."
+    },
+    "subscription": {
+      "refresh_failed": "Config updated, but the subscription could not be regenerated — the files are stale; regenerate them via menu 11."
+    },
+    "warp": {
+      "status": "WARP PROXY is disabled, unable to add WARP routing"
+    },
+    "geodata": {
+      "close_cron": "Successfully stopped geodata auto-update task",
+      "open_cron": "Successfully started geodata auto-update task",
+      "update": "Executing geodata update"
+    },
+    "nginx": {
+      "close_cron": "Successfully stopped nginx auto-update task",
+      "open_cron": "Successfully started nginx auto-update task",
+      "not_installed": "Nginx is not installed. Please install it via SNI mode in the main menu, or from the Nginx menu.",
+      "foreign_binary": "The existing Nginx on this system was not built by this project (missing Brotli and other modules); configuration deployment was skipped. To use this project's Nginx, uninstall the system Nginx and install again.",
+      "purge_refused": "Uninstall refused: the current Nginx is not a build of this project, so nothing was changed.",
+      "http3_stripped": "The local Nginx was built without HTTP/3 support; quic listeners and Alt-Svc were removed from the site config so Nginx does not fail to start on the unknown parameter.",
+      "verify_failed": "Nginx did not become active; please check the Nginx logs or port 80/443 conflicts."
+    },
+    "custom_sites": {
+      "empty": "No custom sites configured",
+      "list_header": "Index | Domain | Proxy Target | UDS",
+      "keep_current": "Leave empty to keep the current value",
+      "added": "Custom site added: ",
+      "updated": "Custom site updated: ",
+      "deleted": "Custom site deleted: ",
+      "upstream_only": "Only the upstream target changed; certificate re-issue is skipped",
+      "syncing": "Syncing custom site configuration"
+    },
+    "sni": {
+      "port_guard_fail": "SNI initialization stopped: required port check failed",
+      "port_guard_self_stop": "This project's Xray is still holding port 443 (non-SNI mode); stopping it to release the port."
+    },
+    "remove_cert": {
+      "confirm": "This will remove the certificate for ${domain} (its HTTPS will break immediately and cannot be undone). Continue? [y/N] ",
+      "cancelled": "Cancelled, nothing changed",
+      "fail": "Failed to remove certificate for ${domain}, check if it exists",
+      "success": "Certificate for ${domain} removed"
+    },
+    "bbr": {
+      "already": "BBR is already enabled, nothing to do.",
+      "enabling": "Enabling BBR congestion control...",
+      "unsupported": "Kernel does not support BBR (tcp_bbr module failed to load). Requires kernel 4.9+, or this kernel lacks the module.",
+      "verified": "BBR is enabled and verified.",
+      "verify_failed": "BBR config written but verification failed. Confirm after reboot, or check /etc/sysctl.d/99-xray-script-personal-use-only-bbr.conf"
+    },
+    "backup": {
+      "export_failed": "Failed to export configuration; see the output above",
+      "import_failed": "Failed to import configuration; see the output above",
+      "import_usage": "Import requires a backup archive path"
+    },
+    "net_status": {
+      "unavailable": "check.sh not found; cannot run the network health check."
+    },
+    "net_tune": {
+      "no_sysctl": "sysctl is unavailable; cannot tune kernel network parameters.",
+      "already": "All kernel network parameters already match the target values; nothing to do.",
+      "plan_title": "Kernel network parameters to be written:",
+      "plan_file": "Target file: ",
+      "plan_scope": "Scope: all TCP connections on this host, not just this app",
+      "plan_change": "Parameters to change: ",
+      "plan_keep": "Already at target: ",
+      "confirm": "Write and apply these parameters?",
+      "cancelled": "Cancelled; no kernel parameter was changed.",
+      "applying": "Writing and applying kernel network parameters...",
+      "write_failed": "Failed to write kernel parameters: ",
+      "write_failed_hint": "Check free disk space and write permission on /etc/sysctl.d (root required).",
+      "done": "Kernel network parameters written and applied.",
+      "partial": "These parameters did not reach the target value (the kernel may cap them):"
+    },
+    "nofile": {
+      "clamped": "Target exceeds fs.nr_open; lowered to: ",
+      "plan_title": "File descriptor limit (nofile) to be written:",
+      "current_label": "Current hard limit: ",
+      "target_label": "Target limit: ",
+      "plan_scope": "Scope: all users and all systemd services",
+      "confirm": "Write this nofile configuration?",
+      "cancelled": "Cancelled; no file was changed.",
+      "applying": "Writing nofile configuration...",
+      "write_failed": "Failed to write nofile configuration: ",
+      "write_failed_hint": "Check free disk space and write permission on /etc/security/limits.d (root required).",
+      "reexec": "Running systemctl daemon-reexec...",
+      "reexec_failed": "daemon-reexec failed; the new limit applies only after a reboot.",
+      "restart_confirm": "Restart xray / nginx now to apply the new limit? Connections drop briefly",
+      "restarting": "Restarting services...",
+      "restart_failed": "Restart failed (the new limit still applies on the next restart): ",
+      "restart_skipped": "Restart skipped; the new limit applies on the next service restart.",
+      "verify_title": "Service verification (read from /proc/pid/limits):",
+      "expect_label": ", expected ",
+      "done": "nofile configuration written."
+    },
+    "health": {
+      "unavailable": "check.sh not found; cannot run the full health check."
+    },
+    "input_unavailable": "Cannot read interactive input: stdin is closed or no terminal is available (common with cron, pipes, or < /dev/null). Operation aborted.",
+    "input_retry_exhausted": "Too many consecutive invalid inputs; operation aborted. Please check the expected format and run again."
+  },
+  "backup": {
+    "usage": "Usage: backup.sh --export [output file] [--with-docker] | --import <archive> [--yes]",
+    "err.missing_tool": "Missing required command: ",
+    "err.no_script_config": "Script config not found; install first: ",
+    "err.mktemp": "Cannot create a staging directory; check disk space and permissions",
+    "err.stage": "Cannot initialize the packaging staging directory",
+    "err.nothing_to_export": "Nothing to export; make sure this machine has been installed",
+    "err.manifest": "Failed to generate the archive manifest",
+    "err.tar": "Packaging failed; the incomplete archive has been removed",
+    "err.outdir": "Cannot create the output directory: ",
+    "err.import_usage": "Import requires an archive file path",
+    "err.archive_missing": "Archive not found: ",
+    "err.archive_unsafe": "Archive failed the safety precheck (absolute path, path traversal, or unexpected entry); import refused",
+    "err.manifest_missing": "manifest.json is missing; this archive was not produced by this script",
+    "err.bad_dotdot": "path contains ..",
+    "err.bad_abs": "absolute path",
+    "err.bad_member": "unexpected entry",
+    "err.extract": "Extraction failed; the archive may be corrupted",
+    "err.manifest_mismatch": "Archive magic or schema version mismatch; use an archive exported by this script",
+    "err.manifest_incomplete": "Archive lacks the main script config; it is not a complete backup",
+    "err.pre_backup_failed": "Automatic pre-import backup failed; aborted (existing config left untouched)",
+    "err.restore_failed": "Error during restore; rolled back to the pre-import state",
+    "err.verify_failed": "Post-restore verification failed; rolled back to the pre-import state",
+    "err.unknown_option": "Unknown option: ",
+    "export.scanning": "Collecting configuration and certificates...",
+    "export.absent": "absent on this machine, skipped",
+    "export.done": "Export complete.",
+    "export.secret_warn": "The archive contains UUIDs and private keys; store and transfer it as confidential.",
+    "export.hint": "To migrate, copy this file to the new machine and import it via Configuration Management -> 9.",
+    "import.validating": "Validating archive...",
+    "import.confirm": "This will overwrite the local configuration with the archive contents. Continue?",
+    "import.cancelled": "Cancelled; nothing was changed.",
+    "import.pre_backup": "Backing up the current state as a rollback point...",
+    "import.stopping": "Stopping services...",
+    "import.restoring": "Restoring configuration and certificates...",
+    "import.rollback": "Restore failed; rolling back to the pre-import state...",
+    "import.verify_failed_rollback": "Configuration verification failed; rolling back to the pre-import state...",
+    "import.starting": "Starting services...",
+    "import.done": "Import complete. Members restored: ",
+    "import.share_warn": "If the domain or port changed, review the share links and client config again.",
+    "import.unknown_member": "Unknown member in the archive, skipped: ",
+    "import.xray_ok": "Xray config verification passed.",
+    "import.xray_invalid_json": "Xray config is not valid JSON.",
+    "import.xray_test_failed": "Xray config verification failed.",
+    "import.nginx_ok": "Nginx config verification passed.",
+    "import.nginx_test_failed": "Nginx config verification failed.",
+    "import.no_unit": "Service unit not found, start skipped: ",
+    "import.start_failed": "Service failed to start, please check manually: ",
+    "label.file": "Archive",
+    "label.size": "Size",
+    "label.members": "Members",
+    "label.skipped": "skipped",
+    "label.sha256": "SHA256",
+    "label.archive": "Archive",
+    "label.created": "Created",
+    "label.host": "Source host",
+    "label.tag": "Protocol",
+    "label.contents": "Contents",
+    "label.pre_backup": "Rollback point"
+  },
+  "read": {
+    "version": "Custom version (e.g. v1.0.0): ",
+    "rules": "Reset routing rules [y/N] ?",
+    "block_bt": "Enable bittorrent blocking [Y/n] ?",
+    "block_cn": "Enable China IP blocking [Y/n] ?",
+    "block_ad": "Enable ad blocking [Y/n] ?",
+    "auto_geo": "Enable geodata auto-update [Y/n] ?",
+    "port": "Enter port (range: 1-65535, default: 443, mKCP random): ",
+    "uuid": "Enter UUID (custom string supported, default auto-generated): ",
+    "fallback": "Enter Fallback UUID (custom string supported, default auto-generated): ",
+    "seed": "Enter seed (default auto-generated): ",
+    "password": "Enter password (default auto-generated): ",
+    "target": "Enter target domain (default random): ",
+    "only_change_domain": "Only change domain [Y/n]: ",
+    "domain": "Enter website domain (for Reality): ",
+    "cdn": "Enter website domain (for CDN): ",
+    "custom_domain": "Enter custom site domain: ",
+    "remove_cert": "Enter the domain whose certificate to remove: ",
+    "proxy_target": "Enter proxy target (port or http[s]://host:port): ",
+    "site_index": "Enter site index: ",
+    "email": "Enter email for ZeroSSL registration: ",
+    "switch_ca": "Switching CA requires re-issuing certificates, continue switching [y/N]: ",
+    "short": "Enter shortId (comma separated, default auto-generated): ",
+    "short_id_tip": "Supports input 0 to 8 to automatically generate shortId of corresponding length",
+    "path": "Enter path (default auto-generated): ",
+    "warp_ip": "Enter IP to route to WARP",
+    "warp_domain": "Enter domain to route to WARP",
+    "block_ip": "Enter IP to route to block",
+    "block_domain": "Enter domain to route to block",
+    "eof_abort": "Failed to read input: stdin is closed (no terminal or pipe exhausted); cannot continue interactively."
+  },
+  "share": {
+    "client": "Client Configuration",
+    "extra": "XHTTP Extra Config",
+    "link": "Share Link",
+    "qr": "QR Code",
+    "qr_missing": "qrencode command not found; QR code display skipped. Install it to show the QR code: apt install qrencode or yum install qrencode",
+    "warning": "WARNING: The following contains service secrets (uuid/password/public key). Do NOT screen-record, screen-share, or keep terminal logs; use --save to write a 0600 file.",
+    "saved": "Share config written to file (mode 0600): ${path}",
+    "fail_save": "Failed to create share output file: ${path}",
+    "fp_invalid": "Unsupported uTLS fingerprint, falling back to chrome (valid: chrome / firefox / safari / ios / android / edge / random)",
+    "subscription": {
+      "title": "One-click subscription",
+      "nodes": "Generated subscription for {n} node(s)",
+      "base64": "base64 subscription (v2rayN/NekoBox/FoXray): {path}",
+      "clash": "Clash subscription (YAML): {path}",
+      "singbox": "sing-box subscription (JSON): {path}",
+      "limit": "Note: Clash/sing-box contain the primary connection only; XHTTP downlink acceleration (extra) is Xray-specific and preserved in the base64 link.",
+      "skip": "Note: sing-box has no mKCP transport; skipped {n} node(s).",
+      "secret": "Subscription files contain sensitive info (uuid/password); permissions set to 0600."
+    }
+  },
+  "check": {
+    "ip": {
+      "check": "Checking IP address validity: ",
+      "ipv4_valid": "IPv4 address is valid: ",
+      "ipv6_valid": "IPv6 address is valid: ",
+      "invalid": "Invalid IP format: "
+    },
+    "port": {
+      "check": "Checking port validity: ",
+      "valid": "Port number is valid: ",
+      "empty": "Input is empty, will be auto-configured",
+      "range_error": "Port must be between 1-65535: "
+    },
+    "sni_ports": {
+      "start": "Running SNI required port checks (TCP 80/443, plus UDP 443 for HTTP/3)...",
+      "occupied_check": "Checking whether port is occupied: ",
+      "occupied_fail": "Port is occupied, cannot continue SNI setup: ",
+      "occupied_fail_hint": "Stop the process occupying this port (see 'ss -lntp'), or use a different port.",
+      "occupied_pass": "Port is not occupied: ",
+      "open_check": "Checking whether firewall allows port: ",
+      "open_pass": "Firewall allows port: ",
+      "open_fail": "Firewall does not allow port: ",
+      "open_skip": "No active firewall policy detected, defaulting to open check pass: ",
+      "firewall_active": "Detected active firewall: ",
+      "allow_try": "Trying to auto-allow port: ",
+      "allow_pass": "Port auto-allowed: ",
+      "allow_fail": "Failed to auto-allow port: ",
+      "manual_allow": "Please manually allow the port and retry (example: ufw allow <port>/<proto> or firewall-cmd --permanent --add-port=<port>/<proto> && firewall-cmd --reload): ",
+      "udp_occupied_check": "Checking whether UDP port is occupied: ",
+      "udp_occupied_fail": "UDP port is occupied, HTTP/3 cannot be enabled: ",
+      "udp_occupied_fail_hint": "Stop the process occupying this UDP port (see 'ss -lnup'), disable HTTP/3, or use a different port.",
+      "udp_occupied_pass": "UDP port is not occupied: ",
+      "http3_skip": "Current Nginx has no HTTP/3 module, skipping UDP 443 check",
+      "all_pass": "SNI required port checks passed"
+    },
+    "uuid": {
+      "check": "Checking UUID type: ",
+      "string": "Input is a plain string, will be mapped to UUID by Xray",
+      "empty": "Input is empty, will auto-generate a UUID",
+      "valid": "UUID is valid: "
+    },
+    "password": {
+      "check": "Checking password validity: ",
+      "valid": "Password format is valid: ",
+      "empty": "Input is empty, will auto-generate password",
+      "space_error": "Password cannot contain spaces: ",
+      "length_error": "Password must be at least 8 characters: "
+    },
+    "path": {
+      "check": "Checking path validity: ",
+      "valid": "Path format is valid: ",
+      "empty": "Path is empty, will auto-generate random path",
+      "space_error": "Path cannot contain spaces: ",
+      "length_error": "Path length cannot exceed 128 characters: ",
+      "char_error": "Path contains invalid characters (only letters, digits, /, -, _, . allowed): ",
+      "double_slash_error": "Path cannot contain consecutive slashes: "
+    },
+    "short": {
+      "check": "Checking shortId validity: ",
+      "valid": "shortId is valid: ",
+      "empty": "shortId is empty, acceptable",
+      "digit": "shortId is a digit between 0-8: ",
+      "length_error": "Length must be even and between 2-16: ",
+      "hex_error": "Contains invalid character (non-hexadecimal): "
+    },
+    "domain": {
+      "empty": "Input is empty, will randomly select a domain from config",
+      "format_error": "Invalid domain format: ",
+      "resolve": "Resolving domain: ",
+      "resolve_fail": "Domain resolution failed: ",
+      "resolve_fail_hint": "Ensure the domain resolves to this server's IP (dig +short <domain>), then retry.",
+      "security_check": "Checking domain security: ",
+      "security_pass": "Domain ${domain} security check passed",
+      "format_ok": "Domain format valid: "
+    },
+    "tcp": {
+      "connect_check": "Testing TCP connection: ",
+      "connect_fail": "Cannot connect to ${domain}:443"
+    },
+    "tls": {
+      "info": "Fetching TLS information: ",
+      "error": "TLS connection failed, may not support TLS 1.3: ",
+      "pass": "Supports TLS 1.3",
+      "key_exchange_warn": "Does not use X25519 key exchange: ",
+      "key_exchange_pass": "Uses X25519 key exchange"
+    },
+    "dns": {
+      "check_start": "Checking if domain resolves to this host: ",
+      "resolution_fail": "Domain resolution failed: ",
+      "resolution_fail_hint": "Ensure the domain resolves to this server's IP (dig +short <domain>), then retry.",
+      "check_pass": "Domain ${domain} DNS check passed"
+    },
+    "config": {
+      "check": "Checking if Xray config file exists: ",
+      "exist": "Xray config file exists: ",
+      "not_exist": "Xray config file does not exist: ",
+      "not_exist_hint": "Run 'bash main.sh' to complete the Xray installation and configuration first."
+    },
+    "version": {
+      "check": "Checking if Xray version exists: ",
+      "exist": "Xray version exists: v",
+      "not_exist": "Xray version does not exist: v"
+    },
+    "email": {
+      "check": "Validating email address: ",
+      "valid": "Email format is valid: ",
+      "empty": "Email cannot be empty",
+      "format_error": "Invalid email format: "
+    },
+    "proxy_target": {
+      "check": "Validating proxy target: ",
+      "empty": "Proxy target cannot be empty",
+      "normalized": "Normalized port-only input to: ",
+      "format_error": "Invalid proxy target format, only http[s]://host:port or a raw port is allowed: ",
+      "scheme_error": "Proxy target scheme must be http or https: ",
+      "host_error": "Invalid proxy target host: ",
+      "path_error": "Proxy target must not include path, query, or fragment: ",
+      "valid": "Proxy target is valid: "
+    },
+    "custom_domain": {
+      "check": "Validating custom site domain: ",
+      "empty": "Custom site domain cannot be empty",
+      "duplicate_domain": "Custom site domain must not duplicate the default domain: ",
+      "duplicate_cdn": "Custom site domain must not duplicate the CDN domain: ",
+      "duplicate_custom": "Custom site domain already exists: ",
+      "valid": "Custom site domain is valid: "
+    },
+    "list_index": {
+      "check": "Validating list index: ",
+      "empty_list": "There are no sites available for this operation",
+      "format_error": "Index must be a positive integer: ",
+      "range_error": "Index is out of range, current list size is ${total}: ",
+      "valid": "List index is valid: "
+    },
+    "net_status": {
+      "title": "Kernel network / BBR health check (read-only)",
+      "kernel_label": "Kernel      : ",
+      "mod_label": "tcp_bbr     : ",
+      "mod_yes": "loaded",
+      "mod_no": "not loaded",
+      "mod_unknown": "cannot detect (lsmod unavailable)",
+      "cc_label": "Congestion  : ",
+      "cc_yes": "correct",
+      "cc_no": "should be bbr",
+      "qdisc_label": "Default qd  : ",
+      "qdisc_yes": "correct",
+      "qdisc_no": "fq recommended",
+      "avail_label": "Available   : ",
+      "unsupported_unknown": "cannot read (sysctl unavailable)",
+      "persist_title": "Persistence (decides whether it survives a reboot)",
+      "persist_mod_yes": "module autoload (modules-load.d): configured",
+      "persist_mod_no": "module autoload (modules-load.d): missing; BBR silently breaks after reboot",
+      "persist_sysctl_yes": "kernel params (sysctl.d): configured",
+      "persist_sysctl_no": "kernel params (sysctl.d): missing; lost after reboot",
+      "persist_tune_yes": "net tuning file (sysctl.d): configured",
+      "persist_tune_no": "net tuning file (sysctl.d): not configured (optional, see menu 3)",
+      "live_title": "Live connection sampling (established sockets)",
+      "live_no_ss": "ss unavailable; live sampling skipped",
+      "live_none": "no established connection; run a download or proxy traffic first",
+      "live_ratio": "connections on BBR: ",
+      "live_hit": "sample:",
+      "live_miss": "sample first field is not bbr",
+      "done_ok": "BBR + fq are correctly enabled and persist across reboots.",
+      "done_no_persist": "BBR is active now, but persistence is incomplete and may not survive a reboot; re-run menu 1.",
+      "done_bad": "Configuration is not fully in effect; check each line above (menu 1 can fix it)."
+    },
+    "health": {
+      "title": "Full health check",
+      "tag_pass": "[PASS]",
+      "tag_warn": "[WARN]",
+      "tag_fail": "[FAIL]",
+      "tag_skip": "[SKIP]",
+      "sec_system": "System resources",
+      "sec_deps": "Required commands",
+      "sec_xray": "Xray service",
+      "sec_nginx": "Nginx service",
+      "sec_port": "Port ownership",
+      "sec_cert": "TLS certificates",
+      "sec_net": "Kernel network",
+      "sec_script": "Script config & logs",
+      "os_label": "OS: ",
+      "kernel_label": "kernel: ",
+      "mem_label": "Mem available/total: ",
+      "mem_low": "available memory is low, check what is consuming it",
+      "disk_label": "Root fs avail/total: ",
+      "disk_low": "less than 1GB free",
+      "unknown": "unreadable",
+      "present": "ok",
+      "not_configured": "not configured",
+      "deps_req_label": "Required: ",
+      "deps_req_missing": "missing required command(s), core features unavailable",
+      "deps_opt_label": "Optional: ",
+      "deps_opt_missing": "missing optional command(s), related features unavailable",
+      "deps_ok": "all present",
+      "svc_unit_label": "Unit: ",
+      "svc_unit_missing": "systemd unit not found",
+      "svc_active_label": "State: ",
+      "xray_bin_label": "Xray version: ",
+      "xray_bin_missing": "xray binary not found",
+      "xray_conf_label": "Xray config: ",
+      "xray_conf_missing": "config file does not exist",
+      "xray_conf_bad": "config file is not valid JSON",
+      "xray_conf_ok": "valid JSON",
+      "nginx_absent": "Nginx not detected, skipping",
+      "nginx_test_label": "Config syntax: ",
+      "nginx_test_ok": "passed",
+      "nginx_test_bad": "failed, check the \"nginx -t\" output",
+      "port443_label": "443 listener: ",
+      "port80_label": "80 listener: ",
+      "port_none": "no process listening",
+      "port_expect_ok": "matches current mode",
+      "port_mismatch": "listener does not match current mode, expected: ",
+      "h3_module_label": "HTTP/3 module: ",
+      "h3_module_ok": "compiled (with-http_v3_module)",
+      "h3_module_missing": "not compiled, HTTP/3 unavailable",
+      "h3_udp_label": "443/UDP listener: ",
+      "h3_udp_absent": "no process listening, HTTP/3 not effective",
+      "h3_fw_label": "443/UDP allowed: ",
+      "h3_fw_open": "allowed",
+      "h3_fw_none": "no active firewall detected",
+      "h3_fw_closed": "not allowed, QUIC handshake will fail",
+      "nginx_user_label": "Worker user: ",
+      "nginx_user_ok": "dropped privileges (non-root)",
+      "nginx_user_root": "still root, switch to a dedicated user",
+      "xray_log_label": "Xray log dir: ",
+      "xray_log_ok": "hardened (700, root-only)",
+      "xray_log_open": "missing or too permissive, real client IPs may leak",
+      "h3_mode_skip": "HTTP/3 check: non-SNI mode, skipped",
+      "cert_no_domain": "no domain configured, skipping",
+      "cert_label": "Cert: ",
+      "cert_missing": "certificate file missing",
+      "cert_days": "days left: ",
+      "cert_expiring": "expiring soon, verify auto-renewal works",
+      "cert_expired": "expired",
+      "net_cc_label": "Congestion control: ",
+      "net_qdisc_label": "Default qdisc: ",
+      "net_persist_label": "Boot persistence: ",
+      "net_persist_missing": "persistence file missing, will be lost after reboot",
+      "script_conf_label": "Script config: ",
+      "script_conf_missing": "does not exist, possibly not installed yet",
+      "script_conf_bad": "not valid JSON",
+      "script_ver_label": "Script version: ",
+      "script_tag_label": "config tag: ",
+      "script_path_label": "Install path: ",
+      "script_path_mismatch": "differs from the running directory, multiple copies may exist",
+      "log_label": "Log size: ",
+      "log_audit_label": "audit ",
+      "log_access_label": "access ",
+      "rotate_label": "Log rotation  : ",
+      "rotate_ok": "configured",
+      "rotate_missing": "not configured. Logs will grow until the disk is full; re-run the installer to write /etc/logrotate.d/xray-script-personal-use-only.",
+      "rotate_absent": "logrotate not installed, skipped",
+      "log_large": "grew large, consider cleaning up",
+      "sub_label": "Subscription files: ",
+      "sub_unit": ", ",
+      "sub_sync": "in sync with config",
+      "sub_stale": "older than the config change; regenerate via menu 11",
+      "sub_absent": "none generated, skipping this check",
+      "summary": "Total",
+      "summary_pass": "passed",
+      "summary_warn": "warned",
+      "summary_fail": "failed",
+      "done_ok": "Health check passed: nothing needs attention",
+      "done_warn": "Health check done: some items worth noting, service unaffected",
+      "done_fail": "Health check done: issues found that need fixing",
+      "no_probe_note": "Note: this check only reads local state, no outbound probing"
+    }
+  },
+  "docker": {
+    "install": {
+      "start": "Installing Docker",
+      "centos8_fix": "Detected CentOS 8, fixing installation script compatibility",
+      "dry_run": "Performing pre-installation check (dry-run)",
+      "running": "Running Docker installation script",
+      "fail_download": "Failed to download or verify the Docker installation script, please check your network and retry."
+    },
+    "warp": {
+      "build": {
+        "start": "Building WARP image",
+        "fail": "Failed to build WARP image"
+      },
+      "enable": {
+        "start": "Enabling WARP container",
+        "success": "WARP container enabled (IP: ${container_ip})"
+      },
+      "disable": {
+        "stop": "Stopping WARP container",
+        "success": "WARP container stopped"
+      }
+    }
+  },
+  "ssl": {
+    "domain": {
+      "invalid": "Invalid domain format; please provide a domain such as example.com."
+    },
+    "install": {
+      "already_installed": "acme.sh is already installed.",
+      "start": "Installing acme.sh...",
+      "fail_download": "Failed to install acme.sh.",
+      "fail_autoupgrade": "Failed to set acme.sh auto-upgrade.",
+      "fail_set_ca": "Failed to set default CA."
+    },
+    "update": {
+      "start": "Updating acme.sh...",
+      "fail": "Failed to update acme.sh."
+    },
+    "purge": {
+      "start": "Uninstalling acme.sh...",
+      "fail_disable_autoupgrade": "Failed to disable acme.sh auto-upgrade.",
+      "fail_uninstall_cmd": "acme.sh uninstall command failed.",
+      "success": "acme.sh and related directories have been deleted."
+    },
+    "issue": {
+      "no_domain": "No domain specified, cannot apply for certificate.",
+      "start": "Issuing SSL certificate...",
+      "fail_create_acme_dir": "Failed to create ACME challenge directory: ${ACME_WEBROOT_PATH}",
+      "fail_create_cert_dir": "Failed to create SSL certificate directory: ${cert_path}",
+      "fail_backup_nginx": "Failed to backup Nginx config file: ${nginx_conf}",
+      "fail_reload_nginx": "Failed to reload Nginx, please check config file.",
+      "fail_start_nginx": "Failed to start Nginx, please check config file.",
+      "fail_first_attempt": "First attempt failed, trying again with debug mode...",
+      "zerossl_pending_switch": "ZeroSSL issuance failed with Pending (The CA is processing your order). Switched to Let's Encrypt and continuing certificate issuance.",
+      "letsencrypt_retry": "Let's Encrypt certificate attempt ${attempt}...",
+      "letsencrypt_fail": "Certificate issuance failed. Please check firewall and configuration.",
+      "fail_ecc_issue": "ECC certificate application failed.",
+      "fail_install_cert": "Failed to install certificate."
+    },
+    "renew": {
+      "start": "Forcing renewal of all SSL certificates...",
+      "fail": "Renewal failed."
+    },
+    "stop_renew": {
+      "start": "Stopping renewal of the specified SSL certificate...",
+      "fail_cmd": "acme.sh stop renewal command failed.",
+      "no_domain": "No domain specified, cannot stop renewal."
+    },
+    "set_ca": {
+      "not_installed": "acme.sh is not installed; cannot set default CA."
+    },
+    "check_cron": {
+      "start": "Checking automatic renewal cron job settings..."
+    },
+    "status": {
+      "no_domain": "No domain provided when checking status."
+    },
+    "info": {
+      "no_domain": "No domain provided when displaying info.",
+      "start": "Displaying SSL certificate information..."
+    },
+    "help": {
+      "usage": "Usage: ${script_name} [command] [options]",
+      "commands_title": "Commands",
+      "cmd_install": "Install acme.sh",
+      "cmd_update": "Update acme.sh",
+      "cmd_purge": "Uninstall acme.sh and delete related directories",
+      "cmd_issue": "Issue/Renew SSL certificate",
+      "cmd_renew": "Force renewal of all SSL certificates",
+      "cmd_stop_renew": "Stop renewal of the specified SSL certificate",
+      "cmd_check_cron": "Check automatic renewal cron job settings",
+      "cmd_info": "Display SSL certificate information",
+      "cmd_status": "Check SSL certificate status",
+      "cmd_set_ca": "Set acme.sh default CA",
+      "cmd_help": "Show this help message",
+      "options_title": "Options",
+      "opt_domain": "Specify domain",
+      "opt_email": "Specify acme.sh account email",
+      "opt_ca": "Specify CA server (zerossl or letsencrypt)"
+    }
+  },
+  "nginx": {
+    "compile": {
+      "install_deps": "Installing compilation dependencies...",
+      "fetch_versions": "Fetching the latest versions of Nginx and OpenSSL.",
+      "download_nginx": "Downloading the latest version of Nginx.",
+      "download_openssl": "Downloading the latest version of OpenSSL.",
+      "fetch_brotli": "Fetching ngx_brotli and building dependencies.",
+      "configure": "Configuring Nginx compilation options.",
+      "swap": "Allocating 512MB of virtual memory.",
+      "start_compile": "Compiling Nginx.",
+      "executing": "Executing command: ${cmd}",
+      "fail_exec_cmd": "Failed to execute command (${cmd}), please check and retry.",
+      "verify_fail": "Source archive integrity check failed: ${file}, please check your network and retry.",
+      "pgp_ok": "Nginx source archive PGP signature verified.",
+      "pgp_fail": "Nginx source archive PGP signature verification failed: ${file}, please check your network and retry.",
+      "pgp_no_gpg": "gpg not found; Nginx source archive PGP signature check skipped.",
+      "pgp_skipped": "Nginx source archive PGP signature check skipped (NGINX_SIGNING_SKIP).",
+      "sha_unavailable": "Official checksum for ${file} unavailable; fell back to archive integrity check."
+    },
+    "install": {
+      "start_install": "Installing Nginx.",
+      "already_installed": "An Nginx build from this project is already installed; skipping recompilation. Use --force to reinstall anyway."
+    },
+    "update": {
+      "fetch_versions": "Fetching the latest versions of Nginx and OpenSSL.",
+      "read_current_versions": "Reading the current versions of Nginx and OpenSSL.",
+      "check_update": "Checking if an update is needed.",
+      "start_update": "Updating Nginx.",
+      "smooth_upgrade": "Performing a smooth upgrade of Nginx...",
+      "no_old_process": "Old Nginx process not found. Skipping subsequent steps."
+    },
+    "purge": {
+      "start_purge": "Uninstalling Nginx...",
+      "purged": "Nginx has been uninstalled.",
+      "refuse_foreign": "The system Nginx is not a build of this project; uninstall refused.",
+      "foreign_hint": "Do not uninstall it directly, or other sites on this machine will lose their web server; use your system package manager instead.",
+      "owner_path": "Nginx executable: ${path}",
+      "not_installed": "Nginx was not detected; nothing to uninstall.",
+      "skip_sbin": "/usr/sbin/nginx is not a symlink of this project and was kept (it may belong to a system package).",
+      "skip_unit": "The systemd service file does not belong to this project and was kept.",
+      "keep_logs": "The log directory ${path} is shared with other sites and was kept."
+    },
+    "service": {
+      "configure": "Configuring Nginx systemd service.",
+      "complete": "Nginx systemd service configuration completed."
+    },
+    "os": {
+      "unsupported_os": "Unsupported operating system.",
+      "unsupported_os_hint": "Run this script on a supported distribution such as Debian 10+, Ubuntu 18+, or CentOS 7+.",
+      "unsupported_ubuntu": "Unsupported operating system, please switch to Ubuntu 20+ and try again.",
+      "unsupported_debian": "Unsupported operating system, please switch to Debian 10+ and try again.",
+      "unsupported_centos": "Unsupported operating system, please switch to CentOS 7+ and try again."
+    },
+    "backup_files": {
+      "backup": "Backup"
+    },
+    "main": {
+      "invalid_option": "Invalid option: '${option}'. Use '$0 --help' to see usage information."
+    },
+    "help": {
+      "usage": "Usage: ${script_name} [options]",
+      "options_title": "Options",
+      "opt_install": "Install Nginx",
+      "opt_update": "Update Nginx",
+      "opt_brotli": "Enable Brotli compression (use with --install or --update)",
+      "opt_force": "Force recompilation and installation (ignore the installed check)",
+      "opt_purge": "Uninstall Nginx",
+      "opt_help": "Show this help message",
+      "opt_rollback_config": "Roll back the Nginx configuration written by this project (Nginx itself is kept)"
+    },
+    "rollback": {
+      "begin": "Rolling back the Nginx configuration written by this project...",
+      "not_local": "No Nginx build of this project was detected; skipping configuration rollback.",
+      "no_template": "The repository template directory is missing, so it is impossible to tell which configuration belongs to this project; rollback skipped.",
+      "bak_is_project": "The original backup of nginx.conf has been overwritten and cannot be restored; the current state was kept (re-run the install to rebuild).",
+      "conf_restored": "The original Nginx nginx.conf has been restored.",
+      "summary": "Configuration rollback complete: ${removed} item(s) removed, ${kept} user-modified file(s) kept.",
+      "check_ok": "Nginx configuration check passed.",
+      "check_fail": "Nginx configuration check failed after the rollback; please check the output above.",
+      "reload_fail": "Failed to reload Nginx; please run systemctl reload nginx manually.",
+      "done": "Nginx configuration rollback complete."
+    }
+  }
+}

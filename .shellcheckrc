@@ -1,0 +1,39 @@
+# ShellCheck 配置 —— 本地与 CI (.github/workflows/shellcheck.yml) 共用。
+# 复核方式:
+#   docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.10.0 -S warning <files>
+#
+# 门禁等级 warning: style / info 不参与门禁 (例如 SC1091 "Not following: /etc/os-release"
+# 属 info, 本工程三处 `source /etc/os-release && os="${ID}"` 均按预期工作)。
+
+severity=warning
+shell=bash
+
+# ---------------------------------------------------------------------------
+# 登记例外: 当前为空。三条历史例外 (SC2155 / SC2034 / SC2154) 已于 2026-09-17 全部拆除,
+# 门禁 (-S warning) 对全部规则全量生效, CI 棘轮基线同步锁 0。
+# 每条都写明根因与"什么条件下可以拆掉", 避免例外变成黑洞。
+# 例外只允许在这里增加 —— 改动本文件会在 CI diff 里显式暴露。
+#
+# 现状盘点 (2026-09-16 第 18 批 SC2155 专项收官之后, `--rcfile=/dev/null` 实测):
+#   SC2154 = 0 处 (2026-09-17 给 install.sh trap 加就地 disable), SC2034 = 0 处 (同日删除 install.sh 4 行死赋值); 两项均已清零 —— 全部落在 install.sh。
+#   SC2155 = 0 处 (已全部改造为 decl+assign, 见下, 不再登记豁免)。
+# ---------------------------------------------------------------------------
+#
+# SC2154 —— 已清零 (2026-09-17 给 install.sh trap 加就地 disable=SC2154, 不再依赖全局例外)
+#   trap 'rc=$?; printf ... "${rc}" ...; exit "${rc}"' ERR
+#   shellcheck 的数据流不跨越 trap 的引号, 误报 rc "referenced but not assigned"。
+#   注: core/_common.sh 里的同名 trap 已用就地 `# shellcheck disable=SC2154` 标注,
+#   不再依赖本文件。install.sh 有意保持自包含 (见 core/_common.sh 顶部说明),
+#   已于 2026-09-17 改其正文 (加就地 disable), 全局例外移除。
+#   拆除条件: 给 install.sh 的 trap 上方也加一行就地 disable, 或改写 trap 不再引用 rc。
+#
+# SC2034 —— 已清零 (2026-09-17 删除 install.sh 4 行死赋值 I18N_DIR/SERVICE_DIR/CONFIG_DIR/TOOL_DIR,
+#   无需例外)。安装器只读 CORE_DIR, 其余 4 个目录变量赋值后未被本文件读取 —— 它们与主流程同名,
+#   属于"保持对称"的声明, 无害但确属死赋值。
+#   core/_common.sh 里的同类公共常量已用文件级 disable 就地标注, 不依赖本文件。
+#
+# SC2155 —— 已清零 (第 18 批专项收官)。`local x="$(cmd)"` 合并声明与赋值会屏蔽返回值,
+#   分两类改造: ①生成/写回/内部函数(失败不可继续)拆成 `local x` + `x="$(cmd)"` 走 fail-fast;
+#   ②检测/查询/读配置(失败可容忍)拆成 `local x` + `x="$(cmd || true)"` 显式降级。
+#   已从 disable 移除, 未来任何回潮都会在门禁 (-S warning) 直接拦截, 棘轮基线锁 0。
+disable=

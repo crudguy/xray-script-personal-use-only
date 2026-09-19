@@ -1,0 +1,664 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 脚本名称: main.sh
+# 脚本仓库: https://github.com/crudguy/xray-script-personal-use-only
+# 功能描述: xray-script-personal-use-only 项目的主要管理脚本。
+#           提供交互式菜单和命令行接口，用于安装、配置、管理 Xray-core
+#           和相关服务（如 Nginx, GeoIP, WARP 等），支持多语言。
+# 作者: crudguy
+# 时间: 2026-09-19
+# 版本: 1.0.0
+# 依赖: bash, jq, cut, sed
+# 配置:
+#   - ${SCRIPT_CONFIG_DIR}/config.json: 用于读取语言设置 (language) 和脚本配置
+#   - ${I18N_DIR}/${lang}.json: 用于读取具体的提示文本 (i18n 数据文件)
+#
+# Copyright (C) 2026 crudguy
+# =============================================================================
+
+# --- 共享头部: 严格模式 / ERR trap / PATH / 颜色 / 目录常量 / i18n 公共函数 ---
+# 实际内容由 core/_common.sh 提供 (13 个脚本共用, 消除副本漂移); 设计取舍 (为何
+# install.sh 不在此列, 为何用 $0 而非 BASH_SOURCE, 为何 PATH 是白名单而非追加) 见该文件。
+# 注: 下面这行刻意留在每个脚本里 —— shellcheck 的 `set -e` 判定不跨 source,
+#     移走会让本脚本内的 `cd` 全被误报 SC2164。
+set -Eeuo pipefail
+
+_XRAY_SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
+if [[ ! -f "${_XRAY_SCRIPT_DIR}/_common.sh" ]]; then
+    printf '\033[31m[错误]\033[0m 脚本文件不完整: 缺少 %s\n' "_common.sh" >&2
+    printf '        (请重新克隆仓库, 或运行 install.sh 重新下载)\n' >&2
+    exit 1
+fi
+# shellcheck source=_common.sh
+source "${_XRAY_SCRIPT_DIR}/_common.sh"
+
+# 定义配置文件和相关目录/脚本的路径
+readonly MENU_PATH="${CUR_DIR}/menu.sh"                        # 菜单脚本路径
+readonly HANDLER_PATH="${CUR_DIR}/handler.sh"                  # 处理器脚本路径
+# 单实例锁文件 (放在已收紧为 700 的配置目录内)
+readonly LOCK_FILE="${SCRIPT_CONFIG_DIR}/.${SCRIPT_NAME}.lock"
+
+# --- 全局变量声明 ---
+declare SCRIPT_CONFIG='' # 存储脚本配置内容
+
+# =============================================================================
+# 函数名称: _error
+# 功能描述: 打印错误信息到标准错误输出并退出脚本。
+# 参数:
+#   $@: 要输出的错误信息文本
+# 返回值: 无 (直接打印到标准错误输出 >&2 并退出)
+# 退出码: 1
+# =============================================================================
+
+function _error() {
+    # $1=错误消息; $2=可选的可执行建议 (非空时以 [建议] 追加一行)
+    # 注: 统一输出到 stderr (与 _common.sh 的 print_error / handler.sh 的 _error 一致),
+    #     避免错误信息污染 $(...) 捕获的 stdout。
+    local msg="${1:-}" hint="${2:-}"
+    printf "${RED}[%s] ${NC}%s\n" "$(_i18n '.title.error')" "${msg}" >&2
+    if [[ -n "${hint}" ]]; then
+        printf "${YELLOW}[%s] ${NC}%s\n" "$(_i18n '.title.hint')" "${hint}" >&2
+    fi
+    exit 1
+}
+
+# =============================================================================
+# 函数名称: exec_menu
+# 功能描述: 执行菜单脚本 (menu.sh)，并将菜单脚本的退出码作为返回值。
+# 参数:
+#   $@: 传递给 menu.sh 脚本的参数
+# 返回值: menu.sh 脚本的退出码 (通过 return ${OPTION} 返回)
+# =============================================================================
+
+function exec_menu() {
+    # 菜单选择经 stdout 返回, 而非退出码 (见审计报告 P1-1)。
+    #   - menu.sh 的 UI 渲染整体走 stderr (见 menu.sh 末尾 dispatch 的 `>&2` 包裹),
+    #     其 stdout 是干净的, 仅承载"退出码即选择编号"这一旧约定; 我们在子进程外
+    #     捕获该退出码, 通过 stdout 输出, 让 exec_menu 自身恒 return 0。
+    #   - 退出码恢复标准语义 (0=成功), 调用方不再需要 `|| choose=$?` 这种反直觉写法,
+    #     也就杜绝了"漏写接住 -> 用户选了非 0 项被 set -e / ERR trap 误判为脚本崩溃"。
+    local OPTION=0 # 初始化局部变量 OPTION 为 0
+    # 执行菜单脚本, 捕获其退出码 (即用户选择的菜单编号); UI 经 stderr 显示到终端
+    bash "${MENU_PATH}" "$@" || OPTION=$?
+    # 经 stdout 返回选择编号 (命令替换只捕获 stdout, 不捕获 stderr, 故 UI 不受影响)
+    printf '%s' "${OPTION}"
+}
+
+# =============================================================================
+# 函数名称: exec_handler
+# 功能描述: 执行处理器脚本 (handler.sh)。
+# 参数:
+#   $@: 传递给 handler.sh 脚本的参数
+# 返回值: 无 (handler.sh 的退出码即为当前函数的退出码)
+# =============================================================================
+
+function exec_handler() {
+    # 执行处理器脚本，并传递所有参数
+    # 注: handler.sh 返回非 0 属可预期情况, 需先接住再自行判定, 不能让 set -e 抢先退出
+    local exit_code=0
+    bash "${HANDLER_PATH}" "$@" || exit_code=$?
+    if [[ ${exit_code} -ne 0 ]]; then
+        _error "$(_i18n ".${CUR_FILE}.handler_failed")"
+    fi
+}
+
+function exec_read() {
+    # read.sh 在 EOF (无输入源) 时以非 0 退出, 这是**刻意的上报**而非脚本故障
+    # (见 core/read.sh 与审计报告 P0-1); 此处只需"取到什么算什么" —— 读不到即空串,
+    # 交由调用方按业务语义处理, 故用 || true 接住, 不让 set -e 把它当失败。
+    bash "${CUR_DIR}/read.sh" "$@" || true
+}
+
+# =============================================================================
+# 函数名称: processes_web_config
+# 功能描述: 处理 Web 配置相关的流程。
+#           1. 显示 Web 配置菜单 (仅 Nginx 默认页面一项)。
+#           2. Web 前端固定为 Nginx 默认页面。
+#           3. 根据 is_change 参数决定是仅更改配置还是执行完整安装流程。
+# 参数:
+#   $1: is_change - 控制流程模式。'y' 表示仅更改 web 配置；
+#                   'n' 表示执行完整安装流程 (安装脚本、Nginx、Xray 配置)。
+#                   默认为 'y'。
+# 返回值: 无 (通过调用其他函数和脚本执行操作)
+# =============================================================================
+
+function processes_web_config() {
+    local is_change="${1:-y}" # 获取 is_change 参数，默认为 'y'
+    local current_tag
+    current_tag="$(jq -r '.xray.tag' "${SCRIPT_CONFIG_PATH}")"
+    # 显示 Web 配置菜单 (仅 Nginx 默认页面一项)
+    # web 菜单固定选中 Nginx 默认页, 无需消费选择; exec_menu 恒 return 0
+    exec_menu '--web' >/dev/null
+    local web='normal' # Web 前端固定为 Nginx 默认页面
+    # 如果 is_change 为 'y'，则仅更改 web 配置
+    if [[ "${is_change}" == 'y' ]]; then
+        exec_handler '--web' "${web}"
+    else
+        # 如果 is_change 为 'n'，则执行完整安装流程
+        if [[ "${current_tag,,}" != 'sni' ]]; then
+            exec_handler '--sni-ports'
+        fi
+        exec_handler '--script-config' 'SNI'  # 设置脚本配置为 SNI
+        exec_handler '--install'              # 安装核心组件
+        exec_handler '--nginx-install'        # 安装 Nginx
+        exec_handler '--xray-config' "${web}" # 配置 Xray 使用选定的 web 类型
+        exec_handler '--restart'              # 重启 Xray 服务
+        exec_handler '--share'                # 显示分享链接
+    fi
+}
+
+# =============================================================================
+# 函数名称: processes_ca_vendor
+# 功能描述: 处理证书颁发机构 (CA) 流程: 显示 CA 菜单读取用户选择, 与当前 CA 比较后
+#           按 apply_mode 执行 —— 'preview' 仅预览; 'switch' 在二次确认后切换;
+#           其他模式直接切换。
+# 参数:
+#   $1: apply_mode - 运行模式 ('preview' / 'switch' / 其他)
+# 返回值: 无 (用户未确认时提前返回)
+# =============================================================================
+function processes_ca_vendor() {
+    local apply_mode="${1:-preview}"
+
+    local choose=0
+    choose="$(exec_menu '--ca')"
+    local ca_server='zerossl'
+    local current_ca_server
+    current_ca_server="$(jq -r '.nginx.ca_server' "${SCRIPT_CONFIG_PATH}" || true)"
+    local switch_confirm='n'
+    case ${choose} in
+    2) ca_server='letsencrypt' ;;
+    *) ca_server='zerossl' ;;
+    esac
+    [[ -z "${current_ca_server}" || "${current_ca_server}" == 'null' ]] && current_ca_server='zerossl'
+
+    if [[ "${apply_mode}" != 'preview' ]]; then
+        if [[ "${apply_mode}" == 'switch' && "${ca_server}" != "${current_ca_server}" ]]; then
+            # 注: 读不到确认 (无输入源) 即视为"未确认" —— 落空串后由下方判定为不切换,
+            #     而不是让 set -e 中断整个脚本。切换 CA 属显式的、需要用户点头的动作。
+            switch_confirm="$(exec_read '--switch-ca')" || switch_confirm=''
+            [[ "${switch_confirm,,}" == 'y' ]] || return 0
+        fi
+        exec_handler '--ca-server' "${ca_server}"
+    fi
+}
+
+# =============================================================================
+# 函数名称: processes_xray_config
+# 功能描述: 处理 Xray 配置相关的流程。
+#           1. 显示 Xray 配置菜单。
+#           2. 根据用户选择确定 XTLS 配置类型 (Vision, mKCP, XHTTP, Trojan, Fallback, SNI)。
+#           3. 如果选择了 SNI，则调用 processes_web_config 进行特殊处理。
+#           4. 否则，设置脚本配置并执行安装和 Xray 配置。
+# 参数: 无
+# 返回值: 无 (通过调用其他函数和脚本执行操作)
+# =============================================================================
+
+function processes_xray_config() {
+    # 显示 Xray 配置菜单
+
+    local choose=0
+    choose="$(exec_menu '--config')"
+    local XTLS_CONFIG='Vision' # 初始化 XTLS 配置类型为 'Vision'
+    # 根据用户选择设置具体的 XTLS 配置类型
+    case ${choose} in
+    1) XTLS_CONFIG='mKCP' ;;     # 选择 1 对应 mKCP
+    3) XTLS_CONFIG='XHTTP' ;;    # 选择 3 对应 XHTTP
+    4) XTLS_CONFIG='Trojan' ;;   # 选择 4 对应 Trojan
+    5) XTLS_CONFIG='Fallback' ;; # 选择 5 对应 Fallback
+    6) XTLS_CONFIG='SNI' ;;      # 选择 6 对应 SNI
+    *) XTLS_CONFIG='Vision' ;;   # 其他情况 (包括 2 和默认) 对应 Vision
+    esac
+    # 如果选择了 SNI 配置
+    if [[ "${XTLS_CONFIG}" == 'SNI' ]]; then
+        processes_ca_vendor 'init'
+        # 调用 processes_web_config 处理 SNI 特殊流程 (不执行完整安装)
+        processes_web_config 'n'
+    else
+        # 对于其他配置类型
+        exec_handler '--script-config' "${XTLS_CONFIG}" # 设置脚本配置
+        exec_handler '--install'                        # 安装核心组件
+        exec_handler '--xray-config'                    # 配置 Xray
+        exec_handler '--restart'                        # 重启 Xray 服务
+        exec_handler '--share'                          # 显示分享链接
+    fi
+}
+
+# =============================================================================
+# 函数名称: processes_xray
+# 功能描述: 处理 Xray 安装相关的流程。
+#           1. 显示 Xray 安装菜单。
+#           2. 根据用户选择确定 Xray 版本 (release, latest, custom)。
+#           3. 根据 is_exec 参数决定是立即安装还是设置版本后进入配置流程。
+# 参数:
+#   $1: is_exec - 控制流程模式。'y' 表示立即执行安装；
+#                 'n' 表示仅设置版本，然后进入 Xray 配置流程。
+#                 默认为 'y'。
+# 返回值: 无 (通过调用其他函数和脚本执行操作)
+# =============================================================================
+
+function processes_xray() {
+    local is_exec="${1:-y}" # 获取 is_exec 参数，默认为 'y'
+    local version='release' # 初始化 Xray 版本为 'release'
+    # 显示 Xray 安装菜单
+
+    local choose=0
+    choose="$(exec_menu '--xray')"
+    # 根据用户选择设置具体的 Xray 版本
+    case ${choose} in
+    1) version='latest' ;;  # 选择 1 对应 latest
+    3) version='custom' ;;  # 选择 3 对应 custom
+    *) version='release' ;; # 其他情况 (包括 2 和默认) 对应 release
+    esac
+    # 如果 is_exec 为 'y'，则立即执行安装
+    if [[ "${is_exec}" == 'y' ]]; then
+        exec_handler '--install' "${version}" 'y' # 安装指定版本的 Xray
+    else
+        # 如果 is_exec 为 'n'，则仅设置版本，然后进入配置流程
+        exec_handler '--version' "${version}" # 设置 Xray 版本
+        processes_xray_config                 # 进入 Xray 配置流程
+    fi
+}
+
+# =============================================================================
+# 函数名称: processes_full_installation
+# 功能描述: 处理一键安装相关的流程。
+#           1. 显示一键安装菜单。
+#           2. 根据用户选择决定是执行快速安装 Vision 还是进入详细 Xray 安装流程。
+# 参数: 无
+# 返回值: 无 (通过调用其他函数和脚本执行操作)
+# =============================================================================
+
+function processes_full_installation() {
+    # 显示一键安装菜单
+
+    local choose=0
+    local reply=''
+    choose="$(exec_menu '--full')"
+    # 根据用户选择执行不同操作
+    case ${choose} in
+    1)
+        # 选择 1：显式执行快速安装 Vision (用户已明确输入编号, 不再二次确认)
+        exec_handler '--quick' 'Vision'
+        ;;
+    2)
+        # 选择 2：进入详细的 Xray 安装流程 (不立即执行安装)
+        processes_xray 'n'
+        ;;
+    *)
+        # 其他情况 (含空回车 = 界面标注为「默认」的一键安装)：安装动作不可逆,
+        # 需二次确认; 无输入源 (EOF, 如 cron/管道) 时保守取消, 直接返回主菜单。
+        # 注: 此前 1 与「默认」共用本分支, 空回车会静默触发不可逆安装, 与
+        #     用户"只是敲了个回车"的预期不符; P2-4 拆分为显式 1 + 默认确认。
+        printf '%s' "$(_i18n ".${CUR_FILE}.full_installation.confirm_default")" >&2
+        read -r reply || reply=''
+        case "${reply,,}" in
+        y | yes) exec_handler '--quick' 'Vision' ;;
+        *) return 0 ;;
+        esac
+        ;;
+    esac
+}
+
+# =============================================================================
+# 函数名称: processes_routing
+# 功能描述: 处理路由规则配置相关的流程。
+#           1. 显示路由规则菜单。
+#           2. 根据用户选择执行不同的路由配置操作 (WARP, Block IP/Domain, WARP IP/Domain)。
+# 参数: 无
+# 返回值: 无 (通过调用其他函数和脚本执行操作)
+# =============================================================================
+
+function processes_routing() {
+    # 显示路由规则菜单
+
+    local choose=0
+    choose="$(exec_menu '--route')"
+    # 根据用户选择执行不同的路由配置操作
+    case ${choose} in
+    1) exec_handler '--warp' ;;                     # 选择 1：配置 WARP
+    2) exec_handler '--reset-warp' ;;               # 选择 2：重置 WARP
+    3) exec_handler '--routing' 'block' 'ip' ;;     # 选择 3：配置阻止 IP 规则
+    4) exec_handler '--routing' 'block' 'domain' ;; # 选择 4：配置阻止 Domain 规则
+    5) exec_handler '--routing' 'warp' 'ip' ;;      # 选择 5：配置 WARP IP 规则
+    6) exec_handler '--routing' 'warp' 'domain' ;;  # 选择 6：配置 WARP Domain 规则
+    *) return 0 ;;                                    # 其他情况：退出脚本
+    esac
+    exec_handler '--restart' # 重启 Xray 服务
+}
+
+# =============================================================================
+# 函数名称: processes_custom_sites
+# 功能描述: 处理自定义站点流程: 显示自定义站点菜单, 按选择派发到
+#           list / add / update / delete 对应 handler。
+# 参数: 无
+# 返回值: 无
+# =============================================================================
+function processes_custom_sites() {
+
+    local choose=0
+    choose="$(exec_menu '--custom-sites')"
+    case ${choose} in
+    1) exec_handler '--custom-sites' 'list' ;;
+    2) exec_handler '--custom-sites' 'add' ;;
+    3) exec_handler '--custom-sites' 'update' ;;
+    4) exec_handler '--custom-sites' 'delete' ;;
+    *) return 0 ;;
+    esac
+}
+
+# =============================================================================
+# 函数名称: processes_sni_config
+# 功能描述: 处理 SNI 配置相关的流程。
+#           1. 检查当前 Xray 配置是否为 SNI 模式，如果不是则报错退出。
+#           2. 显示 SNI 配置菜单。
+#           3. 根据用户选择执行不同的 SNI 相关操作 (更改域名/CDN, 更新 Nginx, 配置 Cron, Web 配置, 重置 V3)。
+# 参数: 无
+# 返回值: 无 (通过调用其他函数和脚本执行操作)
+# 退出码: 如果当前配置不是 SNI，则调用 _error 退出脚本 (exit 1)
+# =============================================================================
+
+function processes_sni_config() {
+    # 从配置文件中读取当前 Xray 的 tag
+    local tag
+    tag="$(jq -r '.xray.tag' "${SCRIPT_CONFIG_PATH}")"
+    # 检查 tag 是否为 'sni' (不区分大小写)，如果不是则调用 _error 函数报错退出
+    [[ "${tag,,}" == 'sni' ]] || _error "$(_i18n ".${CUR_FILE}.not_support")"
+    # 显示 SNI 配置菜单
+
+    local choose=0
+    choose="$(exec_menu '--sni')"
+    # 根据用户选择执行不同的 SNI 相关操作
+    case ${choose} in
+    1) exec_handler '--change-domain' 'domain' ;; # 选择 1：更改域名
+    2) exec_handler '--change-domain' 'cdn' ;;    # 选择 2：更改 CDN
+    3) exec_handler '--renew-certificate' ;;      # 选择 3：强制证书续签
+    4) exec_handler '--nginx-update' ;;           # 选择 4：更新 Nginx 配置
+    5) exec_handler '--nginx-cron' ;;             # 选择 5：配置 Nginx Cron 任务
+    6) processes_web_config ;;                    # 选择 6：进入 Web 配置流程
+    7) processes_ca_vendor 'switch' ;;
+    8) processes_custom_sites ;;
+    9) exec_handler '--remove-certificate' ;;    # 选择 9：移除单域名证书
+    *) return 0 ;;                                  # 其他情况：退出脚本
+    esac
+}
+
+# =============================================================================
+# 函数名称: _return_to_menu
+# 功能描述: 重启脚本后回到指定的菜单层级 (仅供语言切换使用, 见 processes_language)。
+#           语言切换必须重启脚本才能重载 i18n; 若直接重启会落到主菜单, 用户
+#           丢失所在层级。重启时经 `--menu <名称>` 把来源层级带过来, 由本函数
+#           映射回对应的 processes_* 入口。
+# 参数: $1=菜单名 (目前仅 'config' 有语言切换入口; 缺省或未知一律回主菜单)
+# 返回值: 无 (交给对应的 processes_* 入口)
+# =============================================================================
+
+function _return_to_menu() {
+    # 先回到指定层级 (若有), 再进入主菜单循环 —— 与"从主菜单正常进入子菜单"的导航
+    # 完全一致 (子菜单返回 -> 主菜单)。若到此为止, 子菜单一退出整个脚本就结束了。
+    case "${1:-}" in
+    config) processes_config ;; # 配置管理 (语言切换目前唯一的入口)
+    esac
+    processes_index
+}
+
+# =============================================================================
+# 函数名称: processes_language
+# 功能描述: 处理语言设置相关的流程。
+#           1. 显示语言设置菜单。
+#           2. 根据用户选择设置不同的语言（zh: 中文，en: 英语）。
+#           3. 重启脚本以重载 i18n, 并经 --menu 回到切换前所在的菜单层级。
+# 参数: $1=来源菜单名 (重启后经 _return_to_menu 回到该层级; 缺省回主菜单)
+# 返回值: 无 (通过调用其他函数和脚本执行操作)
+# =============================================================================
+
+function processes_language() {
+    # 显示语言设置菜单
+    # P2-4: 记下来源层级 $1 —— 语言切换必须重启脚本才能重载 i18n, 不加这一步
+    #       用户会被丢回主菜单、丢失所在层级 (见 _return_to_menu)。
+    local return_to="${1:-index}"
+
+    local choose=0
+    choose="$(exec_menu '--language')"
+    # 根据用户选择设置不同的语言
+    case ${choose} in
+    2) LANG_PARAM="en" ;; # 选择英文
+    *) LANG_PARAM="zh" ;; # 默认中文
+    esac
+    # 更新配置文件中的语言设置
+    SCRIPT_CONFIG="$(jq --arg language "${LANG_PARAM}" '.language = $language' "${SCRIPT_CONFIG_PATH}")"
+    printf '%s\n' "${SCRIPT_CONFIG}" | _atomic_write "${SCRIPT_CONFIG_PATH}"
+    # 重启脚本以重载 i18n, 并带 --menu 回到切换前所在的菜单层级
+    bash "${CUR_DIR}/${CUR_FILE}.sh" --menu "${return_to}" && exit 0
+}
+
+# =============================================================================
+# 函数名称: processes_config
+# 功能描述: 处理主配置管理相关的流程。
+#           1. 显示主配置管理菜单。
+#           2. 根据用户选择进入不同的子流程 (Xray 配置, 路由规则, SNI 配置, GeoData Cron)。
+# 参数: 无
+# 返回值: 无 (通过调用其他函数和脚本执行操作)
+# =============================================================================
+
+function processes_config() {
+    # 显示主配置管理菜单
+
+    local choose=0
+    choose="$(exec_menu '--management')"
+    # 根据用户选择进入不同的子流程
+    case ${choose} in
+    1) processes_xray_config ;;         # 选择 1：进入 Xray 配置流程
+    2) processes_routing ;;             # 选择 2：进入路由规则配置流程
+    3) processes_sni_config ;;          # 选择 3：进入 SNI 配置流程
+    4) exec_handler '--change-port' ;;  # 选择 4：修改 Xray 端口
+    5) exec_handler '--geodata-cron' ;; # 选择 5：配置 GeoData Cron 任务
+    6) processes_language 'config' ;;   # 选择 6：设置语言 (重启后回到本菜单)
+    7) processes_bbr ;;                 # 选择 7：BBR 与内核网络加速（体检/调优）
+    8) processes_backup ;;              # 选择 8：配置备份与迁移（导出/导入）
+    *) return 0 ;;                        # 其他情况：退出脚本
+    esac
+}
+
+# =============================================================================
+# 函数名称: processes_bbr
+# 功能描述: 处理 BBR 与内核网络加速流程。
+#           1. 显示 BBR 子菜单。
+#           2. 选项 1 幂等开启/修复 BBR; 2 只读体检; 3 内核网络高并发调优;
+#              4 进程文件句柄上限 —— 后两项影响面覆盖整机, 故各自独立成项,
+#              不并入"开启 BBR", 也不自动执行。
+# 参数: 无
+# 返回值: 无 (通过调用 exec_handler 执行操作)
+# =============================================================================
+
+function processes_bbr() {
+    # 显示 BBR 子菜单
+
+    local choose=0
+    choose="$(exec_menu '--bbr')"
+    case ${choose} in
+    1) exec_handler '--bbr' ;;          # 选择 1：开启/修复 BBR (幂等)
+    2) exec_handler '--net-status' ;;   # 选择 2：只读体检 BBR 与内核网络
+    3) exec_handler '--net-tune' ;;     # 选择 3：内核网络高并发调优
+    4) exec_handler '--nofile-limit' ;; # 选择 4：进程文件句柄上限
+    *) return 0 ;;                        # 其他情况：返回管理配置菜单
+    esac
+}
+
+# =============================================================================
+# 函数名称: processes_backup
+# 功能描述: 处理配置备份与迁移流程。
+#           1. 显示备份子菜单。
+#           2. 导出：调用 handler 走默认路径打包 (路径由 backup.sh 打印)。
+#           3. 导入：先读取归档路径, 再交给 handler —— 归档来源必须由用户显式给出,
+#              不做"自动挑选最近一份备份"这类隐含行为。
+# 参数: 无
+# 返回值: 无 (通过调用 exec_handler 执行操作)
+# =============================================================================
+
+function processes_backup() {
+    # 显示备份与迁移子菜单
+
+    local choose=0
+    choose="$(exec_menu '--backup')"
+    local archive=''
+    case ${choose} in
+    1) exec_handler '--export-config' ;; # 选择 1：导出配置与证书
+    2)                                   # 选择 2：从归档导入
+        printf "${GREEN}[%s]${NC}" "$(_i18n '.title.config')" >&2
+        printf ' %s: ' "$(_i18n '.main.backup_input_path')" >&2
+        # 读到 EOF (无 TTY) 时留空串, 交由 handler 判定为"未指定路径"并报错退出
+        read -r archive || archive=''
+        [[ -n "${archive}" ]] || _error "$(_i18n '.main.backup_ipath_required')"
+        exec_handler '--import-config' "${archive}"
+        ;;
+    *) return 0 ;;                         # 其他情况：返回管理配置菜单
+    esac
+}
+
+# =============================================================================
+# 函数名称: processes_index
+# 功能描述: 处理脚本主界面的流程。
+#           1. 显示 Banner、状态和主菜单。
+#           2. 根据用户选择执行不同的主操作 (一键安装, Xray 安装, 卸载, 启动, 停止, 重启, 分享链接, 流量统计, 配置管理)。
+# 参数: 无
+# 返回值: 无 (通过调用其他函数和脚本执行操作)
+# =============================================================================
+
+function processes_index() {
+    # 主循环 (P1-2): 操作完成后回到主菜单, 支持连续配置而无需重敲命令/重渲染 banner+status。
+    #   - 顶层 `* / EOF` 仍 exit 0 (get_choose 在 EOF 归一为 0, 见 menu.sh, 不会空转);
+    #   - exec_handler 失败会 _error 退出整个脚本 (真实错误, 预期行为), 不回菜单。
+    while true; do
+        # 显示 Banner
+        exec_menu '--banner' >/dev/null
+        # 显示状态信息
+        exec_menu '--status' >/dev/null
+        # 显示主菜单
+
+        local choose=0
+        choose="$(exec_menu '--index')"
+        # 根据用户选择执行不同的主操作
+        case ${choose} in
+        1) processes_full_installation ;; # 选择 1：进入一键安装流程
+        2) processes_xray ;;              # 选择 2：进入 Xray 安装流程
+        3) processes_uninstall ;;         # 选择 3：卸载
+        4) exec_handler '--start' ;;      # 选择 4：启动服务
+        5) exec_handler '--stop' ;;       # 选择 5：停止服务
+        6) exec_handler '--restart' ;;    # 选择 6：重启服务
+        7) exec_handler '--share' ;;      # 选择 7：显示分享链接
+        8) exec_handler '--traffic' ;;    # 选择 8：显示流量统计
+        9) processes_config ;;            # 选择 9：进入配置管理流程
+        10) exec_handler '--health' ;;       # 选择 10：一键全量体检 (只读)
+        11) exec_handler '--subscription' ;; # 选择 11：生成订阅
+        *) exit 0 ;;                      # 其他情况：退出脚本
+        esac
+    done
+}
+
+# =============================================================================
+# 函数名称: processes_uninstall
+# 功能描述: 处理卸载管理流程。让用户明确选择卸载对象 (Xray / Nginx),
+#           避免把"卸载 Nginx"藏在一键卸载里造成误操作。
+# 参数: 无
+# 返回值: 无 (通过调用其他函数执行卸载)
+# =============================================================================
+
+function processes_uninstall() {
+    # 显示卸载管理子菜单
+
+    local choose=0
+    choose="$(exec_menu '--uninstall')"
+    # 根据用户选择执行不同的卸载操作
+    case ${choose} in
+    1) exec_handler '--purge' ;;       # 选择 1：卸载 Xray (保留 Nginx/acme.sh/证书/Docker)
+    2) exec_handler '--nginx-purge' ;; # 选择 2：卸载 Nginx (仅本项目编译版, 发行版拒绝)
+    *) return 0 ;;                       # 其他情况：返回主菜单
+    esac
+}
+
+# =============================================================================
+# 函数名称: main
+# 功能描述: 脚本的主入口函数。
+#           1. 加载国际化数据。
+#           2. 检查传入的第一个参数 ($1)。
+#           3. 如果是特定的快速配置参数 (--vision, --xhttp, --fallback)，则直接执行快速安装。
+#           4. 否则，进入主索引流程 (processes_index)。
+# 参数:
+#   $1: 命令行选项 (例如 --vision, --xhttp, --fallback)
+#   $2: 传递给 processes_index 的第二个参数 (如果主流程被调用)
+# 返回值: 无 (通过调用其他函数和脚本执行操作)
+# =============================================================================
+
+function main() {
+    # 加载国际化数据
+    load_i18n
+    # 获取单实例锁 (放在 i18n 之后, 保证占用提示文案可用)
+    _acquire_lock
+    # 将第一个参数转换为小写进行匹配
+    # 注: 用 ${1:-} 先兜底 —— 直接写 "${1,,}" 在零参数调用下会被 set -u 判为 unbound 而崩溃
+    local _cmd="${1:-}"
+    case "${_cmd,,}" in
+    --help | -h)
+        # P1-3 附属: 主入口此前无 --help, 传错参数会落回交互菜单而非报错。
+        printf '%s\n' "$(_i18n '.main.usage')"
+        exit 0
+        ;;
+    # 如果参数是 --vision，则执行快速安装 Vision
+    --vision) exec_handler '--quick' 'Vision' ;;
+    # 如果参数是 --xhttp，则执行快速安装 XHTTP
+    --xhttp) exec_handler '--quick' 'XHTTP' ;;
+    # 如果参数是 --fallback，则执行快速安装 Fallback
+    --fallback) exec_handler '--quick' 'Fallback' ;;
+    # 配置备份 / 迁移: 直达 handler, 便于脚本化与 cron 无交互调用
+    # 注: shift 之后用 "$@" 透传剩余参数 —— 写死 "${2:-}" 会吞掉 --with-docker / --yes
+    --export-config) shift; exec_handler '--export-config' "$@" ;;
+    --import-config) shift; exec_handler '--import-config' "$@" ;;
+    # BBR 与内核网络: 直达 handler, 便于脚本化与 cron 无交互调用
+    # (--net-status 是只读的, 适合放进监控定时任务里盯"BBR 有没有掉")
+    --bbr) exec_handler '--bbr' ;;
+    --net-status) exec_handler '--net-status' ;;
+    # 一键全量体检: 只读, 适合放进 cron / 监控脚本; 需要真实退出码时
+    # 直接用 `core/check.sh --health` (0=无失败项 / 1=有失败项)
+    --health) exec_handler '--health' ;;
+    --net-tune) exec_handler '--net-tune' ;;
+    --nofile-limit) exec_handler '--nofile-limit' ;;
+    # 订阅生成: 与其它功能保持一致提供 CLI 入口 (菜单 11 的等价形式),
+    # 产物落在 ~/.xray-script-personal-use-only/, 便于脚本化与"改完配置后重新生成"
+    --subscription) exec_handler '--subscription' ;;
+    # 内部用途: 语言切换重启后回到原菜单层级 (由 processes_language 传入, 非公开 CLI;
+    # 故不列入 main.usage)。必须排在末尾 `*)` 之前, 否则会被当成未知参数落回主菜单。
+    --menu) _return_to_menu "${2:-}" ;;
+    # 对于其他参数，进入主索引流程，并将第二个参数传递给它
+    *) processes_index "${2:-}" ;;
+    esac
+}
+
+# =============================================================================
+# 函数名称: _acquire_lock
+# 功能描述: 获取脚本单实例锁, 避免两个实例同时改配置/装服务互相踩踏。
+#           1. 系统无 flock 时直接放行 (降级, 不把锁变成新的失败点)。
+#           2. 已被占用时提示并退出, 不做任何写操作。
+#           3. 锁 fd (9) 会被子进程继承, 因此 handler/menu 等子脚本运行期间锁一直有效。
+# 参数: 无
+# 返回值: 无 (获取失败时直接退出脚本)
+# 说明: 设 XRAY_SCRIPT_NO_LOCK=1 可跳过互斥 (确需并行操作时使用)。
+# =============================================================================
+function _acquire_lock() {
+    # 逃生开关: 明确需要并行运行时跳过
+    if [[ "${XRAY_SCRIPT_NO_LOCK:-0}" == '1' ]]; then return 0; fi
+    # 系统没有 flock 时降级放行
+    command -v flock >/dev/null 2>&1 || return 0
+    # 确保配置目录存在
+    (umask 077 && mkdir -p "${SCRIPT_CONFIG_DIR}") 2>/dev/null || true
+    # 先探测锁文件可写性: 不可写则降级放行 (也避免 exec 重定向失败导致 shell 退出)
+    : >>"${LOCK_FILE}" 2>/dev/null || return 0
+    # 打开 fd 9 指向锁文件, 非阻塞加锁; 失败说明已有实例在运行
+    exec 9>>"${LOCK_FILE}"
+    if ! flock -n 9; then
+        _error "$(_i18n '.main.lock_busy')"
+    fi
+}
+
+# --- 脚本执行入口 ---
+# 将脚本接收到的所有参数传递给 main 函数开始执行
+main "$@"

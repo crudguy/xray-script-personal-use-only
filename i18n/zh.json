@@ -1,0 +1,885 @@
+{
+  "title": {
+    "tip": "提示",
+    "info": "信息",
+    "warn": "警告",
+    "error": "错误",
+    "config": "配置",
+    "route": "分流",
+    "pass": "通过",
+    "fail": "失败",
+    "test": "测试",
+    "hint": "建议",
+    "multiple_values": "多个值请用英文逗号分隔"
+  },
+  "main": {
+    "not_support": "当前脚本配置类型不是 SNI ，无法使用该功能",
+    "handler_failed": "操作执行失败，已安全退出以避免污染配置或环境",
+    "lock_busy": "检测到已有 xray-script-personal-use-only 实例正在运行，为避免并发修改配置已退出。请等待其结束再重试；如确认无其它实例，可删除 ~/.xray-script-personal-use-only/.xray-script-personal-use-only.lock 或设置 XRAY_SCRIPT_NO_LOCK=1。",
+    "backup_input_path": "备份归档路径(e.g. /root/.xray-script-personal-use-only/backup/xxx.tar.gz): ",
+    "backup_ipath_required": "未指定备份归档路径，已取消导入",
+    "usage": "用法: xray-script-personal-use-only.sh [选项]\n  无参数            进入交互式管理菜单\n  --vision | --xhttp | --fallback   一键快速安装对应协议\n  --health | --net-status | --bbr | --net-tune | --nofile-limit   只读体检/调优 (可放进 cron)\n  --export-config | --import-config   配置备份与迁移 (可脚本化)\n  --subscription   生成订阅配置\n  --help, -h   显示本帮助"
+  },
+  "menu": {
+    "choose": "请选择操作",
+    "choose_invalid": "输入无效，已按「未选择」处理（仅支持 0-255 的数字，直接回车为默认项）",
+    "status": {
+      "default": "默认",
+      "not_installed": "未安装",
+      "not_configured": "未配置",
+      "enabled": "已启用",
+      "disabled": "未启动"
+    },
+    "index": {
+      "description": "Xray 管理脚本",
+      "installation": "装载管理",
+      "operation": "操作管理",
+      "configuration": "配置管理",
+      "option1": "完整安装",
+      "option2": "仅安装/更新",
+      "option3": "卸载",
+      "option4": "启动",
+      "option5": "停止",
+      "option6": "重启",
+      "option7": "分享链接与二维码",
+      "option8": "信息统计",
+      "option9": "管理配置",
+      "option0": "退出",
+      "diagnostic": "诊断",
+      "option10": "一键全量体检",
+      "subscription": "订阅服务",
+      "option11": "生成订阅 (base64/Clash/sing-box)"
+    },
+    "uninstall": {
+      "title": "卸载管理",
+      "option1": "卸载 Xray",
+      "option2": "卸载 Nginx",
+      "info1": "卸载 Xray 核心并收口本项目痕迹 (Nginx/acme.sh/证书/Docker 保留)",
+      "info2": "仅卸载本项目编译版 Nginx (检测到发行版会拒绝, 避免误删其它站点)",
+      "option0": "退出"
+    },
+    "full_installation": {
+      "title": "安装流程",
+      "option1": "一键安装",
+      "option2": "自定义配置",
+      "info1": "稳定版, Vision+Reality, 屏蔽 bt, cn, 广告, 开启 geodata 自动更新",
+      "info2": "自选版本,自选配置",
+      "confirm_default": "直接回车将执行一键安装 (Vision)，该操作不可逆。确认执行? [y/N]: "
+    },
+    "xray_version": {
+      "title": "装载管理",
+      "option1": "最新版",
+      "option2": "稳定版",
+      "option3": "自选版",
+      "info1": "最新版包含了 pre-release 版本",
+      "info2": "稳定版为最新发布的非 pre-release 版本",
+      "info3": "自选版可能存在配置不兼容问题，请自行解决"
+    },
+    "protocol_config": {
+      "title": "可选配置",
+      "option1": "VLESS+mKCP+seed",
+      "option2": "VLESS+Vision+REALITY",
+      "option3": "VLESS+XHTTP+REALITY",
+      "option4": "Trojan+XHTTP+REALITY",
+      "option5": "双协议复合配置",
+      "option6": "SNI分流复合配置",
+      "info1": "mKCP 牺牲带宽来降低延迟。传输同样的内容，mKCP 一般比 TCP 消耗更多的流量",
+      "info2": "XTLS(Vision) 解决 TLS in TLS 问题",
+      "info3": "XHTTP 全场景通吃的时代正式到来(详情: https://github.com/XTLS/Xray-core/discussions/4113    )",
+      "info3_1": "XHTTP 默认有多路复用，延迟比 Vision 低但多线程测速不如它",
+      "info3_2": "此外 v2rayN&G 客户端有全局 mux.cool 设置，用 XHTTP 前记得关闭，不然连不上新版 Xray 服务端",
+      "info3_3": "当前 DPI 环境下建议优先选 XHTTP，并把监听端口换到 443 之外（如 8443）：443 是重点探测对象，换端口能降低被针对性识别的概率；若该端口用于 CDN 回源则仍保持 443",
+      "info4": "VLESS 替换为 Trojan",
+      "info5": "利用 VLESS+Vision+REALITY 回落 VLESS+XHTTP 共用 443 端口",
+      "info6": "通过 Nginx 的 SNI 分流共用 443 端口，实现 REALITY 直连与过 CDN 共存"
+    },
+    "web_config": {
+      "title": "Web 配置",
+      "option1": "Nginx 默认页面"
+    },
+    "ca_vendor": {
+      "title": "CA 厂商",
+      "option1": "ZeroSSL",
+      "option2": "Let's Encrypt",
+      "info1": "脚本默认 CA 服务器是 ZeroSSL，有时可能会导致获取证书的时候一直出现：Pending，The CA is processing your order，please just wait.",
+      "info2": "Let's Encrypt 不再支持 OCSP 装订功能，但不影响 REALITY 的使用"
+    },
+    "config_management": {
+      "title": "管理配置",
+      "option1": "更新配置",
+      "option2": "分流管理",
+      "option3": "SNI 配置管理",
+      "option4": "修改 Xray 端口",
+      "option5": "开/关 geodata 自动更新",
+      "option6": "设置语言",
+      "option7": "BBR 与内核网络加速",
+      "option8": "配置备份与迁移",
+      "info1": "更新配置功能为整个配置的更新",
+      "info2": "管理屏蔽或 WARP 分流",
+      "info3": "包含 Nginx 更新，修改域名，修改 Web 配置等",
+      "info4": "(非 SNI 配置) 修改 Xray 监听端口，并自动重启服务",
+      "info5": "geodata 由 https://github.com/Loyalsoldier/v2ray-rules-dat  提供",
+      "info6": "开启/修复 BBR、只读体检、内核网络高并发调优与文件句柄上限",
+      "info7": "导出配置与证书为单个归档，或从归档还原（迁移 / 灾备）"
+    },
+    "route_management": {
+      "title": "自定义分流",
+      "option1": "开/关 WARP Proxy",
+      "option2": "重置 WARP Proxy",
+      "option3": "添加屏蔽 ip 分流",
+      "option4": "添加屏蔽 domain 分流",
+      "option5": "添加 WARP ip 分流",
+      "option6": "添加 WARP domain 分流",
+      "info1": "WARP Proxy 功能通过 Docker 部署, 开启时自动安装 Docker",
+      "info2": "WARP Proxy 详情 https://github.com/haoel/haoel.github.io?tab=readme-ov-file#1043-docker-%E4%BB%A3%E7%90%86",
+      "info3": "每次成功开启 WARP Proxy 都会重新申请 WARP 账号, 频繁操作可能导致 IP 被 Cloud­flare 拉黑",
+      "info4": "清空 WARP 容器日志文件，并重置容器",
+      "info5": "添加关于 ip 的屏蔽分流, 相关分流添加在 ruleTag 为 block-ip 中",
+      "info6": "添加关于 domain 的屏蔽分流, 相关分流添加在 ruleTag 为 block-domain 中",
+      "info7": "(需要开启 WARP)添加关于 ip 的 WARP 分流, 相关分流添加在 ruleTag 为 warp-ip 中",
+      "info8": "(需要开启 WARP)添加关于 domain 的 WARP 分流, 相关分流添加在 ruleTag 为 warp-domain 中"
+    },
+    "sni_config": {
+      "title": "SNI 配置",
+      "option1": "修改默认域名",
+      "option2": "修改 CDN 域名",
+      "option3": "强制续签所有证书",
+      "option4": "更新 nginx",
+      "option5": "开/关 nginx 自动更新",
+      "option6": "修改 Web 配置",
+      "option7": "切换 CA 厂商",
+      "option8": "管理自定义域名与反代应用",
+      "option9": "移除证书",
+      "info1": "Reality 对应的域名",
+      "info2": "套用 CDN 的域名",
+      "info3": "切换后会写入配置，并影响后续证书签发",
+      "info4": "为额外挂载的 HTTPS 反代站点做列表、新增、编辑和删除",
+      "info5": "移除指定域名的证书（该站点 HTTPS 将立即失效）"
+    },
+    "custom_sites": {
+      "title": "自定义站点管理",
+      "option1": "查看站点列表",
+      "option2": "新增站点",
+      "option3": "编辑/更新站点",
+      "option4": "删除站点",
+      "info1": "显示索引、域名、反代目标与 UDS 名称",
+      "info2": "新增独立证书和独立反代站点",
+      "info3": "支持修改域名或上游地址",
+      "info4": "删除站点配置、证书与续签记录"
+    },
+    "backup": {
+      "title": "配置备份与迁移",
+      "option1": "导出配置备份",
+      "option2": "从备份导入还原",
+      "option0": "退出",
+      "info1": "打包脚本配置、Xray 配置、Nginx 站点与证书；含私钥，请妥善保管",
+      "info2": "导入前自动备份当前状态，还原失败会自动回退，不留半成品"
+    },
+    "bbr": {
+      "title": "BBR 与内核网络加速",
+      "option1": "开启 / 修复 BBR",
+      "option2": "BBR 与内核网络体检",
+      "option3": "内核网络高并发调优",
+      "option4": "文件句柄上限（nofile）",
+      "option0": "返回管理配置",
+      "info1": "幂等：已生效时不改动任何文件",
+      "info2": "只读：模块、参数、持久化文件与实时连接采样",
+      "info3": "整机 TCP 缓冲与队列参数（需确认）",
+      "info4": "limits.d 与 systemd 上限（需确认，影响所有用户）",
+      "state_on": "已开启",
+      "state_off": "未开启",
+      "state_unknown": "未知"
+    }
+  },
+  "handler": {
+    "unknown_option": "未知或不支持的参数",
+    "script": {
+      "config_update": "正在更新脚本配置"
+    },
+    "xray": {
+      "config_update": "正在更新 Xray 配置"
+    },
+    "purge": {
+      "scope_notice": "本操作卸载 Xray（含其配置与日志），并清理本项目写入的 cron 定时任务与 Nginx 站点配置；Nginx、acme.sh（含已签发证书）与 Docker 容器不会被卸载。",
+      "fail": "Xray 卸载未成功完成（可能未安装），已跳过后续清理。",
+      "cron_removed": "已移除本项目的 cron 定时任务。",
+      "cron_empty": "未发现本项目的 cron 定时任务，无需清理。",
+      "nginx_rollback_fail": "Nginx 配置回滚未成功完成，请检查上方输出。"
+    },
+    "persist": {
+      "invalid_json": "Xray 配置不是合法的 JSON，已拒绝写入（原配置保持不变）。",
+      "write_failed": "Xray 配置写入失败，原配置保持不变。",
+      "verify_failed": "Xray 配置语法校验未通过，已回滚为上一份可用配置。"
+    },
+    "restart": {
+      "verify_failed": "Xray 重启后未能进入运行状态，请检查 Xray 日志或端口占用。"
+    },
+    "start": {
+      "verify_failed": "Xray 启动后未能进入运行状态，请检查 Xray 日志或端口占用。"
+    },
+    "install": {
+      "fail_download": "Xray 安装脚本下载或校验失败，请检查网络后重试。"
+    },
+    "subscription": {
+      "refresh_failed": "配置已更新，但订阅重建失败，订阅文件仍是旧的，请到主菜单 11 手动生成。"
+    },
+    "warp": {
+      "status": "WARP PROXY 没有开启，无法添加 WARP 分流"
+    },
+    "geodata": {
+      "close_cron": "成功停止 geodata 自动更新任务",
+      "open_cron": "成功开启 geodata 自动更新任务",
+      "update": "执行 geodata 更新"
+    },
+    "nginx": {
+      "close_cron": "成功停止 nginx 自动更新任务",
+      "open_cron": "成功开启 nginx 自动更新任务",
+      "not_installed": "Nginx 未安装，请先在主菜单执行 SNI 模式安装，或在 Nginx 菜单中安装。",
+      "foreign_binary": "系统已有的 Nginx 不是本项目编译版（缺少 Brotli 等模块），已跳过配置写入；如需使用本项目 Nginx，请先卸载系统自带 Nginx 后重新安装。",
+      "purge_refused": "已拒绝卸载：当前 Nginx 不是本项目编译版，未做任何改动。",
+      "http3_stripped": "本地 Nginx 未编译 HTTP/3 模块，已从站点配置中移除 quic 监听与 Alt-Svc，避免 Nginx 因无法识别该参数而启动失败。",
+      "verify_failed": "Nginx 未能进入运行状态，请检查 Nginx 日志或 80/443 端口占用。"
+    },
+    "custom_sites": {
+      "empty": "当前没有自定义站点",
+      "list_header": "编号 | 域名 | 反代目标 | UDS",
+      "keep_current": "留空可保留当前值",
+      "added": "自定义站点已新增：",
+      "updated": "自定义站点已更新：",
+      "deleted": "自定义站点已删除：",
+      "upstream_only": "仅更新上游地址，不会重复签发证书",
+      "syncing": "正在同步自定义站点配置"
+    },
+    "sni": {
+      "port_guard_fail": "SNI 初始化已停止：必需端口检查未通过",
+      "port_guard_self_stop": "检测到本项目的 Xray 仍占用 443（非 SNI 模式），正在停止它以让出端口。"
+    },
+    "remove_cert": {
+      "confirm": "将移除 ${domain} 的证书（该站点 HTTPS 将立即失效，且不可恢复），确认继续？[y/N] ",
+      "cancelled": "已取消，未做任何改动",
+      "fail": "移除 ${domain} 的证书失败，请检查该证书是否存在",
+      "success": "已移除 ${domain} 的证书"
+    },
+    "bbr": {
+      "already": "BBR 已启用，无需操作。",
+      "enabling": "正在启用 BBR 拥塞控制…",
+      "unsupported": "当前内核不支持 BBR（tcp_bbr 模块加载失败），已跳过。需内核 4.9+，或该内核未编译该模块。",
+      "verified": "BBR 已启用并生效。",
+      "verify_failed": "BBR 配置已写入，但复核未通过。请重启后确认，或检查 /etc/sysctl.d/99-xray-script-personal-use-only-bbr.conf"
+    },
+    "backup": {
+      "export_failed": "导出配置失败，请检查上方输出",
+      "import_failed": "导入配置失败，请检查上方输出",
+      "import_usage": "导入需要指定备份归档路径"
+    },
+    "net_status": {
+      "unavailable": "缺少 check.sh，无法执行网络体检。"
+    },
+    "net_tune": {
+      "no_sysctl": "当前环境没有 sysctl，无法调整内核网络参数。",
+      "already": "所有内核网络参数已是目标值，无需改动。",
+      "plan_title": "即将写入的内核网络参数：",
+      "plan_file": "写入文件: ",
+      "plan_scope": "影响范围: 整机所有 TCP 连接，不只本应用",
+      "plan_change": "需要修改的参数: ",
+      "plan_keep": "已是目标值的参数: ",
+      "confirm": "确认写入并应用以上参数？",
+      "cancelled": "已取消，未改动任何内核参数。",
+      "applying": "正在写入并应用内核网络参数…",
+      "write_failed": "写入内核参数失败: ",
+      "write_failed_hint": "请检查磁盘剩余空间与 /etc/sysctl.d 的写入权限（需以 root 运行）。",
+      "done": "内核网络参数已写入并生效。",
+      "partial": "以下参数未达到目标值（该内核可能钳低了上限）："
+    },
+    "nofile": {
+      "clamped": "目标值超过 fs.nr_open，已下调为: ",
+      "plan_title": "即将写入的文件句柄上限（nofile）：",
+      "current_label": "当前上限: ",
+      "target_label": "目标上限: ",
+      "plan_scope": "影响范围: 所有用户与所有 systemd 服务",
+      "confirm": "确认写入句柄上限配置？",
+      "cancelled": "已取消，未改动任何文件。",
+      "applying": "正在写入句柄上限配置…",
+      "write_failed": "写入句柄上限配置失败: ",
+      "write_failed_hint": "请检查磁盘剩余空间与 /etc/security/limits.d 的写入权限（需以 root 运行）。",
+      "reexec": "正在执行 systemctl daemon-reexec…",
+      "reexec_failed": "daemon-reexec 失败，新上限需重启系统后才生效。",
+      "restart_confirm": "是否现在重启 xray / nginx 使新上限生效？会短暂中断连接",
+      "restarting": "正在重启服务…",
+      "restart_failed": "重启失败（新上限仍会在下次重启后生效）: ",
+      "restart_skipped": "已跳过重启，新上限将在服务下次重启后生效。",
+      "verify_title": "服务生效复核（读取 /proc/pid/limits）:",
+      "expect_label": "，期望 ",
+      "done": "句柄上限配置已写入。"
+    },
+    "health": {
+      "unavailable": "缺少 check.sh, 无法执行一键全量体检。"
+    },
+    "input_unavailable": "无法读取交互输入: 标准输入已关闭或无可用终端 (常见于 cron、管道、重定向 < /dev/null), 已中止本次操作。",
+    "input_retry_exhausted": "输入连续无效已达重试上限, 已中止本次操作。请确认输入格式后重新运行。"
+  },
+  "backup": {
+    "usage": "用法: backup.sh --export [输出文件] [--with-docker] | --import <归档文件> [--yes]",
+    "err.missing_tool": "缺少必需的依赖命令: ",
+    "err.no_script_config": "未找到脚本配置，请先完成安装: ",
+    "err.mktemp": "无法创建暂存目录，请检查磁盘空间与权限",
+    "err.stage": "无法初始化打包暂存目录",
+    "err.nothing_to_export": "没有任何可导出的内容，请确认本机已完成安装",
+    "err.manifest": "生成归档清单失败",
+    "err.tar": "打包失败，已清理未完成的归档",
+    "err.outdir": "无法创建输出目录: ",
+    "err.import_usage": "导入需要指定归档文件路径",
+    "err.archive_missing": "归档文件不存在: ",
+    "err.archive_unsafe": "归档未通过安全预检（含绝对路径、路径穿越或非预期条目），已拒绝导入",
+    "err.manifest_missing": "归档中缺少 manifest.json，不是本脚本生成的备份",
+    "err.bad_dotdot": "路径含 ..",
+    "err.bad_abs": "绝对路径",
+    "err.bad_member": "非预期条目",
+    "err.extract": "解包失败，归档可能已损坏",
+    "err.manifest_mismatch": "归档标识或结构版本不匹配，请使用本脚本导出的归档",
+    "err.manifest_incomplete": "归档缺少脚本主配置，不是完整备份",
+    "err.pre_backup_failed": "导入前的自动备份失败，已中止（不会覆盖现有配置）",
+    "err.restore_failed": "还原过程中出错，已回退到导入前状态",
+    "err.verify_failed": "还原后的配置复核未通过，已回退到导入前状态",
+    "err.unknown_option": "未知参数: ",
+    "export.scanning": "正在收集配置与证书…",
+    "export.absent": "本机不存在，跳过",
+    "export.done": "导出完成。",
+    "export.secret_warn": "归档内含 UUID 与私钥，请按机密文件保管与传输。",
+    "export.hint": "迁移时把该文件复制到新机器，再在 管理配置 → 9 中导入即可。",
+    "import.validating": "正在校验归档…",
+    "import.confirm": "将用归档内容覆盖本机配置，是否继续？",
+    "import.cancelled": "已取消，未做任何改动。",
+    "import.pre_backup": "正在备份当前状态作为回退点…",
+    "import.stopping": "正在停止服务…",
+    "import.restoring": "正在还原配置与证书…",
+    "import.rollback": "还原失败，正在回退到导入前状态…",
+    "import.verify_failed_rollback": "配置复核未通过，正在回退到导入前状态…",
+    "import.starting": "正在启动服务…",
+    "import.done": "导入完成，已还原成员数: ",
+    "import.share_warn": "如域名或端口有变化，请重新查看分享链接与客户端配置。",
+    "import.unknown_member": "归档中存在未知成员，已跳过: ",
+    "import.xray_ok": "Xray 配置校验通过。",
+    "import.xray_invalid_json": "Xray 配置不是合法 JSON。",
+    "import.xray_test_failed": "Xray 配置校验未通过。",
+    "import.nginx_ok": "Nginx 配置校验通过。",
+    "import.nginx_test_failed": "Nginx 配置校验未通过。",
+    "import.no_unit": "未检测到服务单元，已跳过启动: ",
+    "import.start_failed": "服务启动失败，请手工检查: ",
+    "label.file": "归档文件",
+    "label.size": "大小",
+    "label.members": "包含成员",
+    "label.skipped": "跳过",
+    "label.sha256": "归档校验值",
+    "label.archive": "归档文件",
+    "label.created": "导出时间",
+    "label.host": "来源主机",
+    "label.tag": "协议类型",
+    "label.contents": "包含内容",
+    "label.pre_backup": "回退点"
+  },
+  "read": {
+    "version": "自选版本(e.g. v1.0.0): ",
+    "rules": "是否重置路由规则 [y/N] ",
+    "block_bt": "是否开启 bittorrent 屏蔽 [Y/n] ",
+    "block_cn": "是否开启国内 ip 屏蔽 [Y/n] ",
+    "block_ad": "是否开启广告屏蔽 [Y/n] ",
+    "auto_geo": "是否开启 geodata 自动更新功能 [Y/n] ",
+    "port": "请输入 port (端口范围是 1-65535 ，默认: 443, mKCP随机生成): ",
+    "uuid": "请输入 UUID (支持自定义字符串，默认自动生成): ",
+    "fallback": "请输入 Fallback UUID (支持自定义字符串，默认自动生成): ",
+    "seed": "请输入 seed (默认自动生成): ",
+    "password": "请输入 password (默认自动生成): ",
+    "target": "请输入目标域名 target (默认随机选择): ",
+    "only_change_domain": "仅更新域名 [Y/n]: ",
+    "domain": "请输入网站域名 (供 Reality 使用): ",
+    "cdn": "请输入网站域名 (供 CDN 使用): ",
+    "custom_domain": "请输入自定义站点域名: ",
+    "remove_cert": "请输入要移除证书的域名: ",
+    "proxy_target": "请输入反代目标 (端口或 http[s]://host:port): ",
+    "site_index": "请输入站点编号: ",
+    "email": "请输入用于注册 ZeroSSL 的邮箱: ",
+    "switch_ca": "切换 CA 需要重新申请证书，是否继续切换 [y/N]: ",
+    "short": "请输入 shortId (多个值请用英文逗号分隔，默认自动生成): ",
+    "short_id_tip": "支持输入 0 到 8 自动生成对应倍数长度的 shortId",
+    "path": "请输入 path (默认自动生成): ",
+    "warp_ip": "请输入分流到 WARP 的 ip",
+    "warp_domain": "请输入分流到 WARP 的 domain",
+    "block_ip": "请输入分流到 block 的 ip",
+    "block_domain": "请输入分流到 block 的 domain",
+    "eof_abort": "读取输入失败: 标准输入已关闭 (无终端 / 管道已耗尽), 无法继续交互。"
+  },
+  "share": {
+    "client": "客户端配置",
+    "extra": "XHTTP 扩展配置(extra)",
+    "link": "分享链接",
+    "qr": "二维码",
+    "qr_missing": "未检测到 qrencode 命令，已跳过二维码显示。安装后可显示二维码: apt install qrencode 或 yum install qrencode",
+    "warning": "警告: 以下内容包含服务密钥(uuid/密码/公钥)，请勿录屏、共屏或留存终端日志；可用 --save 写入 0600 文件。",
+    "saved": "分享配置已写入文件(权限 0600): ${path}",
+    "fail_save": "无法创建分享输出文件: ${path}",
+    "fp_invalid": "不支持的 uTLS 指纹，已回落 chrome（可选: chrome / firefox / safari / ios / android / edge / random）",
+    "subscription": {
+      "title": "一键订阅生成",
+      "nodes": "已生成 {n} 个节点的订阅",
+      "base64": "base64 订阅 (v2rayN/NekoBox/FoXray): {path}",
+      "clash": "Clash 订阅 (YAML): {path}",
+      "singbox": "sing-box 订阅 (JSON): {path}",
+      "limit": "说明: Clash/sing-box 仅含主连接; XHTTP 下行加速(extra)为 Xray 专有, 已保留在 base64 链接中。",
+      "skip": "说明: sing-box 不支持 mKCP, 已跳过 {n} 个节点。",
+      "secret": "订阅文件含 UUID/密码等敏感信息, 权限已设为 0600。"
+    }
+  },
+  "check": {
+    "ip": {
+      "check": "正在检查 IP 地址合法性：",
+      "ipv4_valid": "IPv4 地址合法：",
+      "ipv6_valid": "IPv6 地址合法：",
+      "invalid": "IP 地址格式不合法："
+    },
+    "port": {
+      "check": "正在检查端口合法性：",
+      "valid": "端口号合法：",
+      "empty": "输入值为空，将自动配置端口",
+      "range_error": "端口号必须在 1-65535 之间："
+    },
+    "sni_ports": {
+      "start": "正在执行 SNI 必需端口检查（TCP 80/443，HTTP/3 另需 UDP 443）...",
+      "occupied_check": "正在检查端口是否被占用：",
+      "occupied_fail": "端口已被占用，无法继续 SNI 配置：",
+      "occupied_fail_hint": "请停止占用该端口的进程（ss -lntp 可查看），或改用其它端口。",
+      "occupied_pass": "端口未被占用：",
+      "open_check": "正在检查防火墙是否放行端口：",
+      "open_pass": "防火墙已放行端口：",
+      "open_fail": "防火墙未放行端口：",
+      "open_skip": "未检测到活动防火墙策略，默认视为放行：",
+      "firewall_active": "检测到活动防火墙：",
+      "allow_try": "正在尝试自动放行端口：",
+      "allow_pass": "已自动放行端口：",
+      "allow_fail": "自动放行端口失败：",
+      "manual_allow": "请手动放行端口后重试（示例：ufw allow <端口>/<协议> 或 firewall-cmd --permanent --add-port=<端口>/<协议> && firewall-cmd --reload）：",
+      "udp_occupied_check": "正在检查 UDP 端口是否被占用：",
+      "udp_occupied_fail": "UDP 端口已被占用，HTTP/3 无法启用：",
+      "udp_occupied_fail_hint": "请停止占用该 UDP 端口的进程（ss -lnup 可查看）、关闭 HTTP/3，或改用其它端口。",
+      "udp_occupied_pass": "UDP 端口未被占用：",
+      "http3_skip": "当前 Nginx 未编译 HTTP/3 模块，跳过 UDP 443 检查",
+      "all_pass": "SNI 必需端口检查通过"
+    },
+    "uuid": {
+      "check": "正在检查 UUID 类型：",
+      "string": "输入值为普通字符串，将使用 Xray 映射生成 UUID",
+      "empty": "输入值为空，将自动生成一份 UUID",
+      "valid": "UUID 合法："
+    },
+    "password": {
+      "check": "正在检查密码合法性：",
+      "valid": "密码格式合法：",
+      "empty": "输入值为空，将自动生成密码",
+      "space_error": "密码不能包含空格：",
+      "length_error": "密码长度必须大于等于 8 个字符："
+    },
+    "path": {
+      "check": "正在检查路径合法性：",
+      "valid": "路径格式合法：",
+      "empty": "路径为空，将自动生成随机路径",
+      "space_error": "路径不能包含空格：",
+      "length_error": "路径长度不能超过 128 个字符：",
+      "char_error": "路径包含非法字符（只允许字母、数字、斜杠、连字符、下划线、点）：",
+      "double_slash_error": "路径不能包含连续斜杠："
+    },
+    "short": {
+      "check": "正在检查 shortId 合法性：",
+      "valid": "shortId 合法：",
+      "empty": "shortId 为空，符合要求",
+      "digit": "shortId 为 0~8 之间的个位数：",
+      "length_error": "长度必须为 2~16 位偶数：",
+      "hex_error": "包含非法字符（非十六进制）："
+    },
+    "domain": {
+      "empty": "输入值为空，将随机在配置中选择一个目标域名",
+      "format_error": "域名格式不合法：",
+      "resolve": "正在解析域名：",
+      "resolve_fail": "域名解析失败：",
+      "resolve_fail_hint": "请确认该域名已解析到本机 IP（dig +short <域名>），解析生效后重试。",
+      "security_check": "正在检查域名安全性：",
+      "security_pass": "域名 ${domain} 安全性检查通过",
+      "format_ok": "域名格式有效："
+    },
+    "tcp": {
+      "connect_check": "正在测试 TCP 连接：",
+      "connect_fail": "无法连接到 ${domain}:443"
+    },
+    "tls": {
+      "info": "正在获取 TLS 信息：",
+      "error": "TLS 连接失败，可能不支持 TLS 1.3：",
+      "pass": "支持 TLS 1.3",
+      "key_exchange_warn": "未使用 X25519 密钥交换：",
+      "key_exchange_pass": "使用 X25519 密钥交换"
+    },
+    "dns": {
+      "check_start": "正在检查域名解析是否指向本机：",
+      "resolution_fail": "域名解析失败：",
+      "resolution_fail_hint": "请确认该域名已解析到本机 IP（dig +short <域名>），解析生效后重试。",
+      "check_pass": "域名 ${domain} 解析检查通过"
+    },
+    "config": {
+      "check": "正在检查 Xray 配置原文件是否存在：",
+      "exist": "Xray 配置原文件存在：",
+      "not_exist": "Xray 配置原文件不存在：",
+      "not_exist_hint": "请先运行 bash main.sh 完成 Xray 安装与配置。"
+    },
+    "version": {
+      "check": "正在检查 Xray 版本是否存在：",
+      "exist": "Xray 版本存在：v",
+      "not_exist": "Xray 版本不存在：v"
+    },
+    "email": {
+      "check": "正在校验电子邮箱合法性：",
+      "valid": "电子邮箱格式合法：",
+      "empty": "电子邮箱不能为空",
+      "format_error": "电子邮箱格式不合法："
+    },
+    "proxy_target": {
+      "check": "正在校验反代目标：",
+      "empty": "反代目标不能为空",
+      "normalized": "已将端口输入规范化为：",
+      "format_error": "反代目标格式不合法，仅支持 http[s]://host:port 或纯端口：",
+      "scheme_error": "反代目标协议仅支持 http 或 https：",
+      "host_error": "反代目标主机不合法：",
+      "path_error": "反代目标不能包含 path、query 或 fragment：",
+      "valid": "反代目标合法："
+    },
+    "custom_domain": {
+      "check": "正在校验自定义站点域名：",
+      "empty": "自定义站点域名不能为空",
+      "duplicate_domain": "自定义站点域名不能与默认域名重复：",
+      "duplicate_cdn": "自定义站点域名不能与 CDN 域名重复：",
+      "duplicate_custom": "自定义站点域名已存在：",
+      "valid": "自定义站点域名合法："
+    },
+    "list_index": {
+      "check": "正在校验列表索引：",
+      "empty_list": "当前没有可操作的站点",
+      "format_error": "索引必须为正整数：",
+      "range_error": "索引超出范围，当前列表总数为 ${total}：",
+      "valid": "列表索引合法："
+    },
+    "net_status": {
+      "title": "内核网络 / BBR 体检（只读）",
+      "kernel_label": "内核版本        : ",
+      "mod_label": "tcp_bbr 模块    : ",
+      "mod_yes": "已加载",
+      "mod_no": "未加载",
+      "mod_unknown": "无法检测（lsmod 不可用）",
+      "cc_label": "拥塞控制        : ",
+      "cc_yes": "正确",
+      "cc_no": "应为 bbr",
+      "qdisc_label": "默认队列        : ",
+      "qdisc_yes": "正确",
+      "qdisc_no": "建议 fq",
+      "avail_label": "可用算法        : ",
+      "unsupported_unknown": "无法读取（sysctl 不可用）",
+      "persist_title": "持久化（决定重启后是否仍生效）",
+      "persist_mod_yes": "开机自动加载模块 (modules-load.d): 已配置",
+      "persist_mod_no": "开机自动加载模块 (modules-load.d): 未配置，重启后 BBR 会静默失效",
+      "persist_sysctl_yes": "内核参数文件 (sysctl.d): 已配置",
+      "persist_sysctl_no": "内核参数文件 (sysctl.d): 未配置，重启后丢失",
+      "persist_tune_yes": "高并发调优文件 (sysctl.d): 已配置",
+      "persist_tune_no": "高并发调优文件 (sysctl.d): 未配置（可选，见菜单 3）",
+      "live_title": "实时连接采样（已建立连接）",
+      "live_no_ss": "ss 不可用，跳过实时采样",
+      "live_none": "没有已建立连接，先跑一次下载或代理流量再看",
+      "live_ratio": "走 BBR 的连接: ",
+      "live_hit": "样例:",
+      "live_miss": "样例首字段不是 bbr",
+      "done_ok": "BBR + fq 已正确开启，且重启后仍生效。",
+      "done_no_persist": "BBR 当前已生效，但持久化配置不完整，重启后未必仍生效；建议重跑菜单 1。",
+      "done_bad": "配置未完全生效，请对照上方逐项检查（可用菜单 1 修复）。"
+    },
+    "health": {
+      "title": "一键全量体检",
+      "tag_pass": "[通过]",
+      "tag_warn": "[警告]",
+      "tag_fail": "[失败]",
+      "tag_skip": "[跳过]",
+      "sec_system": "系统资源",
+      "sec_deps": "依赖命令",
+      "sec_xray": "Xray 服务",
+      "sec_nginx": "Nginx 服务",
+      "sec_port": "端口归属",
+      "sec_cert": "TLS 证书",
+      "sec_net": "内核网络",
+      "sec_script": "脚本配置与日志",
+      "os_label": "系统: ",
+      "kernel_label": "内核: ",
+      "mem_label": "内存可用/共: ",
+      "mem_low": "可用内存偏低, 建议排查内存占用",
+      "disk_label": "根分区可用/共: ",
+      "disk_low": "剩余空间不足 1GB",
+      "unknown": "无法读取",
+      "present": "正常",
+      "not_configured": "未配置",
+      "deps_req_label": "必需命令: ",
+      "deps_req_missing": "缺少必需命令, 核心功能不可用",
+      "deps_opt_label": "可选命令: ",
+      "deps_opt_missing": "缺少可选命令, 相关功能不可用",
+      "deps_ok": "齐备",
+      "svc_unit_label": "服务单元: ",
+      "svc_unit_missing": "未找到 systemd 单元",
+      "svc_active_label": "运行状态: ",
+      "xray_bin_label": "Xray 版本: ",
+      "xray_bin_missing": "未找到 xray 二进制",
+      "xray_conf_label": "Xray 配置: ",
+      "xray_conf_missing": "配置文件不存在",
+      "xray_conf_bad": "配置文件不是合法 JSON",
+      "xray_conf_ok": "合法 JSON",
+      "nginx_absent": "未检测到 Nginx, 跳过该项",
+      "nginx_test_label": "配置语法: ",
+      "nginx_test_ok": "校验通过",
+      "nginx_test_bad": "校验未通过, 请检查 nginx -t 输出",
+      "port443_label": "443 监听: ",
+      "port80_label": "80 监听: ",
+      "port_none": "无进程监听",
+      "port_expect_ok": "与当前模式相符",
+      "port_mismatch": "监听者与当前模式不符, 期望: ",
+      "h3_module_label": "HTTP/3 模块: ",
+      "h3_module_ok": "已编译 (with-http_v3_module)",
+      "h3_module_missing": "未编译, HTTP/3 不可用",
+      "h3_udp_label": "443/UDP 监听: ",
+      "h3_udp_absent": "无进程监听, HTTP/3 未生效",
+      "h3_fw_label": "443/UDP 放行: ",
+      "h3_fw_open": "已放行",
+      "h3_fw_none": "未检测到活动防火墙",
+      "h3_fw_closed": "未放行, QUIC 握手不通",
+      "nginx_user_label": "Worker 用户: ",
+      "nginx_user_ok": "已降权 (非 root)",
+      "nginx_user_root": "仍是 root, 建议改为专用用户",
+      "xray_log_label": "Xray 日志目录: ",
+      "xray_log_ok": "已收紧 (700, 仅 root 可读)",
+      "xray_log_open": "缺失或权限过宽, 真实客户端 IP 可能外泄",
+      "h3_mode_skip": "HTTP/3 检查: 非 SNI 模式, 跳过",
+      "cert_no_domain": "未配置域名, 跳过该项",
+      "cert_label": "证书: ",
+      "cert_missing": "证书文件缺失",
+      "cert_days": "剩余天数: ",
+      "cert_expiring": "即将到期, 请确认自动续签是否正常",
+      "cert_expired": "已过期",
+      "net_cc_label": "拥塞控制: ",
+      "net_qdisc_label": "默认队列: ",
+      "net_persist_label": "开机自启: ",
+      "net_persist_missing": "持久化文件缺失, 重启后会失效",
+      "script_conf_label": "脚本配置: ",
+      "script_conf_missing": "不存在, 可能尚未安装",
+      "script_conf_bad": "不是合法 JSON",
+      "script_ver_label": "脚本版本: ",
+      "script_tag_label": "配置标签: ",
+      "script_path_label": "安装路径: ",
+      "script_path_mismatch": "与当前运行目录不一致, 可能装了多份",
+      "log_label": "日志体积: ",
+      "log_audit_label": "审计 ",
+      "log_access_label": "访问 ",
+      "rotate_label": "日志轮转: ",
+      "rotate_ok": "已配置",
+      "rotate_missing": "未配置。日志会持续增长直到撑满磁盘, 请重新执行安装以写入 /etc/logrotate.d/xray-script-personal-use-only。",
+      "rotate_absent": "未安装 logrotate, 跳过",
+      "log_large": "体积偏大, 建议清理",
+      "sub_label": "订阅文件: ",
+      "sub_unit": " 个, ",
+      "sub_sync": "与配置同步",
+      "sub_stale": "早于配置修改时间, 建议重新生成 (主菜单 → 11)",
+      "sub_absent": "未生成, 跳过该项",
+      "summary": "合计",
+      "summary_pass": "通过",
+      "summary_warn": "警告",
+      "summary_fail": "失败",
+      "done_ok": "体检通过: 未发现需要处理的问题",
+      "done_warn": "体检完成: 有需要留意的项, 不影响运行",
+      "done_fail": "体检完成: 存在需要修复的问题",
+      "no_probe_note": "说明: 本体检只读本机状态, 不发起外网探测"
+    }
+  },
+  "docker": {
+    "install": {
+      "start": "正在安装 Docker",
+      "centos8_fix": "检测到 CentOS 8，正在修复安装脚本兼容性问题",
+      "dry_run": "执行安装前检查（dry-run）",
+      "running": "正在运行 Docker 安装脚本",
+      "fail_download": "Docker 安装脚本下载或校验失败，请检查网络后重试。"
+    },
+    "warp": {
+      "build": {
+        "start": "正在构建 WARP 镜像",
+        "fail": "WARP 镜像构建失败"
+      },
+      "enable": {
+        "start": "正在开启 WARP 容器",
+        "success": "WARP 容器已启用 (IP: ${container_ip})"
+      },
+      "disable": {
+        "stop": "正在停止 WARP 容器",
+        "success": "WARP 容器已停止"
+      }
+    }
+  },
+  "ssl": {
+    "domain": {
+      "invalid": "域名格式不合法，请输入形如 example.com 的域名。"
+    },
+    "install": {
+      "already_installed": "acme.sh 已安装。",
+      "start": "正在安装 acme.sh...",
+      "fail_download": "acme.sh 安装失败。",
+      "fail_autoupgrade": "acme.sh 自动升级设置失败。",
+      "fail_set_ca": "设置默认 CA 失败。"
+    },
+    "update": {
+      "start": "正在更新 acme.sh...",
+      "fail": "acme.sh 更新失败。"
+    },
+    "purge": {
+      "start": "正在卸载 acme.sh...",
+      "fail_disable_autoupgrade": "禁用 acme.sh 自动升级失败。",
+      "fail_uninstall_cmd": "acme.sh 卸载命令执行失败。",
+      "success": "acme.sh 及相关目录已删除。"
+    },
+    "issue": {
+      "no_domain": "未指定域名，无法申请证书。",
+      "start": "正在签发 SSL 证书...",
+      "fail_create_acme_dir": "无法创建 ACME 验证目录: ${ACME_WEBROOT_PATH}",
+      "fail_create_cert_dir": "无法创建 SSL 证书目录: ${cert_path}",
+      "fail_backup_nginx": "无法备份 Nginx 配置文件: ${nginx_conf}",
+      "fail_reload_nginx": "Nginx 重载失败，请检查配置文件。",
+      "fail_start_nginx": "Nginx 启动失败，请检查配置文件。",
+      "fail_first_attempt": "首次签发失败，尝试启用调试模式重新签发...",
+      "zerossl_pending_switch": "ZeroSSL 签发失败并出现 Pending（The CA is processing your order），已自动切换为 Let's Encrypt 继续申请。",
+      "letsencrypt_retry": "Let's Encrypt 第 ${attempt} 次申请证书...",
+      "letsencrypt_fail": "证书申请失败，请检查防火墙与配置。",
+      "fail_ecc_issue": "ECC 证书申请失败。",
+      "fail_install_cert": "安装证书失败。"
+    },
+    "renew": {
+      "start": "正在强制续期所有 SSL 证书...",
+      "fail": "续期失败。"
+    },
+    "stop_renew": {
+      "start": "正在停止续期指定的 SSL 证书...",
+      "fail_cmd": "acme.sh 停止续期命令执行失败。",
+      "no_domain": "未指定域名，无法停止续期。"
+    },
+    "set_ca": {
+      "not_installed": "acme.sh 未安装，无法设置默认 CA。"
+    },
+    "check_cron": {
+      "start": "正在检查自动续期的定时任务设置..."
+    },
+    "status": {
+      "no_domain": "检查状态时未提供域名。"
+    },
+    "info": {
+      "no_domain": "显示信息时未提供域名。",
+      "start": "正在显示 SSL 证书信息..."
+    },
+    "help": {
+      "usage": "用法: ${script_name} [命令] [选项]",
+      "commands_title": "命令",
+      "cmd_install": "安装 acme.sh",
+      "cmd_update": "更新 acme.sh",
+      "cmd_purge": "卸载 acme.sh 并删除相关目录",
+      "cmd_issue": "签发/更新 SSL 证书",
+      "cmd_renew": "强制续期所有 SSL 证书",
+      "cmd_stop_renew": "停止续期指定的 SSL 证书",
+      "cmd_check_cron": "检查自动续期的定时任务设置",
+      "cmd_info": "显示 SSL 证书信息",
+      "cmd_status": "检查 SSL 证书状态",
+      "cmd_set_ca": "设置 acme.sh 默认 CA",
+      "cmd_help": "显示此帮助信息",
+      "options_title": "选项",
+      "opt_domain": "指定域名",
+      "opt_email": "指定 acme.sh 账户邮箱",
+      "opt_ca": "指定 CA 服务器(zerossl 或 letsencrypt)"
+    }
+  },
+  "nginx": {
+    "compile": {
+      "install_deps": "正在安装编译依赖项...",
+      "fetch_versions": "检索 Nginx 和 OpenSSL 的最新版本。",
+      "download_nginx": "下载最新版本的 Nginx。",
+      "download_openssl": "下载最新版本的 OpenSSL。",
+      "fetch_brotli": "检索 ngx_brotli 并构建依赖项。",
+      "configure": "配置 Nginx 编译选项。",
+      "swap": "申请 512MB 虚拟内存。",
+      "start_compile": "编译 Nginx。",
+      "executing": "正在执行命令: ${cmd}",
+      "fail_exec_cmd": "执行命令 (${cmd}) 失败，请检查并重试。",
+      "verify_fail": "源码包完整性校验失败: ${file}，请检查网络后重试。",
+      "pgp_ok": "Nginx 源码包 PGP 签名校验通过。",
+      "pgp_fail": "Nginx 源码包 PGP 签名校验失败: ${file}，请检查网络后重试。",
+      "pgp_no_gpg": "未检测到 gpg，已跳过 Nginx 源码包 PGP 签名校验。",
+      "pgp_skipped": "已按 NGINX_SIGNING_SKIP 跳过 Nginx 源码包 PGP 签名校验。",
+      "sha_unavailable": "未能获取 ${file} 的官方摘要，已回退到压缩包完整性校验。"
+    },
+    "install": {
+      "start_install": "安装 Nginx。",
+      "already_installed": "检测到已安装的本项目编译版 Nginx，跳过重复编译安装。如需强制重装，请加 --force。"
+    },
+    "update": {
+      "fetch_versions": "检索 Nginx 和 OpenSSL 的最新版本。",
+      "read_current_versions": "读取 Nginx 和 OpenSSL 的当前版本。",
+      "check_update": "判断是否需要更新。",
+      "start_update": "更新 Nginx。",
+      "smooth_upgrade": "正在平滑升级 Nginx...",
+      "no_old_process": "未找到旧的 Nginx 进程。跳过后续步骤。"
+    },
+    "purge": {
+      "start_purge": "正在卸载 Nginx...",
+      "purged": "Nginx 已卸载。",
+      "refuse_foreign": "检测到系统 Nginx 不是本项目编译版，已拒绝卸载。",
+      "foreign_hint": "请勿直接卸载，以免机器上其它站点失去 Web 服务；如需卸载请使用系统包管理器。",
+      "owner_path": "Nginx 可执行文件：${path}",
+      "not_installed": "未检测到 Nginx，无需卸载。",
+      "skip_sbin": "/usr/sbin/nginx 不是本项目的软链接，已保留（可能属于系统包）。",
+      "skip_unit": "systemd 服务文件不属于本项目，已保留。",
+      "keep_logs": "日志目录 ${path} 与其它站点共用，已保留。"
+    },
+    "service": {
+      "configure": "配置 Nginx systemd 服务。",
+      "complete": "Nginx systemd 服务配置完成。"
+    },
+    "os": {
+      "unsupported_os": "不支持的操作系统。",
+      "unsupported_os_hint": "请在 Debian 10+ / Ubuntu 18+ / CentOS 7+ 等受支持的发行版上运行。",
+      "unsupported_ubuntu": "不支持的操作系统，请切换到 Ubuntu 20+ 并重试。",
+      "unsupported_debian": "不支持的操作系统，请切换到 Debian 10+ 并重试。",
+      "unsupported_centos": "不支持的操作系统，请切换到 CentOS 7+ 并重试。"
+    },
+    "backup_files": {
+      "backup": "备份"
+    },
+    "main": {
+      "invalid_option": "无效选项: '${option}'。使用 '$0 --help' 查看用法信息。"
+    },
+    "help": {
+      "usage": "用法: ${script_name} [选项]",
+      "options_title": "选项",
+      "opt_install": "安装 Nginx",
+      "opt_update": "更新 Nginx",
+      "opt_brotli": "启用 Brotli 压缩 (与 --install 或 --update 一起使用)",
+      "opt_force": "强制重新编译安装 (忽略已安装检测)",
+      "opt_purge": "卸载 Nginx",
+      "opt_help": "显示帮助信息",
+      "opt_rollback_config": "回滚本项目写入的 Nginx 配置（保留 Nginx 本体）"
+    },
+    "rollback": {
+      "begin": "正在回滚本项目写入 Nginx 的配置...",
+      "not_local": "未检测到本项目编译的 Nginx，跳过配置回滚。",
+      "no_template": "仓库模板目录缺失，无法判断哪些配置属于本项目，已跳过回滚。",
+      "bak_is_project": "nginx.conf 的原始备份已被覆盖，无法还原，已保留现状（可重新运行安装以重建）。",
+      "conf_restored": "已还原 Nginx 原始 nginx.conf。",
+      "summary": "配置回滚完成：移除 ${removed} 项，保留 ${kept} 项用户改动过的文件。",
+      "check_ok": "Nginx 配置校验通过。",
+      "check_fail": "回滚后 Nginx 配置校验失败，请检查上方输出。",
+      "reload_fail": "Nginx 重载失败，请手工执行 systemctl reload nginx。",
+      "done": "Nginx 配置回滚完成。"
+    }
+  }
+}

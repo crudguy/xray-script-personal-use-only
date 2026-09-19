@@ -1,0 +1,157 @@
+name: shellcheck
+
+# 门禁: 对仓库内所有已跟踪的 shell 脚本执行 ShellCheck `-S warning`。
+# 例外统一登记在仓库根的 .shellcheckrc 里 (每条都写了根因与拆除条件)。
+# 本次两个 P0 (主菜单失效 / 安装引导中断) 属"用 $? 传业务数据被 set -e 误判"一类,
+# 其中 `local x=$(cmd)` 的写法正是 ShellCheck SC2155 指向的问题 —— 见 .shellcheckrc 的债务登记。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 最小权限: 本工作流只读代码
+permissions:
+  contents: read
+
+# 同一分支的新提交取消上一次未跑完的检查
+concurrency:
+  group: shellcheck-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shellcheck:
+    name: shellcheck (-S warning)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        # v5 起运行时为 Node 24; v4 仍锁 Node 20, GitHub 会给出弃用告警
+        uses: actions/checkout@v5
+
+      # 只用已跟踪的 *.sh —— 本地 .workbuddy/ 下的日志与故障注入夹具不参与门禁
+      - name: 收集脚本清单
+        id: list
+        shell: bash
+        run: |
+          set -euo pipefail
+          n=$(git ls-files '*.sh' | wc -l)
+          echo "已跟踪 shell 脚本: ${n} 个"
+          git ls-files '*.sh'
+          if [ "$n" -eq 0 ]; then
+            echo "::error::未找到任何 *.sh, 检查路径或权限设置"
+            exit 1
+          fi
+
+      # 语法检查: 比 ShellCheck 更快给出定位, 也能拦住 shebang/行尾一类的问题
+      - name: bash 语法检查 (bash -n)
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r f; do
+            if bash -n "$f"; then
+              printf '  ok   %s\n' "$f"
+            else
+              printf '  FAIL %s\n' "$f"
+              fail=1
+            fi
+          done < <(git ls-files '*.sh')
+          exit "$fail"
+
+      # 行尾守卫: 本仓库 .gitattributes 规定 *.sh 为 LF。
+      # CRLF 的 shebang 在 Linux 上执行会直接 "bad interpreter"。
+      - name: 行尾守卫 (要求 LF)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bad=0
+          while IFS= read -r f; do
+            if grep -qU $'\r' "$f"; then
+              echo "::error file=$f::含 CR (CRLF), 本仓库 *.sh 必须为 LF"
+              bad=1
+            fi
+          done < <(git ls-files '*.sh')
+          [ "$bad" -eq 0 ] && echo "全部 LF ✓"
+          exit "$bad"
+
+      # 主门禁: 用官方镜像 (版本与本地一致, 避免发行版自带版本差异)
+      - name: ShellCheck 门禁
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.10.0 \
+            -S warning -f gcc $(git ls-files '*.sh')
+
+      # 行为测试: 断言脚本的真实行为, 而不只是"语法通过 / 风格合规"。
+      # 上面四步都是静态检查 —— 上一批给订阅加"遍历全部入站"时, fallback 漏收末节点、
+      # 首节点预填被误删这两个真 bug 静态检查全都发现不了, 靠临时驱动才抓到。本步骤把那批
+      # 驱动固化成了 test/ 下的可重跑用例 (订阅聚合 / 流量统计格式化 / 配置变更后订阅重建),
+      # 用例在临时沙箱里跑真实代码, 只替换"读盘"与网络, 因此可完全离线执行。
+      # 用例需要的 jq / base64 / awk 在 ubuntu-latest 上均自带。
+      - name: 行为测试 (test/run_tests.sh)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash test/run_tests.sh
+
+      # 存量债务棘轮: .shellcheckrc 里被登记为例外的规则, 计数只允许下降、不允许上升。
+      # 用 --rcfile=/dev/null 忽略 .shellcheckrc, 从而能看到被 disable 的规则。
+      # 若某条下降: 请把下面的基线改成新值以锁定成果 (CI 会在摘要里提示)。
+      - name: 存量债务棘轮 (.shellcheckrc 例外只许下降)
+        shell: bash
+        run: |
+          # GitHub Actions 对 `shell: bash` 默认注入 errexit:
+          #   bash --noprofile --norc -eo pipefail {0}
+          # 本步是"审计"性质 —— 只统计、由末尾 `exit $fail` 统一决定成败,
+          # 故显式关掉 -e: 否则某规则计数为 0 时, `grep -o ... | wc -l` 里的 grep
+          # 以 1 退出, 被 pipefail 放大后会让整个 step 在打印任何信息前静默失败
+          # (SC2155 清零后正是踩到这个坑, 见下方 grep 的双保险)。
+          set -uo pipefail
+          set +o errexit
+          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.10.0 \
+            --rcfile=/dev/null -S warning -f gcc $(git ls-files '*.sh') \
+            > /tmp/debt.txt 2>&1 || true
+
+          # 护栏: 若 --rcfile 没被读到, shellcheck 会打印 "unable to read --rcfile" 并
+          # 继续跑 —— 此时统计出的是"读过 rcfile"的结果, 棘轮会假绿 (未来有人加 disable=
+          # 也发现不了)。宁可显式失败, 也不接受一份来路不明的全 0。
+          if grep -q 'unable to read --rcfile' /tmp/debt.txt; then
+            echo "::error::--rcfile 未被读取, 棘轮计数不可信"
+            cat /tmp/debt.txt
+            exit 1
+          fi
+
+          # 基线 = 2026-09-17 第 19 批 (P2 债务清零) 落地时的实测计数
+          # 三条规则均已清零 -> 基线全部设 0, 未来任何回潮都会触发 ::error 拦截
+          declare -A BASE=( [SC2155]=0 [SC2034]=0 [SC2154]=0 )
+          declare -A DESC=(
+            [SC2155]='local x=$(cmd) 合并声明与赋值, 屏蔽返回值 (已清零, 禁止回潮)'
+            [SC2034]='赋值后未被读取的变量 (install.sh 4 行死赋值已删, 已清零)'
+            [SC2154]='字符串内引用但 shellcheck 数据流不跨引号 (install.sh trap 就地 disable, 已清零)'
+          )
+
+          fail=0
+          {
+            echo '| 规则 | 基线 | 当前 | 判定 | 说明 |'
+            echo '|---|---|---|---|---|'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for rule in SC2155 SC2034 SC2154; do
+            # `|| true` 必须放在 grep 之后、wc 之前(用 { } 包住):
+            # grep -o 无匹配时退出码为 1, 这是"该规则已清零"的正常状态, 不是错误。
+            cur=$( { grep -o "\[${rule}\]" /tmp/debt.txt || true; } | wc -l | tr -d ' ')
+            base=${BASE[$rule]}
+            if [ "$cur" -gt "$base" ]; then
+              echo "::error::${rule} 新增 $((cur - base)) 处 (${base} -> ${cur}) —— ${DESC[$rule]}"
+              echo "| ${rule} | ${base} | ${cur} | 🔴 增加 | ${DESC[$rule]} |" >> "$GITHUB_STEP_SUMMARY"
+              fail=1
+            elif [ "$cur" -lt "$base" ]; then
+              echo "::notice::${rule} 减少 $((base - cur)) 处 (${base} -> ${cur}), 请把 workflow 里的基线改为 ${cur} 以锁定成果"
+              echo "| ${rule} | ${base} | ${cur} | 🟢 减少 | ${DESC[$rule]} |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "${rule} 维持 ${cur} 处"
+              echo "| ${rule} | ${base} | ${cur} | ⚪ 持平 | ${DESC[$rule]} |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          exit "$fail"

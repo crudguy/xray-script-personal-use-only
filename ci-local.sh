@@ -22,7 +22,11 @@
 set -uo pipefail   # 不放 -e: 行为测试自行管理成败, 由末尾 exit 决定
 
 ROOT="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
-cd "$ROOT"
+cd "$ROOT" || exit 1
+
+# 收集被跟踪的 shell 脚本清单 (供 ShellCheck 使用; 用数组避免 SC2046 单词拆分告警,
+# 也顺带修了"文件名含空格"时命令替换会错误拆分的隐患)
+mapfile -t sh_files < <(git ls-files '*.sh')
 
 NO_SHELLCHECK=0
 FILTER=""
@@ -72,12 +76,12 @@ else
   if command -v docker >/dev/null 2>&1; then
     echo "  使用 docker: koalaman/shellcheck:v0.10.0"
     docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.10.0 \
-      -S warning -f gcc $(git ls-files '*.sh')
+      -S warning -f gcc "${sh_files[@]}"
     rc=$?
     [ "$rc" -ne 0 ] && exit "$rc"
   elif command -v shellcheck >/dev/null 2>&1; then
     echo "  使用本地 shellcheck: $(command -v shellcheck)"
-    shellcheck -S warning -f gcc $(git ls-files '*.sh')
+    shellcheck -S warning -f gcc "${sh_files[@]}"
     rc=$?
     [ "$rc" -ne 0 ] && exit "$rc"
   else

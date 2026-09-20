@@ -314,7 +314,13 @@ if [[ "${rc}" -eq 0 ]]; then
     ok "T4 导入成功退出 (正常归档通过预检的对照组)"
 else
     bad "T4 导入失败 (rc=${rc})"
-    sed 's/^/  | /' "${SB}/import.log" | head -30
+    # 打印完整 import.log (不再 head 截断): 失败点通常在"停止服务"之后的
+    # 还原/校验阶段, 截断会让人误判为停服出错。
+    sed 's/^/  | /' "${SB}/import.log"
+    echo "  | --- 环境探针 ---"
+    echo "  | cp: $(cp --version 2>/dev/null | head -1)"
+    echo "  | systemctl: $(command -v systemctl || echo MISSING)"
+    echo "  | FAKE_XRAY_CONF sha: $(sha256sum "${FAKE_XRAY_CONF}" 2>/dev/null | cut -d' ' -f1)"
 fi
 
 AFTER_HASH="$(sha256sum "${FAKE_XRAY_CONF}" | cut -d' ' -f1)"

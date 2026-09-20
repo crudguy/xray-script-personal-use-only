@@ -546,12 +546,16 @@ function _restore_payload() {
         file)
             # 单文件成员: payload/<id>/<basename> -> dest
             mkdir -p "$(dirname -- "${dest}")" || return 1
-            cp -a "${src}/$(basename -- "${dest}")" "${dest}" || return 1
+            # 用 -f 而非 -a: 还原场景归属本机当前运行用户, 无需保留归档里的
+            # ownership/特殊属性; cp -a 的 --preserve=all 在容器/overlay 文件
+            # 系统或跨 ownership 时容易非 0 退出, 反而让还原失败。主配置权限由
+            # 紧随其后的 chmod 600 统一约束。
+            cp -f "${src}/$(basename -- "${dest}")" "${dest}" || return 1
             ;;
         *)
             # 目录类成员: 合并式还原 (保留 payload 里没有的既有文件)
             mkdir -p "${dest}" || return 1
-            cp -a "${src}/." "${dest}/" || return 1
+            cp -Rf "${src}/." "${dest}/" || return 1
             ;;
         esac
         restored=$((restored + 1))

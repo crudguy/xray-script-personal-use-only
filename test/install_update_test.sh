@@ -67,8 +67,6 @@ assert_eq "非 GitHub 域不加前缀" "$(_gh_url "https://nginx.org/x")" "https
 
 # ============================================================ _atomic_write (真实)
 echo "== _atomic_write 原子写 =="
-# 占位声明: 真实实现由下方 eval "$AT" 注入; 因 eval 对 shellcheck 不可见, 先声明以满足 SC2218(函数须先于调用定义). eval 会覆盖此占位.
-_atomic_write() { :; }
 eval "$AT"
 printf 'hello' | _atomic_write "$TMPD/aw_target"; rc=$?
 if [[ $rc -eq 0 && "$(cat "$TMPD/aw_target" 2>/dev/null)" == "hello" ]]; then ok "原子写入内容正确"; else bad "_atomic_write 写入异常 rc=$rc"; fi
@@ -78,8 +76,11 @@ _at_rc=0; _atomic_write "" || _at_rc=$?
 if [[ $_at_rc -eq 1 ]]; then ok "空目标路径返回 1 (不崩)"; else bad "空目标应返回 1, 实测 $_at_rc"; fi
 
 # ---- 之后用桩件版 _atomic_write: 把被调用目标写入日志文件 (规避管道子shell 变量不回传) ----
+# 桩件必须用 eval 注入, 不能写成静态 _atomic_write() {...} 定义 —— 否则 shellcheck 会判定上方对
+# _atomic_write 的裸调用(第 71/75 行)发生在"定义之前"而报 SC2218(-S warning 下 CI 直接退出 1).
+# eval 注入对 shellcheck 不可见, 与 _gh_url/get_remote_commit_sha 等同为 eval 注入的模式一致.
 ATOMIC_LOG="$TMPD/atomic_log"; : > "$ATOMIC_LOG"
-_atomic_write() { printf '%s\n' "${1:-}" >> "$ATOMIC_LOG"; return 0; }
+eval '_atomic_write() { printf '\''%s\n'\'' "${1:-}" >> "$ATOMIC_LOG"; return 0; }'
 
 # ============================================================ get_remote_commit_sha (stub curl/jq/cmd_exists)
 echo "== get_remote_commit_sha 40hex 校验 =="

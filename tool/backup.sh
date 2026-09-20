@@ -545,17 +545,38 @@ function _restore_payload() {
         case "${kind}" in
         file)
             # 单文件成员: payload/<id>/<basename> -> dest
-            mkdir -p "$(dirname -- "${dest}")" || return 1
+            dstdir="$(dirname -- "${dest}")"
+            if ! mkdir -p "${dstdir}" 2>"/tmp/bk_mk_$$.log"; then
+                echo "[restore-fail] id=${id} mkdir 失败 dir=${dstdir}: $(cat "/tmp/bk_mk_$$.log" 2>/dev/null)" >&2
+                rm -f "/tmp/bk_mk_$$.log"
+                return 1
+            fi
+            rm -f "/tmp/bk_mk_$$.log"
             # 用 -f 而非 -a: 还原场景归属本机当前运行用户, 无需保留归档里的
             # ownership/特殊属性; cp -a 的 --preserve=all 在容器/overlay 文件
             # 系统或跨 ownership 时容易非 0 退出, 反而让还原失败。主配置权限由
             # 紧随其后的 chmod 600 统一约束。
-            cp -f "${src}/$(basename -- "${dest}")" "${dest}" || return 1
+            if ! cp -f "${src}/$(basename -- "${dest}")" "${dest}" 2>"/tmp/bk_cp_$$.log"; then
+                echo "[restore-fail] id=${id} cp 失败 src=${src}/$(basename -- "${dest}") dest=${dest}: $(cat "/tmp/bk_cp_$$.log" 2>/dev/null)" >&2
+                rm -f "/tmp/bk_cp_$$.log"
+                return 1
+            fi
+            rm -f "/tmp/bk_cp_$$.log"
             ;;
         *)
             # 目录类成员: 合并式还原 (保留 payload 里没有的既有文件)
-            mkdir -p "${dest}" || return 1
-            cp -Rf "${src}/." "${dest}/" || return 1
+            if ! mkdir -p "${dest}" 2>"/tmp/bk_mk_$$.log"; then
+                echo "[restore-fail] id=${id} mkdir 失败 dir=${dest}: $(cat "/tmp/bk_mk_$$.log" 2>/dev/null)" >&2
+                rm -f "/tmp/bk_mk_$$.log"
+                return 1
+            fi
+            rm -f "/tmp/bk_mk_$$.log"
+            if ! cp -Rf "${src}/." "${dest}/" 2>"/tmp/bk_cp_$$.log"; then
+                echo "[restore-fail] id=${id} cp 失败 src=${src}/. dest=${dest}: $(cat "/tmp/bk_cp_$$.log" 2>/dev/null)" >&2
+                rm -f "/tmp/bk_cp_$$.log"
+                return 1
+            fi
+            rm -f "/tmp/bk_cp_$$.log"
             ;;
         esac
         restored=$((restored + 1))
@@ -731,9 +752,11 @@ function _do_import() {
     _info "$(_i18n '.backup.import.stopping')"
     _service_stop nginx
     _service_stop xray
+    echo "[debug] 停服完成, 即将还原 (stage=${stage})" >&2
 
     _info "$(_i18n '.backup.import.restoring')"
-    if ! restored="$(_restore_payload "${stage}")"; then
+    restored="$(_restore_payload "${stage}")" || restored=0
+    if [[ "${restored}" != *[0-9]* || "${restored}" -eq 0 ]]; then
         _warn "$(_i18n '.backup.import.rollback')"
         _restore_payload "${rollback_stage}" || true
         _service_start xray

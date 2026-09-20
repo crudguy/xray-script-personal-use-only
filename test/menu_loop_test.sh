@@ -67,7 +67,7 @@ printf '0\n' > "$QUEUE"; : > "$CALLS"
 ( processes_index ); rcB=$?
 idxB=$(grep -c index_call "$CALLS" 2>/dev/null || true)
 [[ $rcB -eq 0 ]] || { echo "[FAIL B] 退出码应为 0, 实际 $rcB"; ok=0; }
-[[ $idxB -eq 1 ]] || { echo "[FAIL B] exec_menu --index 应仅调用 1 次 (EOF/`*` 不空转), 实际 $idxB"; ok=0; }
+[[ $idxB -eq 1 ]] || { echo "[FAIL B] exec_menu --index 应仅调用 1 次 (EOF/* 不空转), 实际 $idxB"; ok=0; }
 
 if [[ $ok -eq 1 ]]; then
     echo "==== menu_loop_test: PASS=5 FAIL=0 ===="

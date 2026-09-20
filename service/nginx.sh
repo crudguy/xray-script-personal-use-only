@@ -60,6 +60,7 @@ readonly TMPFILE_DIR
 #       它走 _nginx_binary, 只认 NGINX_PREFIX_DIR, 因此下面同步派生一个同名只读变量
 #       把两个命名空间对齐, 将来改安装前缀时只需改这一处。
 readonly NGINX_PATH="/usr/local/nginx"        # Nginx 安装主目录 (非服务脚本路径!)
+# shellcheck disable=SC2034  # 本变量由 core/_common.sh 的 _nginx_binary 跨文件读取, 非死赋值
 readonly NGINX_PREFIX_DIR="${NGINX_PATH}"     # 与 core/_common.sh / _nginx_binary 对齐
 readonly NGINX_LOG_PATH="/var/log/nginx"      # Nginx 日志目录
 

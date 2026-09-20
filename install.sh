@@ -824,7 +824,7 @@ function main() {
             PROJECT_ROOT="${1:-}"
             ;;
         # 无交互直达参数 (与 core/main.sh 的 case 一一对应)
-        --health | --net-status | --bbr | --net-tune | --nofile-limit | --export-config | --import-config | --subscription)
+        --health | --net-status | --bbr | --net-tune | --nofile-limit | --export-config | --import-config | --subscription | --start | --stop | --restart | --share)
             DIRECT_CALL="${1:-}"
             DIRECT_ARGS+=("${1:-}")
             ;;

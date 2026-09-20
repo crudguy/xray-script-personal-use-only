@@ -130,60 +130,76 @@ To check whether the subscription in hand is stale, run **menu → 10 Full healt
 
 ## How to Use
 
-* Download
+After installation the script auto-opens the management menu; **re-running the same file when already installed re-enters the menu without re-downloading or reinstalling**. Copy the command for your scenario:
 
-  ```sh
-  wget --no-check-certificate -O ${HOME}/xray-script-personal-use-only.sh https://raw.githubusercontent.com/crudguy/xray-script-personal-use-only/main/install.sh
-  ```
+### Install (first deployment)
 
-* Usage
-  * Launch UI
+Downloads the installer and runs it, completing dependency install, project deployment, and opening the management menu:
 
-    ```sh
-    bash ${HOME}/xray-script-personal-use-only.sh
-    ```
+```sh
+wget --no-check-certificate -O ${HOME}/xray-script-personal-use-only.sh https://raw.githubusercontent.com/crudguy/xray-script-personal-use-only/main/install.sh
+```
 
-  * Quick install Vision
+### Start / Launch UI (already installed)
 
-    ```sh
-    bash ${HOME}/xray-script-personal-use-only.sh --vision
-    ```
+Re-open the management menu for configuration, start/stop and maintenance (no re-download, no reinstall):
 
-  * Quick install XHTTP
+```sh
+bash ${HOME}/xray-script-personal-use-only.sh
+```
 
-    ```sh
-    bash ${HOME}/xray-script-personal-use-only.sh --xhttp
-    ```
+### Install and start (one-liner)
 
-  * Quick install Fallback
+Download, deploy and open the menu in a single command:
 
-    ```sh
-    bash ${HOME}/xray-script-personal-use-only.sh --fallback
-    ```
+```sh
+wget --no-check-certificate -O ${HOME}/xray-script-personal-use-only.sh https://raw.githubusercontent.com/crudguy/xray-script-personal-use-only/main/install.sh && bash ${HOME}/xray-script-personal-use-only.sh
+```
 
-  * Force update to the latest version (skip comparison and prompt)
+### Quick install (skip the menu)
 
-    ```sh
-    bash ${HOME}/xray-script-personal-use-only.sh --force-update
-    ```
+```sh
+bash ${HOME}/xray-script-personal-use-only.sh --vision       # VLESS + Vision + REALITY
+bash ${HOME}/xray-script-personal-use-only.sh --xhttp        # VLESS + XHTTP + REALITY
+bash ${HOME}/xray-script-personal-use-only.sh --fallback     # Fallback (dual-protocol)
+bash ${HOME}/xray-script-personal-use-only.sh --force-update # refresh to latest commit
+```
 
-* Quick start (UI)
+### Ports & coexistence
 
-  ```sh
-  wget --no-check-certificate -O ${HOME}/xray-script-personal-use-only.sh https://raw.githubusercontent.com/crudguy/xray-script-personal-use-only/main/install.sh && bash ${HOME}/xray-script-personal-use-only.sh
-  ```
+- **Default (VLESS + Vision + REALITY, direct)**: Xray listens on `0.0.0.0:443` (exclusive TCP). No certificate is required (REALITY borrows the TLS fingerprint of a real site). In this mode 443 is owned by Xray — **do not deploy other services that bind TCP 443 on the same host** (e.g. an Nginx site, Caddy, Apache).
+- **SNI mode**: Nginx listens on 443 and splits traffic by SNI at L4 (`ssl_preread`); Xray runs over a Unix socket, so "Xray proxy + a real website" can share 443 without conflict. Note REALITY traffic must still complete TLS inside Xray — **do not** reverse-proxy it at Nginx L7.
+- `80` (HTTP) and bare `UDP 443` (HTTP/3 QUIC) do not conflict with Xray's TCP 443 and may be used separately.
 
 ## Command-line Options
 
-Besides the interactive menu, the script accepts command-line options for scripting and cron use (each option maps to a menu item):
+All options are passed to the **same entry file** — the `install.sh` copy downloaded on first run, normally at `${HOME}/xray-script-personal-use-only.sh`. Use this one file whether you are installing for the first time or managing an existing install:
+
+```sh
+bash ${HOME}/xray-script-personal-use-only.sh <option>
+```
+
+- First run: downloads the project → installs → then runs the option.
+- Later runs: skips the download and re-install, runs the option directly.
+
+Options fall into two groups:
+
+**A. Installer-only** (handled by install.sh itself, never enters the menu)
+
+| Option | Effect |
+| --- | --- |
+| `--lang=zh` / `--lang=en` | Set the UI language |
+| `--check-deps` | Force a dependency re-check and reinstall |
+| `--force-update` | Skip the comparison and refresh to the latest upstream commit |
+| `-d <dir>` | Install into a custom directory |
+| `--help` / `-h` | Show help |
+
+**B. Unattended / scriptable** (forwarded to the core module; safe for cron and scripts)
 
 | Option | Effect | Notes |
 | --- | --- | --- |
 | `--vision` / `--xhttp` / `--fallback` | Quick-install the given mode | First install; drops into the menu afterwards |
-| `--lang=zh` / `--lang=en` | Set the UI language | Unattended installs |
-| `--check-deps` | Force a dependency re-check and reinstall | By default only checked on the first run |
-| `--force-update` | Skip the comparison and refresh to the latest upstream commit | Update the script itself |
-| `--health` | Full health check | Exit code `0` = no failures, `1` = failures; usable for cron alerts |
+| `--health` | Full health check | Exit code `0` = no failures, `1` = failures, `2` = bad usage; usable for cron alerts |
 | `--net-status` | Read-only view of kernel network and BBR state | Good for monitoring jobs |
 | `--bbr` | Enable/repair BBR congestion control | Idempotent, safe to re-run |
 | `--net-tune` | Kernel network tuning for high concurrency | Changes kernel parameters; asks for confirmation |
@@ -191,17 +207,57 @@ Besides the interactive menu, the script accepts command-line options for script
 | `--export-config [--with-docker] [--yes]` | Export config and certificates to an archive | Container data is included only with `--with-docker` |
 | `--import-config <archive> [--yes]` | Restore config and certificates from an archive | A rollback point is created before writing |
 | `--subscription` | Generate base64 / Clash / sing-box subscriptions | Written to `~/.xray-script-personal-use-only/` |
+| `--start` / `--stop` / `--restart` | Start / stop / restart the Xray service | Idempotent, with an active-state recheck |
+| `--share [--save] [--no-qr]` | Show share links | Can save to a file / skip the QR code |
 
 Examples:
 
 ```sh
-# Run the health check daily; exit code 1 on failures, so cron can e-mail you
+# First install or re-install Vision (REALITY), fully unattended
+bash ${HOME}/xray-script-personal-use-only.sh --vision
+
+# Read-only health check on an existing install (good for cron)
 bash ${HOME}/xray-script-personal-use-only.sh --health
+
+# Force the script itself to the latest commit
+bash ${HOME}/xray-script-personal-use-only.sh --force-update
 
 # Export before migrating (including container data), then restore on the new host
 bash ${HOME}/xray-script-personal-use-only.sh --export-config --with-docker --yes
 bash ${HOME}/xray-script-personal-use-only.sh --import-config /root/xray-backup.tar.gz --yes
 ```
+
+> **Note**: A few actions such as changing the port (`change-port`) and switching the CA (`ca-server`) remain **interactive menu items** and do not yet have a public unattended flag. All other frequent operations — health check / start / stop / restart / share / subscription / export / import — already support unattended invocation.
+
+## Supported Clients
+
+This script generates three subscription formats for different clients. After installation, generate them via the menu "Share links & QR / Generate subscription" or `--subscription`; the files are written to `~/.xray-script-personal-use-only/` with mode `0600` (they contain secrets such as uuid / password / public key — keep them safe and do not leak them).
+
+### Choose a client by system
+
+| System | Recommended client | Subscription formats |
+| --- | --- | --- |
+| Windows | **v2rayN** or **Clash Verge Rev** (NekoBox as alternative) | base64 / Clash |
+| macOS | **NekoBox** or **Clash Verge Rev** (v2rayN cross-platform as alternative) | base64 / Clash |
+| Linux | **v2rayN** or **NekoBox** (Clash Verge Rev as alternative) | base64 / Clash |
+| Android | **v2rayNG** or **NekoBox** (Clash for Android / sing-box as alternative) | base64 / Clash / sing-box |
+| iOS | **FoXray** or **Shadowrocket / Stash** (NekoBox / sing-box as alternative) | base64 / Clash / sing-box |
+
+### Three subscription formats
+
+| File | Format | Supported clients |
+| --- | --- | --- |
+| `subscription-base64.txt` | v2rayN-style base64 subscription (all nodes + XHTTP extra) | v2rayN (all platforms) / NekoBox / FoXray |
+| `subscription-clash.yaml` | Clash subscription (YAML) | Clash Verge Rev / Clash for Windows / Clash for Android / Stash / NekoBox (Clash mode) |
+| `subscription-singbox.json` | sing-box subscription (JSON) | sing-box (all platforms, incl. SFA / desktop) |
+
+### Usage notes
+
+- **How to import**: In the client choose "Subscription / Import from link / Import from file", then paste the share link or import the file above.
+- **XHTTP mode warning**: If the server uses `VLESS + XHTTP + REALITY`, the client **must disable global mux.cool** (both v2rayN and v2rayNG have this setting), otherwise it cannot connect to the newer Xray server.
+- **sing-box has no mKCP**: If you enabled an mKCP config, the sing-box subscription automatically skips those nodes (the rest work normally).
+- **Clash / sing-box carry the primary connection only**: XHTTP downlink acceleration (extra) is Xray-specific and is preserved only in the base64 link; it does not take effect under Clash / sing-box.
+- Subscriptions are **rebuilt automatically** after a config change; you can also regenerate them anytime via `--subscription` or the menu item.
 
 ## Script UI
 

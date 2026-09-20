@@ -96,7 +96,10 @@
     {
       "tag": "direct",
       "protocol": "freedom",
-      "settings": {}
+      "settings": {},
+      "sockopt": {
+        "tcpFastOpen": true
+      }
     },
     {
       "tag": "block",

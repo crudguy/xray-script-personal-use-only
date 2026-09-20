@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034  # 同上: WARP 系列函数为 eval 注入的真实实现, CONFIG_DIR 等由它们读取。
 # docker.sh WARP 容器管理回归测试 (纯 bash, 不依赖真实 docker)
 #   锁定: enable_warp / disable_warp / build_warp 的"已存在则跳过"幂等分支,
 #        get_container_ip / obtain_container_ip 取值.

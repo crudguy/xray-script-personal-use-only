@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034  # 同上: read_input/main/param_map 为 eval 注入的真实实现, GREEN/YELLOW/NC/CUR_FILE 由它们读取。
 # read.sh 纯逻辑回归测试 (纯 bash)
 #   锁定: read_input 标题/颜色/rule 多值提示; main 的 param_map 命中/未命中、
 #        --short 额外提示、EOF 退出 1 (P0-1 关键修复).

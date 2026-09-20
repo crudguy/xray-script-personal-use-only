@@ -22,6 +22,12 @@
 
 Xray 版本可选最新版、稳定版或自选版。
 
+### 端口与共存
+
+- **默认（VLESS + Vision + REALITY 直连）**：Xray 直接监听 `0.0.0.0:443`（TCP 独占），不申请任何证书（REALITY 借用真实站点 TLS 特征）。该模式下 443 被 Xray 独占，**同机不要再部署其他占用 TCP 443 的服务**（如 Nginx 站点、Caddy、Apache）。
+- **SNI 分流模式**：改由 Nginx 监听 443 并按 SNI 做四层（`ssl_preread`）分流，Xray 走 Unix socket，可实现「Xray 代理 + 真实网站」共用 443 互不冲突。注意 REALITY 流量仍需由 Xray 完成 TLS，**不能**用 Nginx 七层反代。
+- `80`（HTTP）与纯 `UDP 443`（HTTP/3 QUIC）不与 Xray 的 TCP 443 冲突，可另行使用。
+
 ### 参数默认值
 
 - **端口**：REALITY 系默认 443，mKCP 随机生成；非 SNI 配置可修改监听端口并自动重启
@@ -73,20 +79,62 @@ Xray 版本可选最新版、稳定版或自选版。
 
 ## 安装与启动
 
+脚本安装完成后会自动打开管理菜单；**已安装时重新运行同一文件即进入管理菜单，不会重复下载或重装**。请按场景复制对应命令：
+
+### 一键安装（首次部署）
+
+下载安装器并执行，自动完成依赖安装、项目部署，并打开管理菜单：
+
 ```sh
 wget --no-check-certificate -O ${HOME}/xray-script-personal-use-only.sh https://raw.githubusercontent.com/crudguy/xray-script-personal-use-only/main/install.sh
+```
+
+### 一键启动（已安装后打开管理菜单）
+
+重新打开管理菜单进行配置、启停与运维（不重复下载、不重装）：
+
+```sh
 bash ${HOME}/xray-script-personal-use-only.sh
+```
+
+### 一键安装并启动（一步到位）
+
+下载、部署、打开菜单合并为一条命令：
+
+```sh
+wget --no-check-certificate -O ${HOME}/xray-script-personal-use-only.sh https://raw.githubusercontent.com/crudguy/xray-script-personal-use-only/main/install.sh && bash ${HOME}/xray-script-personal-use-only.sh
 ```
 
 ## 命令行参数
 
+所有参数都加在**同一个入口文件**后面（首次下载的 `install.sh` 副本，默认位于 `~/xray-script-personal-use-only.sh`）。无论首次安装还是已安装后，都通过这一个文件调用：
+
+```sh
+bash ~/xray-script-personal-use-only.sh <参数>
+```
+
+- 首次运行：下载项目 → 安装 → 执行参数
+- 已安装后运行：跳过下载、不重装，直接执行参数
+
+参数分两类：
+
+**A. 安装器专用**（install.sh 自行处理，不进入交互菜单）
+
 | 参数 | 作用 |
 | --- | --- |
-| `--vision` / `--xhttp` / `--fallback` | 快速安装对应模式 |
 | `--lang=zh` / `--lang=en` | 指定界面语言 |
 | `--check-deps` | 强制重新检查并安装依赖 |
 | `--force-update` | 跳过比对与询问，直接刷新到远端最新提交 |
-| `--health` | 一键全量体检，退出码 `0` 无失败项 / `1` 有失败项 |
+| `-d <目录>` | 自定义安装目录 |
+| `--help` / `-h` | 显示帮助 |
+
+**B. 无交互直达**（转发给核心模块，可脚本化 / 放入 cron）
+
+| 参数 | 作用 |
+| --- | --- |
+| `--vision` / `--xhttp` / `--fallback` | 快速安装对应模式 |
+| `--health` | 一键全量体检，退出码 `0` 无失败项 / `1` 有失败项 / `2` 参数错误 |
+| | 放进 cron 时请以退出码判别：`2` 表示用法有误（如拼错参数），不可当作"通过" |
 | `--net-status` | 只读查看内核网络与 BBR 状态 |
 | `--bbr` | 启用 / 修复 BBR，幂等可重复执行 |
 | `--net-tune` | 内核网络高并发调优 |
@@ -94,6 +142,56 @@ bash ${HOME}/xray-script-personal-use-only.sh
 | `--export-config [--with-docker] [--yes]` | 导出配置与证书归档 |
 | `--import-config <归档> [--yes]` | 从归档还原 |
 | `--subscription` | 生成 base64 / Clash / sing-box 三种订阅 |
+| `--start` / `--stop` / `--restart` | 启动 / 停止 / 重启 Xray 服务（幂等，带 active 复查） |
+| `--share [--save] [--no-qr]` | 显示分享链接（可保存到文件 / 不打印二维码） |
+
+常用示例：
+
+```sh
+# 首次或重装直接装 Vision（REALITY），全程非交互
+bash ~/xray-script-personal-use-only.sh --vision
+
+# 已安装后只读体检（适合 cron 盯 BBR 是否掉）
+bash ~/xray-script-personal-use-only.sh --health
+
+# 强制刷新脚本到最新提交
+bash ~/xray-script-personal-use-only.sh --force-update
+
+# 导出配置归档（含 docker、非交互确认）
+bash ~/xray-script-personal-use-only.sh --export-config --with-docker --yes
+```
+
+> **注意**：改端口（`change-port`）、切换 CA（`ca-server`）等仍为**交互菜单项**，公开入口暂未提供非交互参数；如需 `bash ... --change-port` 形式的调用可继续补转发。其它高频运维动作（体检 / 启停 / 分享 / 订阅 / 导出导入）均已支持非交互。
+
+## 支持的客户端
+
+本脚本生成三种订阅格式，分别适配不同客户端。安装完成后通过菜单「分享链接与二维码 / 生成订阅」或 `--subscription` 生成，文件写入 `~/.xray-script-personal-use-only/`，权限 `0600`（含 uuid / 密码 / 公钥等敏感信息，请妥善保管、勿外泄）。
+
+### 按系统选择客户端
+
+| 系统 | 推荐客户端 | 适用订阅格式 |
+| --- | --- | --- |
+| Windows | **v2rayN** 或 **Clash Verge Rev**（备选 NekoBox） | base64 / Clash |
+| macOS | **NekoBox** 或 **Clash Verge Rev**（备选 v2rayN 跨平台版） | base64 / Clash |
+| Linux | **v2rayN** 或 **NekoBox**（备选 Clash Verge Rev） | base64 / Clash |
+| Android | **v2rayNG** 或 **NekoBox**（备选 Clash for Android / sing-box） | base64 / Clash / sing-box |
+| iOS | **FoXray** 或 **Shadowrocket / Stash**（备选 NekoBox / sing-box） | base64 / Clash / sing-box |
+
+### 三种订阅格式
+
+| 文件 | 格式 | 适用客户端 |
+| --- | --- | --- |
+| `subscription-base64.txt` | v2rayN 风格 base64 订阅（含全部节点与 XHTTP extra） | v2rayN（全平台）/ NekoBox / FoXray |
+| `subscription-clash.yaml` | Clash 订阅（YAML） | Clash Verge Rev / Clash for Windows / Clash for Android / Stash / NekoBox（Clash 模式） |
+| `subscription-singbox.json` | sing-box 订阅（JSON） | sing-box（全平台，含 SFA / 桌面版） |
+
+### 使用要点
+
+- **导入方式**：在客户端中选择「订阅 / 从链接导入 / 从文件导入」，粘贴分享链接或直接导入上述文件即可。
+- **XHTTP 模式特别注意**：若服务端使用 `VLESS + XHTTP + REALITY`，客户端**必须关闭全局 mux.cool**（v2rayN 与 v2rayNG 均有此设置），否则无法连上新版 Xray 服务端。
+- **sing-box 不支持 mKCP**：若你启用了 mKCP 配置，sing-box 订阅会自动跳过这些节点（其余节点正常）。
+- **Clash / sing-box 仅含主连接**：XHTTP 下行加速（extra）是 Xray 专有特性，仅保留在 base64 链接中；使用 Clash / sing-box 时 XHTTP 的下行加速不生效。
+- 配置变更后订阅会**自动重建**，无需手动重新生成；也可随时执行 `--subscription` 或菜单项手动刷新。
 
 ## 安装位置
 

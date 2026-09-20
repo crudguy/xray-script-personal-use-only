@@ -530,6 +530,9 @@ function _restore_payload() {
     [[ -f "${stage}/${MANIFEST_NAME}" ]] || return 1
 
     while IFS= read -r id; do
+        # 同上: jq 的 CRLF 输出会让 id 残留 CR, _member_spec 因此匹配不到而把它当成
+        # "未知成员" 跳过 —— 表现为导入只还原最后一个成员, 其余配置静默丢失。
+        id="${id%$'\r'}"
         [[ -n "${id}" ]] || continue
         if ! spec="$(_member_spec "${id}")"; then
             _warn "$(_i18n '.backup.import.unknown_member')${id}"

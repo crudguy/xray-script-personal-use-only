@@ -309,9 +309,18 @@ EOF
         --key-file "${cert_path}/privkey.pem" \
         --fullchain-file "${cert_path}/fullchain.pem" \
         --reloadcmd "nginx -t && systemctl reload nginx" || print_error "$(_i18n ".${CUR_FILE}.issue.fail_install_cert")"
-    # 证书文件保持其他用户可读 (644): 降权后的 nginx worker (user nginx) 才能读取私钥。
-    # 显式设为 644 是幂等保险 —— acme.sh 续签重新拷贝后权限可能被重置。
-    chmod 644 "${cert_path}/privkey.pem" "${cert_path}/fullchain.pem" 2>/dev/null || true
+    # 私钥收紧为 640 —— 降权后的 nginx worker 以 nginx 身份运行 (config/nginx/conf/nginx.conf:4
+    # 的 `user nginx;`), 属组可读即够用; 不再 world-readable, 降低私钥被其它本机用户或被入侵
+    # 进程读取的风险。fullchain 是公开证书链, 保持 644 无害。
+    # chown root:nginx 把属组切到 nginx, 配合 640 让 worker 可读; 若主机无 nginx 组 (极端情况),
+    # chown 失败则回退 644, 避免 nginx 因读不到私钥而启动失败。
+    if chown root:nginx "${cert_path}/privkey.pem" 2>/dev/null; then
+        chmod 640 "${cert_path}/privkey.pem" 2>/dev/null || true
+    else
+        chmod 644 "${cert_path}/privkey.pem" 2>/dev/null || true
+    fi
+    # fullchain 为公开证书链, 保持 644 (幂等, acme.sh 续签重新拷贝后权限可能被重置)
+    chmod 644 "${cert_path}/fullchain.pem" 2>/dev/null || true
 }
 
 # =============================================================================

@@ -1901,6 +1901,15 @@ function main() {
     --list-index) check_list_index "$@" >&2 ;;
     --net-status) check_net_status "$@" >&2 ;; # 只读体检内核网络与 BBR 状态
     --health) check_health_report "$@" >&2 ;; # 一键全量体检 (只读)
+    # P1-3 补漏: 本函数的 case 原本没有 `*)` 分支 —— 未知/拼错的参数什么都不做就退出,
+    # 退出码 0。而 core/main.sh 与 README 都推荐脚本化调用走 `core/check.sh --health`
+    # (0=无失败项 / 1=有失败项), cron 里把 `--health` 误写成 `--heath` 就会拿到 exit 0,
+    # 结果监控永远假绿 —— 这正是 handler.sh:3282 那段注释要防的问题, 本脚本却漏了网。
+    # 退出码 2 = 用法错误, 与正常 0、真实故障 1 区分开 (与 handler.sh 的 main 保持一致)。
+    *)
+        printf "${RED}[%s]${NC} %s: %s\n" "$(_i18n '.title.error')" "$(_i18n ".${CUR_FILE}.unknown_option")" "${option}" >&2
+        exit 2
+        ;;
     esac
 }
 

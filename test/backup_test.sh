@@ -69,6 +69,13 @@ for dep in bash tar gzip jq sha256sum; do
     fi
 done
 
+# Python 解释器: 下面两处要用 tarfile 精确构造"绝对路径成员"与".. 穿越"归档,
+# GNU tar 造不出来。CI (ubuntu-latest) 只提供 python3, 本机可能是 python ——
+# 不能写死命令名, 否则 `python: command not found` 会让脚本以 127 直接崩掉
+# (set -e 下不是"某条 FAIL", 而是"输出到这里就断了")。两者都缺时交由调用方
+# 走"构造失败跳过"分支, 而不是拖垮整个用例。
+PY_BIN="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
+
 # ---------------------------------------------------------------------------
 # 1. 沙箱: core/ + i18n/ + tool/ (tool 与 core 平级, 与仓库一致)
 # ---------------------------------------------------------------------------
@@ -215,7 +222,10 @@ make_bad_archive() {
 _make_abs_member_archive() {
     local dest="$1" src="$2" dest_win
     dest_win="$(cygpath -w -- "${dest}" 2>/dev/null || printf '%s' "${dest}")"
-    python - "${dest_win}" <<'PYEOF' 2>/dev/null
+    if [[ -z "${PY_BIN:-}" ]]; then
+        return 1
+    fi
+    "${PY_BIN}" - "${dest_win}" <<'PYEOF' 2>/dev/null
 import sys, tarfile, io
 dest = sys.argv[1]
 with tarfile.open(dest, 'w:gz') as tf:
@@ -237,7 +247,10 @@ make_dotdot_archive() {
     local dest="$1"
     local dest_win
     dest_win="$(cygpath -w -- "${dest}" 2>/dev/null || printf '%s' "${dest}")"
-    python - "${dest_win}" <<'PYEOF' 2>/dev/null
+    if [[ -z "${PY_BIN:-}" ]]; then
+        return 1
+    fi
+    "${PY_BIN}" - "${dest_win}" <<'PYEOF' 2>/dev/null
 import sys, tarfile, io
 dest = sys.argv[1]
 with tarfile.open(dest, 'w:gz') as tf:
@@ -253,12 +266,14 @@ PYEOF
 # 同时要求日志里出现拒绝原因, 避免把"因别的原因崩了"误判成"安全预检生效"。
 for kind in dotdot abs top; do
     dest="${SB}/out/bad-${kind}.tar.gz"
+    # 构造失败 (无 python / tar 版本差异) 必须走下面的"跳过"分支, 不能在 set -e 下
+    # 就地崩掉 —— 故统一用 `|| built=$?` 接住。
     if [[ "${kind}" == 'dotdot' ]]; then
-        make_dotdot_archive "${dest}"
-        built=$?
+        built=0
+        make_dotdot_archive "${dest}" || built=$?
     else
-        make_bad_archive "${kind}" "${dest}"
-        built=$?
+        built=0
+        make_bad_archive "${kind}" "${dest}" || built=$?
     fi
     if [[ "${built}" -eq 0 ]]; then
         rc=0

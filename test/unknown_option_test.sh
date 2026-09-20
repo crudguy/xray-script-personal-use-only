@@ -58,6 +58,28 @@ grep -q 'exit 0' "$SB/i.sh";            ok $? && echo "[T4b] install.sh --help �
 grep -q '"unknown_option":' i18n/zh.json; ok $? && echo "[T5a] zh.json 含 handler.unknown_option 键" || echo "[FAIL T5a] zh.json 缺 handler.unknown_option 键"
 grep -q '"unknown_option":' i18n/en.json; ok $? && echo "[T5b] en.json 含 handler.unknown_option 键" || echo "[FAIL T5b] en.json 缺 handler.unknown_option 键"
 
+# ---------------------------------------------------------------------------
+# T6 [check.sh] main() 的 case 必须有 `*)` 默认分支, 引用 check.unknown_option 并 exit 2
+#    背景: core/main.sh 的注释与 README 都推荐脚本化告警直接调 `core/check.sh --health`
+#          (0=无失败项 / 1=有失败项), 但这条路径原本没有未知参数保护 —— cron 里把
+#          `--health` 误写成 `--heath` 会什么都不做并返回 0, 监控永远假绿。
+#          handler.sh 在 P1-3 已修 (的代码就在 handler.sh:3282 注释里), check.sh 是漏网的那个。
+# ---------------------------------------------------------------------------
+extract core/check.sh main > "$SB/c.sh"
+grep -Eq '^[[:space:]]*\*\)' "$SB/c.sh"; ok $? && echo "[T6a] check.sh main() 含 *) 默认分支"  || echo "[FAIL T6a] check.sh main() 缺少 *) 默认分支"
+grep -q 'exit 2' "$SB/c.sh";            ok $? && echo "[T6b] check.sh *) 分支退出码为 2"       || echo "[FAIL T6b] check.sh *) 分支未 exit 2"
+grep -q 'unknown_option' "$SB/c.sh";    ok $? && echo "[T6c] check.sh 引用 unknown_option 文案" || echo "[FAIL T6c] check.sh 未引用 unknown_option 文案"
+
+# ---------------------------------------------------------------------------
+# T7 [i18n] check 段的 unknown_option 必须双语齐备 (不能只在 handler 段有)
+#    注: 顶层的 `"unknown_option":` 可能来自 handler 段, 故先截出 check 块再判定。
+# ---------------------------------------------------------------------------
+check_block_has_key() { # $1=语言文件
+    awk '/^  "check": \{/{f=1} f{print} f && /^  \},/{exit}' "$1" | grep -q '"unknown_option":'
+}
+check_block_has_key i18n/zh.json; ok $? && echo "[T7a] zh.json 的 check 段含 unknown_option" || echo "[FAIL T7a] zh.json 的 check 段缺 unknown_option"
+check_block_has_key i18n/en.json; ok $? && echo "[T7b] en.json 的 check 段含 unknown_option" || echo "[FAIL T7b] en.json 的 check 段缺 unknown_option"
+
 echo "==== unknown_option_test: PASS=$pass FAIL=$fail ===="
 rm -rf "$SB"
 [[ $fail -eq 0 ]]

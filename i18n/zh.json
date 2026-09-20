@@ -431,6 +431,7 @@
     }
   },
   "check": {
+    "unknown_option": "未知或不支持的参数",
     "ip": {
       "check": "正在检查 IP 地址合法性：",
       "ipv4_valid": "IPv4 地址合法：",

@@ -34,7 +34,6 @@ fi
 source "${_XRAY_SCRIPT_DIR}/_common.sh"
 
 # 定义配置文件和相关目录的路径
-readonly GENERATE_PATH="${CUR_DIR}/generate.sh"                # 项目中的 generate.sh 脚本路径
 
 # =============================================================================
 # 函数名称: menu_language

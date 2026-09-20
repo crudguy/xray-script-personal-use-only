@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034  # 本用例把 install.sh 的真实函数体 awk 抽取后 eval 注入, 下列常量与桩件变量 (I18N_DATA/GREEN/NC/.../CUR_FILE) 由被注入的函数体读取; shellcheck 的数据流不跨 eval。
 # install.sh 自更新/回滚与 commit SHA 校验回归测试 (纯 bash, 不依赖真实 curl/jq/git)
 #   锁定: get_remote_commit_sha / read_local_commit_sha / save_local_commit_sha 的 40hex 校验,
 #        _gh_url 代理改写, _atomic_write 原子写, check_xray_script_update 决策,

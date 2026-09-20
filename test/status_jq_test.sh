@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034  # run_fn 内 SCRIPT_CONFIG_PATH 供随后 source 进来的 print_status 实现读取 (跨 source)。
 # P2-1 收尾回归守卫: print_status 状态栏取数由 4 次 jq 合并为 1 次.
 #   静态: print_status 内 jq 调用恰好 1 次; 旧形态 (`jq '.'` + `echo|jq -r`) 清零.
 #   行为: 抽取 menu.sh 真实 print_status 函数体, 以桩件 jq / i18n 驱动三种配置场景.

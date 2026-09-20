@@ -1401,6 +1401,25 @@ function handler_xray_config() {
         XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg password "${TROJAN_PASSWORD}" '.inbounds[1].settings.clients[0].password = $password')"
         ;;
     esac
+    # P-优化: REALITY serverNames 守卫 —— 防手滑把占位符/空值写进 .xray.serverNames,
+    #   导致握手失败或把伪装目标暴露成 example.com。
+    #   - 非空且非占位符 example.com;
+    #   - 非 sni 模板时, serverNames 必须包含 target 域名 (REALITY 要求 SNI 命中其中一个)。
+    case "${CONFIG_TAG,,}" in
+    vision | xhttp | trojan | fallback | sni)
+        if [[ -z "${SERVER_NAMES}" || "${SERVER_NAMES}" == '[]' || "${SERVER_NAMES}" == 'null' ]]; then
+            _error "REALITY serverNames 为空, 请先配置 .xray.serverNames (config.json)"
+        fi
+        if [[ "${SERVER_NAMES}" == *'example.com'* ]]; then
+            _error "REALITY serverNames 含占位符 example.com, 请改为真实 target 域名"
+        fi
+        if [[ "${CONFIG_TAG,,}" != 'sni' ]]; then
+            if ! echo "${SERVER_NAMES}" | jq -e --arg d "${TARGET_DOMAIN}" 'any(.[]; . == $d)' >/dev/null 2>&1; then
+                _error "REALITY serverNames 必须包含 target 域名 ${TARGET_DOMAIN} (config.json 的 .xray.serverNames)"
+            fi
+        fi
+        ;;
+    esac
     # 根据配置标签更新特定字段 (第二部分)
     case "${CONFIG_TAG,,}" in
     mkcp)
@@ -2178,6 +2197,7 @@ function handler_net_tune() {
         '1000000'                 # file-max: 全机 fd 上限, 与句柄上限配套
         '0'                       # slow_start_after_idle: 空闲后不把 cwnd 打回初值
         '1'                       # tw_reuse: 复用 TIME_WAIT (比已废弃的 tw_recycle 安全)
+        '3'                       # tcp_fastopen: 客户端+服务端均启用 TFO, 省一次 RTT (需 xray sockopt.tcpFastOpen 配合)
     )
 
     cmd_exists 'sysctl' || _error "$(_i18n ".${CUR_FILE}.net_tune.no_sysctl")"

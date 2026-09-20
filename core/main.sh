@@ -625,6 +625,13 @@ function main() {
     # 订阅生成: 与其它功能保持一致提供 CLI 入口 (菜单 11 的等价形式),
     # 产物落在 ~/.xray-script-personal-use-only/, 便于脚本化与"改完配置后重新生成"
     --subscription) exec_handler '--subscription' ;;
+    # 服务启停与分享: 直达 handler, 便于脚本化与 cron 无交互调用
+    # (菜单项「启动 / 停止 / 重启 / 分享」的等价 CLI 形式)
+    --start) exec_handler '--start' ;;
+    --stop) exec_handler '--stop' ;;
+    --restart) exec_handler '--restart' ;;
+    # --share 支持附加参数 (--save / --no-qr), 用 shift + "$@" 透传, 与 --export-config 同款
+    --share) shift; exec_handler '--share' "$@" ;;
     # 内部用途: 语言切换重启后回到原菜单层级 (由 processes_language 传入, 非公开 CLI;
     # 故不列入 main.usage)。必须排在末尾 `*)` 之前, 否则会被当成未知参数落回主菜单。
     --menu) _return_to_menu "${2:-}" ;;

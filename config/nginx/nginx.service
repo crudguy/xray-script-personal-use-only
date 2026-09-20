@@ -7,6 +7,11 @@ Wants=network-online.target
 
 [Service]
 Type=forking
+# 进程崩溃/被 OOM kill 后由 systemd 自动拉起, 避免 443 静默不通 (默认不重启)。
+Restart=on-failure
+RestartSec=2s
+# 高并发下 worker 可能耗尽文件描述符; unit 级显式上限比依赖全局 DefaultLimitNOFILE 更稳。
+LimitNOFILE=100000
 PIDFile=/run/nginx.pid
 ExecStartPre=/bin/rm -rf /dev/shm/nginx
 ExecStartPre=/bin/mkdir /dev/shm/nginx

@@ -107,7 +107,10 @@
   "outbounds": [
     {
       "tag": "direct",
-      "protocol": "freedom"
+      "protocol": "freedom",
+      "sockopt": {
+        "tcpFastOpen": true
+      }
     },
     {
       "tag": "block",

@@ -431,6 +431,7 @@
     }
   },
   "check": {
+    "unknown_option": "Unknown or unsupported option",
     "ip": {
       "check": "Checking IP address validity: ",
       "ipv4_valid": "IPv4 address is valid: ",

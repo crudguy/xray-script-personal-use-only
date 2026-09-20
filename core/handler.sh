@@ -2183,6 +2183,7 @@ function handler_net_tune() {
         'fs.file-max'
         'net.ipv4.tcp_slow_start_after_idle'
         'net.ipv4.tcp_tw_reuse'
+        'net.ipv4.tcp_fastopen'
     )
     # 取值来源: 社区通用的"BBR + 高并发"配方, 面向高带宽高延迟 (BDP 大) 链路。
     # 注: rmem/wmem 抬的是**上限**而非实际占用, 但极限下单 socket 可占到 128MB,

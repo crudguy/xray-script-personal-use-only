@@ -33,7 +33,7 @@ echo "=== 非交互服务参数转发守卫测试 ==="
 echo "-- install.sh DIRECT_ARGS 收集清单 --"
 for p in --start --stop --restart --share; do
     # 参数后要么是 " |"(中间项) 要么是 ")"(末项), 两者都算被收集
-    grep -Eq "$p([[:space:]]*\\||[[:space:]]*\\))" "$INSTALL" \
+    grep -Eq -- "$p([[:space:]]*\\||[[:space:]]*\\))" "$INSTALL" \
         && ok "install.sh 收集: $p" \
         || bad "install.sh 未收集: $p"
 done

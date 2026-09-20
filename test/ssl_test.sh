@@ -50,6 +50,11 @@ mkdir -p "${SB}/home/.xray-script-personal-use-only" "${SB}/home/bin" "${SB}/roo
 mkdir -p "${SB}/core" "${SB}/service"
 # ssl.sh 仅 source core/_common.sh, 不必复制整个 core (省时 + 隔离)
 cp "${REPO}/core/_common.sh" "${SB}/core/"
+# _common.sh 的 PATH 白名单把 ~/bin 放在 /usr/bin 之后, 且该 ~/bin 是字面量不会展开,
+# 导致 ssl_test 放在 ${HOME}/bin 的 nginx/systemctl 桩件从未被命中 —— 真实(无 systemd)的
+# systemctl 被优先调用, --issue 起停 nginx 在 CI/沙箱里必败。仅改沙箱副本: 把桩件目录
+# 前置到白名单最前, 让桩件优于真实二进制生效 (不影响生产 PATH 语义)。
+sed -i "s#^PATH=.*#PATH=\"${SB}/home/bin:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:/snap/bin\"#" "${SB}/core/_common.sh"
 cp -r "${REPO}/i18n"         "${SB}/i18n"
 cp "${REPO}/service/ssl.sh"  "${SB}/service/"
 

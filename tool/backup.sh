@@ -621,13 +621,19 @@ function _verify_restored() {
     elif command -v nginx >/dev/null 2>&1; then
         nginx_bin="$(command -v nginx)"
     fi
-    if [[ -n "${nginx_bin}" ]]; then
-        # Nginx 的 -t 会把结果打到 stderr 并给出退出码, 故整体重定向后只看退出码
-        if "${nginx_bin}" -t >/dev/null 2>&1; then
+    if [[ -n "${nginx_bin}" && -f "${NGINX_CONFIG_DIR}/nginx.conf" ]]; then
+        # 必须用 -c 指定"刚还原的那份配置": 裸 nginx -t 读的是系统全局配置
+        # (/etc/nginx/nginx.conf), 与本模块还原的目标无关 —— 拿系统配置的成败去
+        # 回滚刚完成的还原, 是把误判放大成"还原被撤销"。
+        #
+        # 且本分支只告警、不置 ok=1 (不回滚):
+        #  ① 系统 nginx 与本项目编译的 nginx 配置树未必一致, -t 结果不可直接采信;
+        #  ② non-root 下 -t 常因无权访问 /var/log/nginx 等而失败, 这类环境性失败
+        #     不代表还原出的配置本身有问题。真正的语法问题交由服务启动阶段暴露。
+        if "${nginx_bin}" -t -c "${NGINX_CONFIG_DIR}/nginx.conf" >/dev/null 2>&1; then
             _info "$(_i18n '.backup.import.nginx_ok')"
         else
             _warn "$(_i18n '.backup.import.nginx_test_failed')"
-            ok=1
         fi
     fi
     return "${ok}"

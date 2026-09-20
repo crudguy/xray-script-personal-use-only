@@ -67,6 +67,8 @@ assert_eq "非 GitHub 域不加前缀" "$(_gh_url "https://nginx.org/x")" "https
 
 # ============================================================ _atomic_write (真实)
 echo "== _atomic_write 原子写 =="
+# 占位声明: 真实实现由下方 eval "$AT" 注入; 因 eval 对 shellcheck 不可见, 先声明以满足 SC2218(函数须先于调用定义). eval 会覆盖此占位.
+_atomic_write() { :; }
 eval "$AT"
 printf 'hello' | _atomic_write "$TMPD/aw_target"; rc=$?
 if [[ $rc -eq 0 && "$(cat "$TMPD/aw_target" 2>/dev/null)" == "hello" ]]; then ok "原子写入内容正确"; else bad "_atomic_write 写入异常 rc=$rc"; fi

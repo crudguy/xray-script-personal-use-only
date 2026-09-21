@@ -300,12 +300,17 @@ function _install() {
 }
 
 # =============================================================================
-# 函数名称: check_os
-# 功能描述: 检查操作系统是否受支持。
+# 函数名称: check_os_nginx_build
+# 功能描述: 检查操作系统是否满足【编译 Nginx】的基线。
+#
+# 为什么改名 (原为 check_os): 与 install.sh 的 check_os 同名但基线不同, 曾造成
+#       两份实现静默漂移 (那边 Ubuntu>=16/Debian>=9, 这边 >=20/>=10)。改名后"同名
+#       不同义"在代码里不再隐形。差异是刻意的: 编译 Nginx 受构建依赖的库版本约束,
+#       基线必须高于脚本运行的通用基线, 不要与 install.sh 互相拉齐。
 # 参数: 无
 # 返回值: 无 (受支持则继续，不受支持则 print_error 退出)
 # =============================================================================
-function check_os() {
+function check_os_nginx_build() {
     [[ -z "$(_os)" ]] && print_error "$(_i18n '.nginx.os.unsupported_os')" "$(_i18n '.nginx.os.unsupported_os_hint')"
 
     case "$(_os)" in
@@ -965,8 +970,8 @@ function main() {
     # 加载国际化数据
     load_i18n
 
-    # 首先检查操作系统兼容性
-    check_os
+    # 首先检查操作系统兼容性 (编译 Nginx 的专项基线)
+    check_os_nginx_build
 
     # 初始化 action 变量
     local action=''

@@ -869,11 +869,22 @@ function check_xray_version_exists() {
     _info "$(_i18n ".${CUR_FILE}.version.check")v${version}"
 
     # 构造 GitHub Releases 页面的 URL
-    local version_url="https://github.com/XTLS/Xray-core/releases/tag/v${version#*v}"
+    # 注: 必须经 _gh_url —— handler.sh 里取版本号的同类请求都走它, 而这里曾是裸域名。
+    #     国内网络下 github.com 常被阻断, 一旦取不到 200 就会被下文判成"版本不存在",
+    #     于是出现"安装能通(那边有加速)、版本校验必失败"的怪象。
+    local version_url
+    version_url="$(_gh_url "https://github.com/XTLS/Xray-core/releases/tag/v${version#*v}")"
 
     # 使用 curl 获取页面的 HTTP 状态码
     local status_code
     status_code=$(curl -L --connect-timeout 10 --max-time 20 --retry 2 -o /dev/null -s -w '%{http_code}\n' "$version_url" || true)
+
+    # 网络不可达要单独识别: curl 连不上时 -w 打出的是 000, 与"版本真的不存在"(404)
+    # 是两回事。混为一谈会把网络故障误报成"你填的版本号不对", 让用户白改一通配置。
+    if [[ "$status_code" == "000" || -z "$status_code" ]]; then
+        _fail "$(_i18n ".${CUR_FILE}.version.network_error")"
+        return 1
+    fi
 
     # 检查状态码是否为 200 (OK)
     if [[ "$status_code" == "200" ]]; then

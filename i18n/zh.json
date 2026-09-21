@@ -232,7 +232,8 @@
     "geodata": {
       "close_cron": "成功停止 geodata 自动更新任务",
       "open_cron": "成功开启 geodata 自动更新任务",
-      "update": "执行 geodata 更新"
+      "update": "执行 geodata 更新",
+      "not_installed": "Xray 未安装，无法管理 geodata 自动更新任务，请先完成安装。"
     },
     "nginx": {
       "close_cron": "成功停止 nginx 自动更新任务",
@@ -537,7 +538,8 @@
     "version": {
       "check": "正在检查 Xray 版本是否存在：",
       "exist": "Xray 版本存在：v",
-      "not_exist": "Xray 版本不存在：v"
+      "not_exist": "Xray 版本不存在：v",
+      "network_error": "无法连接 GitHub 校验版本（网络不可达或被阻断），未判定该版本是否存在。可设置 GH_PROXY 加速前缀后重试"
     },
     "email": {
       "check": "正在校验电子邮箱合法性：",
@@ -767,7 +769,8 @@
       "letsencrypt_retry": "Let's Encrypt 第 ${attempt} 次申请证书...",
       "letsencrypt_fail": "证书申请失败，请检查防火墙与配置。",
       "fail_ecc_issue": "ECC 证书申请失败。",
-      "fail_install_cert": "安装证书失败。"
+      "fail_install_cert": "安装证书失败。",
+      "privkey_perm_warn": "警告: 证书私钥权限收紧失败, 当前可能为全局可读 (world-readable)。请手工执行 chown root:nginx 与 chmod 640 修复, 避免私钥被本机其它用户读取。"
     },
     "renew": {
       "start": "正在强制续期所有 SSL 证书...",

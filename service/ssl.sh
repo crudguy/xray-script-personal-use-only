@@ -348,10 +348,15 @@ EOF
     # 进程读取的风险。fullchain 是公开证书链, 保持 644 无害。
     # chown root:nginx 把属组切到 nginx, 配合 640 让 worker 可读; 若主机无 nginx 组 (极端情况),
     # chown 失败则回退 644, 避免 nginx 因读不到私钥而启动失败。
+    # 收紧失败必须让用户看见: 私钥是长期凭据, 静默留在 world-readable 等于把泄露
+    # 风险藏起来 —— 用户以为已经加固, 实际同机任何用户/被入侵进程都能读走。
     if chown root:nginx "${cert_path}/privkey.pem" 2>/dev/null; then
-        chmod 640 "${cert_path}/privkey.pem" 2>/dev/null || true
+        chmod 640 "${cert_path}/privkey.pem" 2>/dev/null ||
+            print_warn "$(_i18n ".${CUR_FILE}.issue.privkey_perm_warn")"
     else
+        # 无 nginx 组时仍需让 nginx 读得到私钥, 只能放宽; 但这属于"降级", 要明确告知
         chmod 644 "${cert_path}/privkey.pem" 2>/dev/null || true
+        print_warn "$(_i18n ".${CUR_FILE}.issue.privkey_perm_warn")"
     fi
     # fullchain 为公开证书链, 保持 644 (幂等, acme.sh 续签重新拷贝后权限可能被重置)
     chmod 644 "${cert_path}/fullchain.pem" 2>/dev/null || true

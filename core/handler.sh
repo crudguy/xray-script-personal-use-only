@@ -2738,6 +2738,10 @@ function handler_geodata_cron() {
             # 打印已开启 Cron 任务的提示
             echo -e "${GREEN}[$(_i18n '.title.tip')] ${NC}$(_i18n ".${CUR_FILE}.geodata.open_cron")" >&2
         fi
+    else
+        # Xray 未安装时必须给出反馈: 原实现在这里静默返回, 用户在菜单里选了本项却
+        # 得不到任何输出 —— 既可能误以为"已经设好了", 也可能以为脚本卡死。
+        echo -e "${YELLOW}[$(_i18n '.title.warn')]${NC} $(_i18n ".${CUR_FILE}.geodata.not_installed")" >&2
     fi
 }
 
@@ -2953,6 +2957,10 @@ function handler_nginx_cron() {
             # 打印开启 Cron 任务的提示
             echo -e "${GREEN}[$(_i18n '.title.tip')] ${NC}$(_i18n ".${CUR_FILE}.nginx.open_cron")" >&2
         fi
+    else
+        # 同上: Nginx 未安装时原实现静默返回, 用户选了菜单项却零反馈, 无从判断
+        # 是"已设置"还是"没生效"。这里与 handler_nginx_stop 的处理保持一致。
+        echo -e "${YELLOW}[$(_i18n '.title.warn')]${NC} $(_i18n ".${CUR_FILE}.nginx.not_installed")" >&2
     fi
 }
 

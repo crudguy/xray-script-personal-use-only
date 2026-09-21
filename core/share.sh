@@ -680,12 +680,18 @@ function show_sni_config() {
 # =============================================================================
 function _collect_node() {
     local user="${CLIENT_CONFIG[uuid]:-${CLIENT_CONFIG[password]}}"
+    # port 走 --argjson 是为了让产物里的端口是 JSON 数字而非字符串; 代价是它必须是
+    # 合法字面量 —— 空串或非数字会让 jq 直接报 "Invalid numeric literal" 失败,
+    # 进而在 set -e 下中断整轮订阅生成 (用户看到的是"生成失败"而非"端口没配").
+    # 故先做数字守卫, 取不到就退回 443 (本项目默认端口), 保证产物始终能生成。
+    local port="${CLIENT_CONFIG[port]:-}"
+    [[ "${port}" =~ ^[0-9]+$ ]] || port=443
     local node_json
     node_json="$(jq -nc \
         --arg scheme "${CLIENT_CONFIG[protocol]}" \
         --arg user "${user}" \
         --arg host "${CLIENT_CONFIG[remote_host]}" \
-        --argjson port "${CLIENT_CONFIG[port]}" \
+        --argjson port "${port}" \
         --arg type "${CLIENT_CONFIG[type]}" \
         --arg security "${CLIENT_CONFIG[security]}" \
         --arg sni "${CLIENT_CONFIG[server_name]}" \
@@ -805,12 +811,19 @@ function singbox_build_outbound() {
         return 0
     fi
 
+    # 端口守卫 (与 _collect_node 同源问题): 节点 JSON 里的 port 可能是空串或非数字,
+    # 直接喂给 --argjson 会让 jq 解析失败并中断整个 sing-box 订阅生成。
+    # 注: 值为 null 时 jq -r 输出字面 null, --argjson 能接受; 但空串不行, 故统一守卫。
+    local nport
+    nport="$(jq -r '.port // empty' <<<"${n}")"
+    [[ "${nport}" =~ ^[0-9]+$ ]] || nport=443
+
     local obj
     obj="$(jq -nc \
         --arg scheme "${scheme}" \
         --arg tag "$(jq -r '.tag' <<<"${n}")" \
         --arg host "$(jq -r '.host' <<<"${n}")" \
-        --argjson port "$(jq -r '.port' <<<"${n}")" \
+        --argjson port "${nport}" \
         --arg user "$(jq -r '.user' <<<"${n}")" \
         --arg sni "$(jq -r '.sni' <<<"${n}")" \
         --arg fp "$(jq -r '.fp' <<<"${n}")" \

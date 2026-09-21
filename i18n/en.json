@@ -232,7 +232,8 @@
     "geodata": {
       "close_cron": "Successfully stopped geodata auto-update task",
       "open_cron": "Successfully started geodata auto-update task",
-      "update": "Executing geodata update"
+      "update": "Executing geodata update",
+      "not_installed": "Xray is not installed, cannot manage the geodata auto-update task. Please install it first."
     },
     "nginx": {
       "close_cron": "Successfully stopped nginx auto-update task",
@@ -537,7 +538,8 @@
     "version": {
       "check": "Checking if Xray version exists: ",
       "exist": "Xray version exists: v",
-      "not_exist": "Xray version does not exist: v"
+      "not_exist": "Xray version does not exist: v",
+      "network_error": "Cannot reach GitHub to verify the version (network unreachable or blocked); existence was not determined. Set a GH_PROXY prefix and retry"
     },
     "email": {
       "check": "Validating email address: ",
@@ -767,7 +769,8 @@
       "letsencrypt_retry": "Let's Encrypt certificate attempt ${attempt}...",
       "letsencrypt_fail": "Certificate issuance failed. Please check firewall and configuration.",
       "fail_ecc_issue": "ECC certificate application failed.",
-      "fail_install_cert": "Failed to install certificate."
+      "fail_install_cert": "Failed to install certificate.",
+      "privkey_perm_warn": "Warning: failed to tighten permissions on the certificate private key; it may currently be world-readable. Please fix it manually with chown root:nginx and chmod 640 to prevent other local users from reading the key."
     },
     "renew": {
       "start": "Forcing renewal of all SSL certificates...",

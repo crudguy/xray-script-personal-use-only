@@ -93,6 +93,8 @@ declare -A I18N_DATA=(
     ['failed']='下载失败'
     ['downloaded']='文件已下载到'
     ['cron_disabled']='未检测到已启用且运行中的 cron 服务: 自动更新 GeoData、自动更新 Nginx、自动续签证书都不会执行, 请执行 systemctl enable --now cron 修复'
+    ['installer_update_failed']='安装器自身更新失败, 已保留旧版本可继续使用; 新代码已在项目目录就位, 下次运行将生效'
+    ['config_init_failed']='脚本默认配置下载或校验失败, 无法初始化。请检查网络后重试; 国内网络可设置 GH_PROXY 加速前缀后重跑'
 )                        # 默认的国际化数据 (中文)
 declare PROJECT_ROOT=''  # 项目安装根目录 (动态设置)
 declare CORE_DIR=''      # 核心脚本目录 (动态设置)
@@ -315,7 +317,7 @@ function load_i18n() {
             ['error']='Error'
             ['root']='This script must be run as root'
             ['supported']='Not supported OS'
-            ['ubuntu']='Not supported OS, please change to Ubuntu 18+ and try again.'
+            ['ubuntu']='Not supported OS, please change to Ubuntu 16+ and try again.'
             ['debian']='Not supported OS, please change to Debian 9+ and try again.'
             ['centos']='Not supported OS, please change to CentOS 7+ and try again.'
             ['tip']='Update Notice'
@@ -328,6 +330,8 @@ function load_i18n() {
             ['failed']='Download failed'
             ['downloaded']='The file has been downloaded to'
             ['cron_disabled']='No enabled and running cron service detected: automatic GeoData updates, automatic Nginx updates and certificate renewal will not run. Please fix it with: systemctl enable --now cron'
+            ['installer_update_failed']='Failed to update the installer itself; the previous version is kept and still usable. The new code is already in place under the project directory and will take effect on the next run'
+            ['config_init_failed']='Failed to download or verify the default script configuration, cannot initialize. Please check your network and retry; you can also set a GH_PROXY prefix and rerun'
         )
     fi
 }
@@ -348,31 +352,49 @@ function _error() {
 
 # =============================================================================
 # 函数名称: check_os
-# 功能描述: 检查操作系统是否受支持。
+# 功能描述: 检查操作系统是否受支持 (脚本运行的【通用基线】)。
+#
+# 注意: 这是 install.sh 单文件自包含副本, 与 service/nginx.sh 的 check_os 同名但
+#       基线**不同**是刻意的 —— 那边是"编译 Nginx"的专项要求 (Ubuntu>=20/Debian>=10,
+#       受构建依赖的库版本约束), 这里是"本脚本能否运行"的通用要求。两者不要互相
+#       对齐: 一旦把通用基线抬到 20, Ubuntu 18 用户将连脚本都装不上; 反之若把编译
+#       基线降到 16, 又会在编译中途因库版本不足失败。
 # 参数: 无
 # 返回值: 无 (如果不支持则调用 _error 退出)
 # =============================================================================
 function check_os() {
+    # 取一次版本号复用, 避免每个分支各 fork 一次子进程
+    local ver
+    ver="$(_os_ver)"
+
+    # 版本号取不到时不做"过低"判定:
+    # _os_ver 依赖 /etc/os-release 等文件的文本解析, 在精简镜像/非标准发行版上可能
+    # 返回空。空串参与 -lt 会被算术上下文当成 0, 于是 <16 成立 —— 明明只是"识别不出
+    # 版本", 却把用户拦在门外并报出误导性的"版本过低"。识别不出时应放行, 让后续
+    # 依赖检查去暴露真实问题。
+    local ver_unknown=0
+    [[ -n "${ver}" ]] || ver_unknown=1
+
     # 检查操作系统类型和版本
     case "$(_os)" in
     # CentOS 系列
     centos)
         # 检查版本号是否大于等于 7
-        if [[ "$(_os_ver)" -lt 7 ]]; then
+        if [[ "${ver_unknown}" -eq 0 && "${ver}" -lt 7 ]]; then
             _error "${I18N_DATA['centos']}"
         fi
         ;;
     # Ubuntu 系列
     ubuntu)
         # 检查版本号是否大于等于 16
-        if [[ "$(_os_ver)" -lt 16 ]]; then
+        if [[ "${ver_unknown}" -eq 0 && "${ver}" -lt 16 ]]; then
             _error "${I18N_DATA['ubuntu']}"
         fi
         ;;
     # Debian 系列
     debian)
         # 检查版本号是否大于等于 9
-        if [[ "$(_os_ver)" -lt 9 ]]; then
+        if [[ "${ver_unknown}" -eq 0 && "${ver}" -lt 9 ]]; then
             _error "${I18N_DATA['debian']}"
         fi
         ;;
@@ -683,10 +705,22 @@ function _update_xray_script() {
         fi
         _error "${I18N_DATA['failed']}: ${PROJECT_ROOT}"
     fi
-    # 删除旧的脚本文件
-    rm -f "${CUR_DIR}/${CUR_FILE}"
-    # 更新当前脚本文件
-    cp -f "${PROJECT_ROOT}/install.sh" "${CUR_DIR}/${CUR_FILE}"
+    # 更新当前脚本文件 (原子替换: 先写同目录临时文件, 再 rename 覆盖)
+    #
+    # 为什么不能"先 rm 再 cp": 两步之间一旦 cp 失败 (磁盘满 / 权限 / 新包里缺该文件),
+    # 安装器就永久消失, 用户连"重跑一次自更新"的入口都没了 —— 而此时新代码其实已经
+    # 在 ${PROJECT_ROOT} 就位, 本可以下次运行自然生效, 不该为此搭上整个入口。
+    # 直接 cp 原地覆盖同样不行: 当前进程正按偏移读取这个脚本, 原地覆写会让 bash
+    # 后续读到新旧混杂的内容; rename 是原子的, 执行中的进程继续持有旧 inode, 不受影响。
+    local self_new="${CUR_DIR}/.${CUR_FILE}.new.$$"
+    if cp -f "${PROJECT_ROOT}/install.sh" "${self_new}" 2>/dev/null &&
+        mv -f "${self_new}" "${CUR_DIR}/${CUR_FILE}" 2>/dev/null; then
+        : # 替换成功
+    else
+        # 替换失败: 清理临时文件, 保留旧安装器并明确告知 (不中断, 新代码下次生效)
+        rm -f "${self_new}" 2>/dev/null || true
+        echo -e "${YELLOW}[${I18N_DATA['tip']}]${NC} ${I18N_DATA['installer_update_failed']}" >&2
+    fi
     # 界面展示的版本号随新代码同步
     _sync_script_version_label
     # 记录本次安装的 commit, 作为下次"是否需要更新"的判据
@@ -814,6 +848,14 @@ function main() {
         if wget --timeout=30 --tries=2 -q -O "${default_config_tmp}" "$(_gh_url "${XRAY_SCRIPT_CONFIG_URL}")" &&
             jq -e . "${default_config_tmp}" >/dev/null 2>&1; then
             _atomic_write "${SCRIPT_CONFIG_PATH}" <"${default_config_tmp}"
+        else
+            # 下载/校验失败必须显式终止, 不能静默跳过:
+            # 后续流程会把 SCRIPT_CONFIG_PATH 当作"已存在"继续用 —— 缺文件时
+            # `jq --arg path ... "${SCRIPT_CONFIG_PATH}"` 报错、取到空结果, 再被原子写
+            # 回磁盘, 于是生成一个**空配置文件**; 之后再跑任何菜单都会以 jq 解析失败
+            # 的形式崩溃, 而真实原因(这次下载失败)早已淹没在输出里。
+            rm -f "${default_config_tmp}"
+            _error "${I18N_DATA['config_init_failed']}"
         fi
         rm -f "${default_config_tmp}"
     fi

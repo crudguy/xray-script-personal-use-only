@@ -624,9 +624,19 @@ function main() {
     # (--net-status 是只读的, 适合放进监控定时任务里盯"BBR 有没有掉")
     --bbr) exec_handler '--bbr' ;;
     --net-status) exec_handler '--net-status' ;;
-    # 一键全量体检: 只读, 适合放进 cron / 监控脚本; 需要真实退出码时
-    # 直接用 `core/check.sh --health` (0=无失败项 / 1=有失败项)
-    --health) exec_handler '--health' ;;
+    # 一键全量体检: 只读, 适合放进 cron / 监控脚本。
+    #
+    # 这里刻意**不走** exec_handler: handler_health 为了不中断菜单而恒 return 0,
+    # 若 CLI 也走它, cron 里的 `--health` 永远拿到退出码 0 —— 体检项全红照样报成功
+    # (假绿), 监控形同虚设。故直接调 check.sh 并用 exit 透传其退出码:
+    #   0 = 无失败项, 1 = 有失败项
+    # 代价: 这条路径不经过 handler, 因此不写审计日志 (审计只在菜单路径记录);
+    #       体检是只读操作, 且 cron 场景更看重退出码, 此权衡可接受。
+    --health)
+        local _health_rc=0
+        bash "${CUR_DIR}/check.sh" '--health' || _health_rc=$?
+        exit "${_health_rc}"
+        ;;
     --net-tune) exec_handler '--net-tune' ;;
     --nofile-limit) exec_handler '--nofile-limit' ;;
     # 订阅生成: 与其它功能保持一致提供 CLI 入口 (菜单 11 的等价形式),

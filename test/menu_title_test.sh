@@ -40,8 +40,13 @@ _MENU_RULE_WIDTH=54
 _DISP_WIDTH=0
 
 # 独立基准: GNU coreutils wc -L (显示列宽, CJK 感知). 不可用则退化为跳过对照.
+#
+# ⚠️ 探测样本必须与实际比对样本【同类】: 原先用纯 ASCII 的 'a' 探测, 而任何 locale 下
+# 'a' 的宽度都是 1 —— 守卫恒真, 于是 T2 拿着 CJK 串去比对一个在 C/POSIX locale 下
+# 对多字节返回 0 的 oracle (中文测试: C locale=0 / C.UTF-8=8), 直接产出 6 处假红。
+# 改用中文串探测: 只有 wc -L 真能识别双宽字符时才认为基准可用。
 _HAS_WCL=0
-if printf 'a\n' | wc -L >/dev/null 2>&1 && [[ "$(printf 'a\n' | wc -L)" == "1" ]]; then
+if printf '中文\n' | wc -L >/dev/null 2>&1 && [[ "$(printf '中文\n' | wc -L)" == "4" ]]; then
     _HAS_WCL=1
 fi
 oracle_wc(){ printf '%s\n' "$1" | wc -L | tr -d '[:space:]'; }
@@ -64,7 +69,7 @@ if (( _HAS_WCL )); then
     done
     assert_eq "disp_width 与 wc -L 基准全一致" "0" "$mism"
 else
-    ok "跳过 wc -L 对照 (本平台无 GNU wc -L)"
+    ok "跳过 wc -L 对照 (无 GNU wc -L, 或当前 locale 非 UTF-8 导致多字节宽度不可信)"
 fi
 
 # --- T3: _menu_rule 恒为满宽纯 '-' ---

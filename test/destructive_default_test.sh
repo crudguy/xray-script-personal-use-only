@@ -60,8 +60,8 @@ assert_contains "fn has read confirm" "$FN" 'read -r reply'
 assert_contains "fn installs only on y" "$FN" 'y | yes) exec_handler'
 
 # 注: 不用裸 mktemp -d —— Windows/Git-Bash 下可能返回 "C:/..." 风格路径, MSYS 无法解析。
-#     改用项目内固定目录(约定 .workbuddy/tmp/)。
-TMPD="$ROOT/.workbuddy/tmp/destructive_default.$$"
+#     改用项目内固定目录(约定 test/.tmp/)。
+TMPD="$ROOT/test/.tmp/destructive_default.$$"
 rm -rf "$TMPD" 2>/dev/null || true
 mkdir -p "$TMPD"
 trap 'rm -rf "$TMPD" 2>/dev/null || true' EXIT

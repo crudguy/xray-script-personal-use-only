@@ -10,8 +10,10 @@
 # =============================================================================
 set -u
 
-SB=".workbuddy/tmp/menu_loop_sb"
+SB="test/.tmp/menu_loop_sb"
 rm -rf "$SB"; mkdir -p "$SB"
+# EXIT trap: 断言失败提前退出时也要收掉沙箱, 否则多次运行会不断累积残留目录
+trap 'rm -rf "$SB" 2>/dev/null || true' EXIT
 CALLS="$SB/calls"; : > "$CALLS"
 QUEUE="$SB/queue"
 MAIN=core/main.sh

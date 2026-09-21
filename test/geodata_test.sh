@@ -9,7 +9,7 @@ bad()  { FAIL=$((FAIL + 1)); printf '  [FAIL] %s\n' "$1" >&2; }
 
 SRC='tool/geodata.sh'
 if [[ ! -r "$SRC" && -r "${0%/*}/../$SRC" ]]; then cd "${0%/*}/.." || exit 1; fi
-TMPD=".workbuddy/tmp/geodata_$$"; rm -rf "$TMPD"; mkdir -p "$TMPD"
+TMPD="test/.tmp/geodata_$$"; rm -rf "$TMPD"; mkdir -p "$TMPD"
 trap 'rm -rf "$TMPD" 2>/dev/null || true' EXIT
 [[ -r "$SRC" ]] || { bad "找不到 $SRC"; echo "PASS=$PASS FAIL=$FAIL"; exit 1; }
 

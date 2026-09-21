@@ -113,6 +113,28 @@ function set_default_ca() {
     "${HOME}/.acme.sh/acme.sh" --set-default-ca --server "${CA_SERVER}" || print_error "$(_i18n ".${CUR_FILE}.install.fail_set_ca")"
 }
 
+# acme.sh 安装链路的供应链锁定。
+#
+# 背景 (为什么必须有这两个默认值): 本项目为所有第三方安装脚本设计了
+# `_download_verified` 三重体检 (体积 / SHA256 摘要 / bash 语法), Xray (handler.sh:83)
+# 与 Docker (docker.sh:54) 两处都已内置摘要; 但本文件原先引用了一个**从未被定义**
+# 的 ACME_SH_INSTALL_SHA256, `${VAR:-}` 恒为空 => 摘要体检被静默跳过, 只剩"体积≥512B
+# 与 bash -n"两道弱校验, 而下载物随后以 root 身份执行。这里补上真实摘要以堵住该缺口。
+#
+# 摘要为实测所得 (同一 URL 三次独立拉取结果逐字节一致), 升级版本时应同步更新:
+#   curl -fsSL https://get.acme.sh | sha256sum
+#
+# ACME_SH_REF 的作用: 官方 bootstrap 内部按 $BRANCH 拼接第二阶段地址
+#   https://raw.githubusercontent.com/acmesh-official/acme.sh/$BRANCH/acme.sh
+# 不设则取浮动的 master (移动靶); 钉住后第二阶段地址才是确定的。
+#
+# ⚠️ 残余风险 (本方案无法覆盖): 该 bootstrap 内部执行 `$_get "$_url" | sh`,
+# 即第二阶段仍然是"边下边执行"且未做摘要校验 —— 这是上游自带写法, 锁定本文件只能
+# 保证【第一阶段】来源可信。要彻底消除需改用离线安装 (取 pinned tag 的 acme.sh 本体
+# + 校验摘要 + `--install`), 属安装方式变更, 未在本改动中实施。
+declare ACME_SH_INSTALL_SHA256="${ACME_SH_INSTALL_SHA256-8681df828f7765a351a4fc708a46fc3f7f383c0155fe4b19002d20e5c4ee5431}"
+declare ACME_SH_REF="${ACME_SH_REF-3.1.6}"
+
 # =============================================================================
 # 函数名称: install_acme_sh
 # 功能描述: 安装 acme.sh 脚本。
@@ -132,13 +154,17 @@ function install_acme_sh() {
     # 用 `sh -s email=... < 文件` 从已校验的本地文件读取脚本, 与管道写法语义一致
     # ($0 同为 sh, $1 同为 email=...), 但避免了"边下边执行"。
     local acme_installer=''
-    if ! acme_installer="$(_download_verified 'https://get.acme.sh' "${ACME_SH_INSTALL_SHA256:-}")"; then
+    if ! acme_installer="$(_download_verified 'https://get.acme.sh' "${ACME_SH_INSTALL_SHA256}")"; then
         print_error "$(_i18n ".${CUR_FILE}.install.fail_download")"
     fi
-    sh -s email="${ACCOUNT_EMAIL}" <"${acme_installer}" || print_error "$(_i18n ".${CUR_FILE}.install.fail_download")"
+    # BRANCH 前缀赋值只作用于本次 sh: bootstrap 会把它拼进第二阶段 URL (见上方 ACME_SH_REF 说明)。
+    # 若不传, 上游默认取浮动的 master。
+    BRANCH="${ACME_SH_REF}" sh -s email="${ACCOUNT_EMAIL}" <"${acme_installer}" || print_error "$(_i18n ".${CUR_FILE}.install.fail_download")"
     rm -f "${acme_installer}"
 
-    "${HOME}/.acme.sh/acme.sh" --upgrade --auto-upgrade || print_error "$(_i18n ".${CUR_FILE}.install.fail_autoupgrade")"
+    # 关闭自动升级: 上游 --auto-upgrade 会安装一个定时任务, 把钉住的 3.1.6 漂回浮动版本,
+    # 破坏供应链锁定。需要升级时请显式运行 ssl.sh --update (同分支内升级, 不会漂走)。
+    "${HOME}/.acme.sh/acme.sh" --upgrade || print_error "$(_i18n ".${CUR_FILE}.install.fail_autoupgrade")"
 
     "${HOME}/.acme.sh/acme.sh" --set-default-ca --server "${CA_SERVER}" || print_error "$(_i18n ".${CUR_FILE}.install.fail_set_ca")"
 }
@@ -194,9 +220,15 @@ function issue_certificate() {
 
     local nginx_conf="${NGINX_CONFIG_PATH}/nginx.conf"
     local nginx_conf_bak="${nginx_conf}.ssl_script.bak"
+    local nginx_conf_modified=0
 
     if [[ -f "${nginx_conf}" ]]; then
         cp -f "${nginx_conf}" "${nginx_conf_bak}" || print_error "$(_i18n_sub ".${CUR_FILE}.issue.fail_backup_nginx" '${nginx_conf}' "${nginx_conf}")"
+        nginx_conf_modified=1
+        # 健壮性修复: 签发期间 nginx.conf 被改写为"仅 ACME 挑战"最小配置; 此前仅在成功路径
+        # 手动还原, 任意中途 print_error 退出 (如重载/启动失败或签发失败) 都会让线上配置停留在
+        # 损坏态。挂 EXIT trap 兜底, 无论成功/失败/被信号打断, 都先把原配置还原再退出。
+        trap '[[ ${nginx_conf_modified} -eq 1 && -f "${nginx_conf_bak}" ]] && mv -f "${nginx_conf_bak}" "${nginx_conf}"; trap - EXIT' EXIT
     fi
 
     cat >"${nginx_conf}" <<EOF
@@ -301,8 +333,10 @@ EOF
         fi
     fi
 
-    # 签发成功后，恢复原始 Nginx 配置
+    # 签发成功后，恢复原始 Nginx 配置 (同时清掉兜底 trap, 避免脚本末尾重复触发)
     mv -f "${nginx_conf_bak}" "${nginx_conf}"
+    nginx_conf_modified=0
+    trap - EXIT
 
     # 安装签发的证书到指定路径，并设置 Nginx 重载命令
     "${HOME}/.acme.sh/acme.sh" --install-cert --ecc -d "${DOMAIN}" \

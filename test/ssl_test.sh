@@ -40,7 +40,7 @@ bad() { printf '  FAIL %s\n' "$1"; fail=1; }
 # --- 依赖前置检查 (区分"环境没配好" 与 "代码坏了") ---
 for dep in bash jq; do
     if ! command -v "$dep" >/dev/null 2>&1; then
-        echo "前置依赖缺失: ${dep} (请 PATH 加入 jq 垫片: export PATH=\"\$REPO/.workbuddy/tmp/jqshim:\$PATH\")"
+        echo "前置依赖缺失: ${dep} (请 PATH 加入 jq 垫片: export PATH=\"\$REPO/test/.tmp/jqshim:\$PATH\")"
         exit 3
     fi
 done
@@ -62,7 +62,7 @@ cp "${REPO}/service/ssl.sh"  "${SB}/service/"
 printf '{"version":"vTEST","language":"zh","nginx":{"ca_server":"zerossl"}}\n' >"${SB}/home/.xray-script-personal-use-only/config.json"
 
 # jq 垫片进 ~/bin (被测子进程 PATH 由 _common 覆盖为白名单, ~/bin 在内)
-SHIM="${XRAY_TEST_SHIM:-${REPO}/.workbuddy/tmp/jqshim}"
+SHIM="${XRAY_TEST_SHIM:-${REPO}/test/.tmp/jqshim}"
 if [[ -n "${SHIM}" && -x "${SHIM}/jq" ]]; then
     ln -sf "${SHIM}/jq" "${SB}/home/bin/jq"
 fi

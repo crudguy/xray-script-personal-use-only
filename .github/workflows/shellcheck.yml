@@ -23,7 +23,18 @@ concurrency:
 jobs:
   shellcheck:
     name: shellcheck (-S warning)
-    runs-on: ubuntu-latest
+    # 钉版本而非浮动标签: 官方公告 2026-10-19 起 ubuntu-latest 迁移到 Ubuntu 26。
+    # 本项目对 runner 镜像内容敏感 —— 曾因子标签迁移后 runner 预装 nginx, 导致
+    # backup_test 里裸 `nginx -t` 测的是系统配置而非还原后的配置从而长期飘红;
+    # 虽已改用 `-c` 指定配置根治, 但仍不应把系统 nginx 的存在与否交给浮动标签决定。
+    # ShellCheck 走 docker (koalaman/shellcheck:v0.10.0), 不受换 runner 镜像影响。
+    runs-on: ubuntu-24.04
+    env:
+      # 固定 UTF-8 (job 级, 覆盖所有 step): menu_title_test 用 GNU `wc -L` 作独立
+      # 基准来校验 `_disp_width` 的 CJK 双宽计算; 在 C/POSIX locale 下 wc -L 无法
+      # 识别多字节, 对中文返回 0 (中文测试: C locale=0 / C.UTF-8=8), 会产出 6 处假红。
+      LC_ALL: C.UTF-8
+      LANG: C.UTF-8
     steps:
       - name: Checkout
         # v5 起运行时为 Node 24; v4 仍锁 Node 20, GitHub 会给出弃用告警
@@ -88,7 +99,7 @@ jobs:
       # 首节点预填被误删这两个真 bug 静态检查全都发现不了, 靠临时驱动才抓到。本步骤把那批
       # 驱动固化成了 test/ 下的可重跑用例 (订阅聚合 / 流量统计格式化 / 配置变更后订阅重建),
       # 用例在临时沙箱里跑真实代码, 只替换"读盘"与网络, 因此可完全离线执行。
-      # 用例需要的 jq / base64 / awk 在 ubuntu-latest 上均自带。
+      # 用例需要的 jq / base64 / awk 在 runner 自带; LC_ALL/LANG 已在 job 级固定为 C.UTF-8。
       - name: 行为测试 (test/run_tests.sh)
         shell: bash
         run: |

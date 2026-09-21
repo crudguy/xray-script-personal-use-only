@@ -103,10 +103,14 @@
    2. Traffic statistics no longer depends on `numfmt` / `column` (neither is in the dependency list, so minimal systems failed outright); it is now pure `awk`.
    3. Non-interactive options such as `--health` / `--export-config` now really reach the core scripts through the entry point (previously they were silently dropped and fell back to the interactive menu).
    4. All ShellCheck legacy exceptions and ratchet baselines are cleared, and a `test/` behaviour-test step was added (subscription aggregation, traffic statistics formatting, subscription rebuild after config changes).
-   5. Subscriptions are rebuilt automatically after a config change: changing the domain / port / inbounds no longer requires regenerating them by hand. First-time users never get subscription files created out of nowhere, and a failed rebuild only warns — it never breaks a config change that already succeeded.
+   5. Subscriptions are rebuilt automatically after a config change: changing the domain / port / inbounds no longer requires regenerating them by hand. (That rebuild is still conditional on the files already existing — but a fresh install now generates them, see item 12.) A failed rebuild only warns — it never breaks a config change that already succeeded.
    6. The full health check gained a "subscription freshness" item in section 8: a subscription older than the config change is reported as `[WARN]`.
+12. Subscriptions are generated automatically after installation.
+   1. Quick install (`--vision` / `--xhttp` / `--fallback`, and menu "Full installation") plus the custom Xray-config and SNI install flows now write `subscription-base64.txt` / `subscription-clash.yaml` / `subscription-singbox.json` as soon as the install succeeds, and print their paths; the screen still shows the raw link and QR code for v2rayN-family clients.
+   2. Previously the install flow only ran `--share`, and the rebuild-on-config-change mechanism required the files to already exist — so a first-time install never produced them, and Clash / sing-box users had nothing to import until they happened to find menu item 11.
+   3. Generation is best-effort: a failure only warns and never rolls back or breaks an install that already succeeded.
 
-## Share Links
+## Share Link Format
 
 Implemented based on [VMessAEAD / VLESS share link proposal](https://github.com/XTLS/Xray-core/discussions/716) and [v2rayN](https://github.com/2dust/v2rayN). If other clients do not work, adjust based on the generated share link manually.
 
@@ -114,7 +118,7 @@ In SNI configuration, CDN share links use H2 as default ALPN. If you need H3, mo
 
 ## Subscription
 
-Menu item **11 → Generate subscription** aggregates every client inbound of the current mode into three subscription files, written atomically to `~/.xray-script-personal-use-only/` on the server (mode `0600`; no plaintext and no QR code is ever printed):
+Menu item **11 → Generate subscription** — and **automatic generation right after a successful install** — aggregates every client inbound of the current mode into three subscription files, written atomically to `~/.xray-script-personal-use-only/` on the server (mode `0600`; no plaintext and no QR code is ever printed):
 
 | File | Format | Clients |
 | --- | --- | --- |
@@ -124,7 +128,9 @@ Menu item **11 → Generate subscription** aggregates every client inbound of th
 
 All three traverse **every client inbound** of that mode (Fallback = 2, SNI = 5, other modes as many as the config has) — never just a single node. mKCP transport cannot be expressed in sing-box, so those nodes are skipped for that format and the skip count is reported. Subscription files are local artifacts: no URL is exposed and no extra listening port is opened.
 
-A subscription has the domain / port / UUID / SNI baked into it, so **any config change silently invalidates the old one** (clients keep dialling with the stale parameters). The script therefore rebuilds subscriptions at every config-write checkpoint: if subscription files already exist under `~/.xray-script-personal-use-only/`, they are regenerated after a config change; users who never generated a subscription never get files created out of nowhere. A failed rebuild only writes an audit entry and warns — it never fails a config change that already succeeded.
+A subscription has the domain / port / UUID / SNI baked into it, so **any config change silently invalidates the old one** (clients keep dialling with the stale parameters). The script therefore rebuilds subscriptions at every config-write checkpoint, and **also generates them once right after a successful install** — so a fresh deployment hands you all three files without an extra step, and later config changes keep them in sync. Generation is best-effort: a failure only warns, never breaking an install or config change that already succeeded.
+
+For the difference between the on-screen share link and these files, how to copy them off the server, and client-by-client import steps, see [Share Links, Subscription Files & Clients](#share-links-subscription-files--clients).
 
 To check whether the subscription in hand is stale, run **menu → 10 Full health check**: section 8 compares the subscription's mtime against the config's and reports `[WARN]` when it lags behind; with no subscription generated it shows `[SKIP]` and does not count towards failures.
 
@@ -229,35 +235,68 @@ bash ${HOME}/xray-script-personal-use-only.sh --import-config /root/xray-backup.
 
 > **Note**: A few actions such as changing the port (`change-port`) and switching the CA (`ca-server`) remain **interactive menu items** and do not yet have a public unattended flag. All other frequent operations — health check / start / stop / restart / share / subscription / export / import — already support unattended invocation.
 
-## Supported Clients
+## Share Links, Subscription Files & Clients
 
-This script generates three subscription formats for different clients. After installation, generate them via the menu "Share links & QR / Generate subscription" or `--subscription`; the files are written to `~/.xray-script-personal-use-only/` with mode `0600` (they contain secrets such as uuid / password / public key — keep them safe and do not leak them).
+After installation you get two kinds of output at once: **share links printed on screen** (scan or copy them directly) and **three subscription files on the server** (covering every node).
 
-### Choose a client by system
+### 1. On screen: share links
 
-| System | Recommended client | Subscription formats |
+Printed when the install finishes, and reproducible anytime via the menu "Share links & QR codes" or `--share`.
+
+| Output | Description |
+| --- | --- |
+| `vless://…` / `trojan://…` link | Carries UUID, address, port, Reality public key, SNI, flow and everything else; the trailing `#tag` is the node name |
+| Terminal QR code | ANSI QR of that same link — scannable directly from a phone (needs `qrencode` on the server; if missing it only warns, never aborts) |
+| How many links | 1 for normal modes; **2 for Fallback** (Vision + XHTTP); **5 for SNI** (incl. upstream/downstream split and CDN) |
+
+Two extra flags for `--share`:
+
+- `--share --save`: writes the link and client config to `~/.xray-script-personal-use-only/share-link.txt` with mode `0600`, and **prints no plaintext or QR on screen** (use it when you want to keep a copy without spraying secrets across the terminal).
+- `--share --no-qr`: prints the link only, no QR code (good for logs / cron).
+
+> Screen output **contains secrets** — the script warns before the first link is printed. Be careful with screen recording, screen sharing and terminal scrollback.
+
+### 2. On the server: three subscription files
+
+**Generated automatically right after installation** into `~/.xray-script-personal-use-only/` with mode `0600` (they contain UUID / password / public key — keep them safe and do not leak them). Rebuilt automatically on config changes, and refreshable anytime via menu item 11 or `--subscription`.
+
+| File | Format | Description |
 | --- | --- | --- |
-| Windows | **v2rayN** or **Clash Verge Rev** (NekoBox as alternative) | base64 / Clash |
-| macOS | **NekoBox** or **Clash Verge Rev** (v2rayN cross-platform as alternative) | base64 / Clash |
-| Linux | **v2rayN** or **NekoBox** (Clash Verge Rev as alternative) | base64 / Clash |
-| Android | **v2rayNG** or **NekoBox** (Clash for Android / sing-box as alternative) | base64 / Clash / sing-box |
-| iOS | **FoXray** or **Shadowrocket / Stash** (NekoBox / sing-box as alternative) | base64 / Clash / sing-box |
+| `subscription-base64.txt` | v2rayN-style base64 (single line) | Every node + XHTTP extra |
+| `subscription-clash.yaml` | Clash / mihomo YAML | Includes proxy-groups and direct rules |
+| `subscription-singbox.json` | sing-box outbound JSON | Works across all sing-box platforms |
 
-### Three subscription formats
+Difference from the screen links: the subscription files walk **every client inbound** of the current mode (custom / multi-inbound configs are never truncated), whereas the screen link prints only the first inbound in normal modes.
 
-| File | Format | Supported clients |
-| --- | --- | --- |
-| `subscription-base64.txt` | v2rayN-style base64 subscription (all nodes + XHTTP extra) | v2rayN (all platforms) / NekoBox / FoXray |
-| `subscription-clash.yaml` | Clash subscription (YAML) | Clash Verge Rev / Clash for Windows / Clash for Android / Stash / NekoBox (Clash mode) |
-| `subscription-singbox.json` | sing-box subscription (JSON) | sing-box (all platforms, incl. SFA / desktop) |
+**How to get the files onto your device** (the script exposes no subscription URL and opens no extra port — the files live on the server only):
 
-### Usage notes
+- **Copy and paste** (easiest; base64 is a single line):
+  `cat ~/.xray-script-personal-use-only/subscription-base64.txt`
+- **Download to your computer**:
+  `scp root@<server-ip>:~/.xray-script-personal-use-only/subscription-clash.yaml ./`
+  (on Windows use WinSCP / FinalShell / Xshell's built-in sftp)
+- **Onto a phone**: send the contents of `subscription-base64.txt` or `subscription-singbox.json` to yourself over a channel you trust, then use the client's "Import from file".
 
-- **How to import**: In the client choose "Subscription / Import from link / Import from file", then paste the share link or import the file above.
-- **XHTTP mode warning**: If the server uses `VLESS + XHTTP + REALITY`, the client **must disable global mux.cool** (both v2rayN and v2rayNG have this setting), otherwise it cannot connect to the newer Xray server.
-- **sing-box has no mKCP**: If you enabled an mKCP config, the sing-box subscription automatically skips those nodes (the rest work normally).
+### 3. How to use each client
+
+| System | Recommended client | Use this | How to import |
+| --- | --- | --- | --- |
+| Windows | **v2rayN** | Screen link or `base64` | Copy the `vless://` link → "Servers → Import from clipboard"; or add the base64 content under "Subscription group settings" |
+| Windows / macOS | **Clash Verge Rev** | `subscription-clash.yaml` | "Profiles" → import / new → pick the local YAML file (or paste its content) |
+| Win / mac / Linux | **NekoBox / Nekoray** | `base64` or `clash.yaml` | Pick by active core: v2ray core → base64 link, Clash core → YAML |
+| Android | **v2rayNG** | Screen QR or `base64` | Scan the QR; or "Subscription → add subscription" with the base64 content / import from file |
+| Android | **Clash for Android / sing-box** | `clash.yaml` / `singbox.json` | "Profiles → import from file" |
+| iOS | **FoXray** | Screen link or `base64` | "Import from clipboard", or import from QR / file |
+| iOS | **Shadowrocket / Stash** | Screen link or `clash.yaml` | Paste the link; Stash can import the YAML directly |
+| All platforms | **sing-box** (SFA / SFM / desktop) | `subscription-singbox.json` | Import the JSON config (SFA supports QR or file import) |
+
+### 4. Usage notes and known limits
+
+- **XHTTP mode: disable global mux.cool on the client** (both v2rayN and v2rayNG have this switch), otherwise it cannot connect to the newer Xray server.
+- **sing-box has no mKCP**: with an mKCP config the sing-box subscription skips those nodes automatically (the rest work; the skip count is reported at generation time).
 - **Clash / sing-box carry the primary connection only**: XHTTP downlink acceleration (extra) is Xray-specific and is preserved only in the base64 link; it does not take effect under Clash / sing-box.
-- Subscriptions are **rebuilt automatically** after a config change; you can also regenerate them anytime via `--subscription` or the menu item.
+- **Subscriptions are rebuilt automatically on config changes.** If you suspect the copy in hand is stale, run menu → 10 "Full health check": section 8 compares the subscription's mtime against the config's and reports `[WARN]` when it lags behind.
+- **Generated automatically after installation**: a first install writes all three files and prints their paths, so no manual step is needed; afterwards they are rebuilt automatically on config changes, and you can regenerate them anytime via `--subscription` or the menu item.
 
 ## Script UI
 

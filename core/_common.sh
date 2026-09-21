@@ -712,6 +712,17 @@ function _download_verified() {
         tmp_dir="${TMPDIR:-/tmp}"
     fi
 
+    # 摘要缺失守卫 (2026-09-21 增设)
+    # 这一步若在静默中被跳过, 就等价于 acme.sh 当年那个 P0: 只剩"体积≥512B + bash -n"
+    # 两道弱校验, 而下载物随后会被执行。跳过摘要属于明确的降级选择 (即"跟随上游最新版"),
+    # 必须在 stderr 上显性告知 —— 本函数的 stdout 只输出待用文件路径, 告警走 stderr 不会污染。
+    if [[ -z "${expect_sha256}" ]]; then
+        print_warn "$(_i18n '.common.download.no_sha256')"
+        if [[ -n "${GH_PROXY:-}" ]]; then
+            print_warn "$(_i18n '.common.download.via_proxy')"
+        fi
+    fi
+
     # 创建 0600 临时文件 (mktemp 默认权限即为仅属主可读写)
     tmp_file="$(mktemp "${tmp_dir%/}/.${SCRIPT_NAME}-dl.XXXXXXXX")" || return 1
 

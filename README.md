@@ -63,7 +63,7 @@ Xray 版本可选最新版、稳定版或自选版。
 - 分享链接与二维码、信息统计
 - BBR 与内核网络加速：开启或修复 BBR（幂等）、只读网络体检、内核网络高并发调优、文件句柄上限
 - 一键全量体检：八个分区全程只读，退出码 `0`/`1` 可直接用于告警，含订阅新鲜度检查
-- 订阅生成：base64 / Clash / sing-box 三种格式写入 `~/.xray-script-personal-use-only/`，权限 `0600`；配置变更后自动重建
+- 订阅生成：base64 / Clash / sing-box 三种格式写入 `~/.xray-script-personal-use-only/`，权限 `0600`；**安装完成后自动生成**，配置变更后自动重建
 
 ### 备份与迁移
 
@@ -163,35 +163,67 @@ bash ~/xray-script-personal-use-only.sh --export-config --with-docker --yes
 
 > **注意**：改端口（`change-port`）、切换 CA（`ca-server`）等仍为**交互菜单项**，公开入口暂未提供非交互参数；如需 `bash ... --change-port` 形式的调用可继续补转发。其它高频运维动作（体检 / 启停 / 分享 / 订阅 / 导出导入）均已支持非交互。
 
-## 支持的客户端
+## 分享链接、订阅文件与客户端使用
 
-本脚本生成三种订阅格式，分别适配不同客户端。安装完成后通过菜单「分享链接与二维码 / 生成订阅」或 `--subscription` 生成，文件写入 `~/.xray-script-personal-use-only/`，权限 `0600`（含 uuid / 密码 / 公钥等敏感信息，请妥善保管、勿外泄）。
+安装完成后你会同时拿到两类产物：**屏幕上的分享链接**（可直接扫码 / 复制）和**服务器上的三个订阅文件**（覆盖全部节点）。
 
-### 按系统选择客户端
+### 一、屏幕输出：分享链接
 
-| 系统 | 推荐客户端 | 适用订阅格式 |
+安装结束时直接打印；之后可用菜单「分享链接与二维码」或 `--share` 随时重现。
+
+| 产物 | 说明 |
+| --- | --- |
+| `vless://…` / `trojan://…` 链接 | 含 UUID、地址、端口、Reality 公钥、SNI、flow 等全部参数，末尾 `#标签` 即节点名 |
+| 终端二维码 | 同一条链接的 ANSI 二维码，手机端可直接扫（需服务器装有 `qrencode`，缺失时只告警、不中断） |
+| 打印条数 | 普通模式 1 条；**Fallback 2 条**（Vision + XHTTP）；**SNI 5 条**（含上下行分离与 CDN） |
+
+`--share` 的两个附加参数：
+
+- `--share --save`：把链接与客户端配置按 `0600` 写入 `~/.xray-script-personal-use-only/share-link.txt`，**屏幕不再打印明文与二维码**（想留存又不想明文上屏时用这个）。
+- `--share --no-qr`：只打印链接、不出二维码（适合写进日志 / cron）。
+
+> 屏幕输出**含密钥**，首次打印前脚本会给出泄露提示；录屏、共享屏幕或终端回滚时请注意。
+
+### 二、服务器上的三个订阅文件
+
+**安装完成后自动生成**，落在 `~/.xray-script-personal-use-only/`，权限 `0600`（含 UUID / 密码 / 公钥，请勿外泄）。配置变更会自动重建，也可随时用菜单 11 或 `--subscription` 手动刷新。
+
+| 文件 | 格式 | 说明 |
 | --- | --- | --- |
-| Windows | **v2rayN** 或 **Clash Verge Rev**（备选 NekoBox） | base64 / Clash |
-| macOS | **NekoBox** 或 **Clash Verge Rev**（备选 v2rayN 跨平台版） | base64 / Clash |
-| Linux | **v2rayN** 或 **NekoBox**（备选 Clash Verge Rev） | base64 / Clash |
-| Android | **v2rayNG** 或 **NekoBox**（备选 Clash for Android / sing-box） | base64 / Clash / sing-box |
-| iOS | **FoXray** 或 **Shadowrocket / Stash**（备选 NekoBox / sing-box） | base64 / Clash / sing-box |
+| `subscription-base64.txt` | v2rayN 风格 base64（单行） | 含全部节点与 XHTTP extra |
+| `subscription-clash.yaml` | Clash / mihomo YAML | 含 proxy-groups 与直连规则 |
+| `subscription-singbox.json` | sing-box 出站 JSON | sing-box 全平台通用 |
 
-### 三种订阅格式
+与屏幕链接的区别：订阅文件会**遍历当前模式的全部客户端入站**（自定义 / 多入站配置也不会漏节点），而屏幕链接普通模式只打印首个入站。
 
-| 文件 | 格式 | 适用客户端 |
-| --- | --- | --- |
-| `subscription-base64.txt` | v2rayN 风格 base64 订阅（含全部节点与 XHTTP extra） | v2rayN（全平台）/ NekoBox / FoXray |
-| `subscription-clash.yaml` | Clash 订阅（YAML） | Clash Verge Rev / Clash for Windows / Clash for Android / Stash / NekoBox（Clash 模式） |
-| `subscription-singbox.json` | sing-box 订阅（JSON） | sing-box（全平台，含 SFA / 桌面版） |
+**怎么把文件弄到你的设备上**（脚本不开放订阅 URL、不额外监听端口，文件只存在服务器本机）：
 
-### 使用要点
+- **复制粘贴**（最省事，base64 是单行）：
+  `cat ~/.xray-script-personal-use-only/subscription-base64.txt`
+- **下载到电脑**：
+  `scp root@<服务器IP>:~/.xray-script-personal-use-only/subscription-clash.yaml ./`
+  （Windows 可用 WinSCP / FinalShell / Xshell 自带的 sftp）
+- **传到手机**：把 `subscription-base64.txt` 或 `subscription-singbox.json` 的内容用你信任的方式发到手机，再用客户端「从文件导入」。
 
-- **导入方式**：在客户端中选择「订阅 / 从链接导入 / 从文件导入」，粘贴分享链接或直接导入上述文件即可。
-- **XHTTP 模式特别注意**：若服务端使用 `VLESS + XHTTP + REALITY`，客户端**必须关闭全局 mux.cool**（v2rayN 与 v2rayNG 均有此设置），否则无法连上新版 Xray 服务端。
-- **sing-box 不支持 mKCP**：若你启用了 mKCP 配置，sing-box 订阅会自动跳过这些节点（其余节点正常）。
-- **Clash / sing-box 仅含主连接**：XHTTP 下行加速（extra）是 Xray 专有特性，仅保留在 base64 链接中；使用 Clash / sing-box 时 XHTTP 的下行加速不生效。
-- 配置变更后订阅会**自动重建**，无需手动重新生成；也可随时执行 `--subscription` 或菜单项手动刷新。
+### 三、各客户端怎么用
+
+| 系统 | 推荐客户端 | 用哪个产物 | 导入方式 |
+| --- | --- | --- | --- |
+| Windows | **v2rayN** | 屏幕链接 或 `base64` | 复制 `vless://` 链接 → 「服务器 → 从剪贴板导入」；或把 base64 内容加入「订阅分组设置」 |
+| Windows / macOS | **Clash Verge Rev** | `subscription-clash.yaml` | 「配置」→ 导入 / 新建 → 选择本地 YAML 文件（或粘贴内容） |
+| Win / mac / Linux | **NekoBox / Nekoray** | `base64` 或 `clash.yaml` | 按当前内核二选一：v2ray 内核用 base64 链接，Clash 内核用 YAML |
+| Android | **v2rayNG** | 屏幕二维码 或 `base64` | 直接扫码；或「订阅 → 添加订阅」导入 base64 内容 / 从文件导入 |
+| Android | **Clash for Android / sing-box** | `clash.yaml` / `singbox.json` | 「配置 → 从文件导入」 |
+| iOS | **FoXray** | 屏幕链接 或 `base64` | 「从剪贴板导入」或「从二维码 / 文件导入」 |
+| iOS | **Shadowrocket / Stash** | 屏幕链接 或 `clash.yaml` | 粘贴链接；Stash 可直接导入 YAML 配置 |
+| 全平台 | **sing-box**（SFA / SFM / 桌面版） | `subscription-singbox.json` | 导入 JSON 配置（SFA 支持扫码或文件导入） |
+
+### 四、使用要点与已知限制
+
+- **XHTTP 模式必须关闭客户端全局 mux.cool**（v2rayN 与 v2rayNG 均有此开关），否则连不上新版 Xray 服务端。
+- **sing-box 不支持 mKCP**：启用 mKCP 时 sing-box 订阅会自动跳过这些节点（其余正常，跳过数量在生成时提示）。
+- **Clash / sing-box 仅含主连接**：XHTTP 下行加速（extra）是 Xray 专有特性，只保留在 base64 链接中；用 Clash / sing-box 时该加速不生效。
+- **订阅随配置变更自动重建**；若怀疑手上的订阅已过期，跑菜单 10「一键全量体检」，第 8 分区会比较订阅与配置的修改时间，落后则报 `[WARN]`。
 
 ## 安装位置
 

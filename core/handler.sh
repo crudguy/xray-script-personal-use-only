@@ -3222,6 +3222,11 @@ function handler_quick_install() {
     handler_restart
     # 显示分享链接
     handler_share
+    # 安装完成后顺带生成订阅三件套 (base64/Clash/sing-box), 让用户一次拿到所有客户端可用的配置:
+    # v2rayN/NekoBox/FoXray 用 base64 链接, Clash 用 YAML, sing-box 用 JSON。订阅是配置的"派生快照",
+    # 此处首次生成后, 后续配置变更由 refresh_subscription_after_config_change 自动重建。
+    # 用 || true 兜底: 订阅生成异常不应中断已成功的安装 (best-effort, 与刷新机制一致)。
+    handler_subscription || true
 }
 
 # =============================================================================

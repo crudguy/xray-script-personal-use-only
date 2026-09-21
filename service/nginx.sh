@@ -478,6 +478,12 @@ function source_compile() {
     # 从 GitHub API 获取最新的 Nginx release 标签名
     local nginx_version
     nginx_version="$(wget -qO- --timeout=30 --tries=2 "$(_gh_url 'https://api.github.com/repos/nginx/nginx/tags')" | grep 'name' | cut -d\" -f4 | grep 'release' | head -1 | sed 's/release/nginx/' || true)"
+    # 白名单校验: 标签经 `sed 's/release/nginx/'` 后应为 nginx-x.y.z; 未校验就流入下方
+    # eval (nginx.sh 内 _error_detect 的 `curl -o ${nginx_version}...`), 一旦 GitHub API
+    # 被劫持/返回异常, 可能注入命令 (与 openssl_version 的约束对齐, 纵深防御)。
+    if [[ -z "${nginx_version}" || ! "${nginx_version}" =~ ^nginx-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        print_error "$(_i18n '.nginx.compile.bad_nginx_version')"
+    fi
     # 获取最新的 OpenSSL 标签名 (格式为 openssl-x.y.z)
     local openssl_version
     openssl_version="openssl-$(wget -qO- --timeout=30 --tries=2 "$(_gh_url 'https://api.github.com/repos/openssl/openssl/tags')" | grep 'name' | cut -d\" -f4 | grep -Eoi '^openssl-([0-9]\.?){3}$' | head -1 || true)"

@@ -144,6 +144,9 @@ function processes_web_config() {
         exec_handler '--xray-config' "${web}" # 配置 Xray 使用选定的 web 类型
         exec_handler '--restart'              # 重启 Xray 服务
         exec_handler '--share'                # 显示分享链接
+        # SNI 安装完成后同样生成订阅三件套 (base64/Clash/sing-box), 让用户一次拿到所有客户端配置。
+        # best-effort, 失败不中断安装。
+        bash "${CUR_DIR}/share.sh" --subscription || true
     fi
 }
 
@@ -220,6 +223,9 @@ function processes_xray_config() {
         exec_handler '--xray-config'                    # 配置 Xray
         exec_handler '--restart'                        # 重启 Xray 服务
         exec_handler '--share'                          # 显示分享链接
+        # 安装完成后顺带生成订阅三件套 (base64/Clash/sing-box): Clash/sing-box 不能直接吃屏幕裸链接,
+        # 必须靠订阅文件; 首次安装特意生成, 之后配置变更由刷新机制自动重建。best-effort, 失败不中断安装。
+        bash "${CUR_DIR}/share.sh" --subscription || true
     fi
 }
 

@@ -14,7 +14,7 @@ SRC='install.sh'
 if [[ ! -r "$SRC" && -r "${0%/*}/../$SRC" ]]; then cd "${0%/*}/.." || exit 1; fi
 # 项目根: 优先取调用方传入的 PROJ_ROOT (沙箱内层 bash 的 $PWD 可能被 shim 破坏), 否则回退 $PWD
 ROOT_DIR="${PROJ_ROOT:-${PWD:-}}"
-TMPD="$ROOT_DIR/.workbuddy/tmp/install_upd_$$"; rm -rf "$TMPD"; mkdir -p "$TMPD"
+TMPD="$ROOT_DIR/test/.tmp/install_upd_$$"; rm -rf "$TMPD"; mkdir -p "$TMPD"
 trap 'rm -rf "$TMPD" 2>/dev/null || true' EXIT
 [[ -r "$SRC" ]] || { bad "找不到 $SRC"; echo "PASS=$PASS FAIL=$FAIL"; exit 1; }
 

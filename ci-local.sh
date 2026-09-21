@@ -21,6 +21,14 @@
 
 set -uo pipefail   # 不放 -e: 行为测试自行管理成败, 由末尾 exit 决定
 
+# ⚠️ 与 CI 对齐: shellcheck.yml 在 job 级固定 LC_ALL/LANG=C.UTF-8。
+# menu_title_test 用 GNU `wc -L` 作为 CJK 双宽断言的独立基准, 该基准只在
+# UTF-8 locale 下对中文返回 4 (C/POSIX 下返回 0); 若本地继承到 C/POSIX,
+# 测试会静默跳过这套断言, 给出"假绿"且和 CI 对不上。这里显式固定, 让本地
+# 复现忠实于 CI。主机若未装 C.UTF-8, glibc 会回退并发警告, 不影响其它检查。
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
+
 ROOT="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
 cd "$ROOT" || exit 1
 
@@ -75,10 +83,28 @@ else
   echo; echo ">>> [3/4] ShellCheck 门禁 (-S warning)"
   if command -v docker >/dev/null 2>&1; then
     echo "  使用 docker: koalaman/shellcheck:v0.10.0"
-    docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.10.0 \
-      -S warning -f gcc "${sh_files[@]}"
-    rc=$?
-    [ "$rc" -ne 0 ] && exit "$rc"
+    if docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.10.0 \
+      -S warning -f gcc "${sh_files[@]}"; then
+      : # 门禁通过
+    else
+      rc=$?
+      # rc==1 是 ShellCheck 真发现(门禁未过), 与 CI 一致, 必须失败;
+      # 其余(125/126/127 等)是 docker 基础设施失败, 多为离线拉取镜像失败。
+      # 本地复现应优雅降级而非中断整轮: 先回退本地 shellcheck, 再不行则跳过。
+      if [ "$rc" -eq 1 ]; then
+        exit 1
+      fi
+      echo "  ⚠️ docker 运行 ShellCheck 失败(rc=$rc), 多为离线无法拉取镜像。"
+      if command -v shellcheck >/dev/null 2>&1; then
+        echo "     回退使用本地 shellcheck: $(command -v shellcheck)"
+        shellcheck -S warning -f gcc "${sh_files[@]}"
+        rc2=$?
+        [ "$rc2" -ne 0 ] && exit "$rc2"
+      else
+        echo "     且本地无 shellcheck 二进制, 跳过 ShellCheck 门禁(离线/无 registry 访问)。"
+        echo "     想跑真 ShellCheck: 联网拉取镜像, 或 brew/apt 安装 shellcheck。"
+      fi
+    fi
   elif command -v shellcheck >/dev/null 2>&1; then
     echo "  使用本地 shellcheck: $(command -v shellcheck)"
     shellcheck -S warning -f gcc "${sh_files[@]}"

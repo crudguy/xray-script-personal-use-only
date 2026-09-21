@@ -65,8 +65,8 @@ assert_contains "block has hint branch" "$BLOCK" 'qr_missing'
 
 # 注: 不用 mktemp -d —— Windows/Git-Bash 下它可能返回 "C:/..." 风格路径, MSYS 工具
 #     无法解析(尤其 chmod +x 与 PATH 查找), 会让"存在 qrencode"场景假失败。
-#     改用项目约定的 .workbuddy/tmp/ 下固定目录, 路径可被 MSYS 正常解析。
-TMPD="$ROOT/.workbuddy/tmp/share_qr_test.$$"
+#     改用项目约定的 test/.tmp/ 下固定目录, 路径可被 MSYS 正常解析。
+TMPD="$ROOT/test/.tmp/share_qr_test.$$"
 rm -rf "$TMPD" 2>/dev/null || true
 mkdir -p "$TMPD/empty" "$TMPD/bin"
 trap 'rm -rf "$TMPD" 2>/dev/null || true' EXIT

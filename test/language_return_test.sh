@@ -80,8 +80,8 @@ assert_contains "fn _return_to_menu extracted"    "$FN_RTM" '_return_to_menu'
 assert_contains "rtm enters main loop"            "$FN_RTM" 'processes_index'
 
 # 注: 不用裸 mktemp -d —— Windows/Git-Bash 下可能返回 "C:/..." 风格路径, MSYS 无法解析。
-#     改用项目内固定目录(约定 .workbuddy/tmp/)。
-TMPD="$ROOT/.workbuddy/tmp/language_return.$$"
+#     改用项目内固定目录(约定 test/.tmp/)。
+TMPD="$ROOT/test/.tmp/language_return.$$"
 rm -rf "$TMPD" 2>/dev/null || true
 mkdir -p "$TMPD"
 trap 'rm -rf "$TMPD" 2>/dev/null || true' EXIT

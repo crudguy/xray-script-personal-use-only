@@ -17,8 +17,10 @@
 # =============================================================================
 set -u
 
-SB=".workbuddy/tmp/i18n_parity_sb"
+SB="test/.tmp/i18n_parity_sb"
 rm -rf "$SB"; mkdir -p "$SB"
+# EXIT trap: 断言失败提前退出时也要收掉沙箱, 否则多次运行会不断累积残留目录
+trap 'rm -rf "$SB" 2>/dev/null || true' EXIT
 
 if [[ -n "${XRAY_TEST_SHIM:-}" && -d "${XRAY_TEST_SHIM}" ]]; then
     export PATH="${XRAY_TEST_SHIM}:${PATH}"

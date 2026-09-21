@@ -9,8 +9,10 @@
 # =============================================================================
 set -u
 
-SB=".workbuddy/tmp/unknown_option_sb"
+SB="test/.tmp/unknown_option_sb"
 rm -rf "$SB"; mkdir -p "$SB"
+# EXIT trap: 断言失败提前退出时也要收掉沙箱, 否则多次运行会不断累积残留目录
+trap 'rm -rf "$SB" 2>/dev/null || true' EXIT
 
 # 抽取顶层函数体: 从 `function NAME()` 到第一个列 0 的 `}` 结束
 extract() { # $1=file $2=funcname -> 输出到 stdout

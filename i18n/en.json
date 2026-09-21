@@ -699,6 +699,12 @@
       "no_probe_note": "Note: this check only reads local state, no outbound probing"
     }
   },
+  "common": {
+    "download": {
+      "no_sha256": "No SHA256 digest provided — digest verification skipped; the payload is trusted as-is and may be executed afterwards",
+      "via_proxy": "GH_PROXY is set, so the download goes through a third-party reverse proxy; without a pinned digest the proxy can substitute the payload"
+    }
+  },
   "docker": {
     "install": {
       "start": "Installing Docker",
@@ -817,7 +823,8 @@
       "pgp_fail": "Nginx source archive PGP signature verification failed: ${file}, please check your network and retry.",
       "pgp_no_gpg": "gpg not found; Nginx source archive PGP signature check skipped.",
       "pgp_skipped": "Nginx source archive PGP signature check skipped (NGINX_SIGNING_SKIP).",
-      "sha_unavailable": "Official checksum for ${file} unavailable; fell back to archive integrity check."
+      "sha_unavailable": "Official checksum for ${file} unavailable; fell back to archive integrity check.",
+      "bad_nginx_version": "Failed to resolve a valid Nginx version (expected nginx-x.y.z); compilation aborted to prevent command injection."
     },
     "install": {
       "start_install": "Installing Nginx.",

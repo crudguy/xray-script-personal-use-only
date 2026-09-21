@@ -699,6 +699,12 @@
       "no_probe_note": "说明: 本体检只读本机状态, 不发起外网探测"
     }
   },
+  "common": {
+    "download": {
+      "no_sha256": "未提供 SHA256 摘要, 已跳过摘要体检 —— 该下载物将被直接信任, 且后续可能被执行",
+      "via_proxy": "当前配置了 GH_PROXY, 下载将经由第三方反代; 未锁定摘要时, 代理方具备替换下载内容的能力"
+    }
+  },
   "docker": {
     "install": {
       "start": "正在安装 Docker",
@@ -817,7 +823,8 @@
       "pgp_fail": "Nginx 源码包 PGP 签名校验失败: ${file}，请检查网络后重试。",
       "pgp_no_gpg": "未检测到 gpg，已跳过 Nginx 源码包 PGP 签名校验。",
       "pgp_skipped": "已按 NGINX_SIGNING_SKIP 跳过 Nginx 源码包 PGP 签名校验。",
-      "sha_unavailable": "未能获取 ${file} 的官方摘要，已回退到压缩包完整性校验。"
+      "sha_unavailable": "未能获取 ${file} 的官方摘要，已回退到压缩包完整性校验。",
+      "bad_nginx_version": "未能解析到合法的 Nginx 版本号（期望格式 nginx-x.y.z），已终止编译以防命令注入风险。"
     },
     "install": {
       "start_install": "安装 Nginx。",

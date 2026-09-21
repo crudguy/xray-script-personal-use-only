@@ -24,9 +24,9 @@ assert_eq() { if [[ "$1" == "$2" ]]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)
 
 # --- 桩件 menu.sh: UI 走 stderr, 选择编号经 exit 返回 ---
 # 注: 不用裸 mktemp —— Windows/Git-Bash 下它可能返回 "C:/..." 风格路径, MSYS 无法
-#     解析, 且 set -e + 收尾 rm 失败会中止脚本。改用项目内固定目录(约定 .workbuddy/tmp/)。
-mkdir -p .workbuddy/tmp
-FAKE_MENU=".workbuddy/tmp/menu_dispatch_fake_menu.$$"
+#     解析, 且 set -e + 收尾 rm 失败会中止脚本。改用项目内固定目录(约定 test/.tmp/)。
+mkdir -p test/.tmp
+FAKE_MENU="test/.tmp/menu_dispatch_fake_menu.$$"
 cat > "$FAKE_MENU" <<'EOF'
 #!/usr/bin/env bash
 # 模拟 menu.sh: 渲染 UI 到 stderr, 选择编号经退出码返回

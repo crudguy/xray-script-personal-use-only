@@ -29,7 +29,7 @@ set -Eeuo pipefail
 REPO="$(cd -P -- "$(dirname -- "$0")/.." && pwd -P)"
 cd "$REPO"
 
-SB="$REPO/.workbuddy/tmp/eof_input.$$"
+SB="$REPO/test/.tmp/eof_input.$$"
 rm -rf "$SB" 2>/dev/null || true
 mkdir -p "$SB"
 trap 'rm -rf "$SB" 2>/dev/null || true' EXIT

@@ -16,9 +16,9 @@ MENU='core/menu.sh'
 if [[ ! -r "$MENU" && -r "${0%/*}/../$MENU" ]]; then
     cd "${0%/*}/.." || exit 1
 fi
-# 临时目录固定落在仓库 .workbuddy/tmp/ —— 不裸用 mktemp:
+# 临时目录固定落在仓库 test/.tmp/ —— 不裸用 mktemp:
 # Git-Bash 下 mktemp 会返回 C:\... 反斜杠路径, 既污染 PATH 又破坏 awk -v 转义.
-TMPD=".workbuddy/tmp/status_jq_$$"
+TMPD="test/.tmp/status_jq_$$"
 rm -rf "$TMPD"
 mkdir -p "$TMPD"
 trap 'rm -rf "$TMPD" 2>/dev/null || true' EXIT

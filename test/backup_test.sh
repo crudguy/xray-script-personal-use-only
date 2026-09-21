@@ -54,7 +54,7 @@ bad() {
 
 # ---------------------------------------------------------------------------
 # 0. 前置依赖: 本用例**自身**在顶层就用 jq 解析归档 manifest (不只是被测脚本里用),
-#    而本机 (Windows/MSYS) 默认没有 jq, 靠 .workbuddy/tmp/jqshim 垫片进 PATH。
+#    而本机 (Windows/MSYS) 默认没有 jq, 靠 test/.tmp/jqshim 垫片进 PATH。
 #    垫片没进 PATH 时, 顶层那些 jq 只会打出 "jq: command not found" 然后继续,
 #    断言全部拿着空串静默 FAIL —— 看起来像被测代码坏了, 实际是环境没配好。
 #    所以这里显式前置检查, 缺了就直接退出并给出正确命令。
@@ -63,8 +63,8 @@ for dep in bash tar gzip jq sha256sum; do
     if ! command -v "${dep}" >/dev/null 2>&1; then
         printf 'SKIP: 缺少依赖 %s\n' "${dep}" >&2
         printf '  本机 (MSYS) 需把 jq 垫片带进 PATH, 正确调用方式:\n' >&2
-        printf '    PATH="$PWD/.workbuddy/tmp/jqshim:$PATH" \\\n' >&2
-        printf '    XRAY_TEST_SHIM="$PWD/.workbuddy/tmp/jqshim" bash test/backup_test.sh\n' >&2
+        printf '    PATH="$PWD/test/.tmp/jqshim:$PATH" \\\n' >&2
+        printf '    XRAY_TEST_SHIM="$PWD/test/.tmp/jqshim" bash test/backup_test.sh\n' >&2
         exit 3
     fi
 done
@@ -128,7 +128,7 @@ patch_backup "${SB}/tool/backup.sh"
 #
 # jq 垫片怎么进 PATH: _common.sh 会把 PATH **整体覆盖**为固定白名单 (/bin:/sbin:
 # /usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/snap/bin), 白名单外的目录
-# (含本机的 .workbuddy/tmp/jqshim) 会被抹掉, 于是子进程里找不到 jq。白名单里唯一
+# (含本机的 test/.tmp/jqshim) 会被抹掉, 于是子进程里找不到 jq。白名单里唯一
 # 可写的是 `~/bin`, 而本用例的 HOME 指向沙箱 —— 所以把垫片软链到 ${SB}/home/bin/jq。
 if [[ -n "${XRAY_TEST_SHIM:-}" && -x "${XRAY_TEST_SHIM}/jq" ]]; then
     mkdir -p "${SB}/home/bin"

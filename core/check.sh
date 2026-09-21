@@ -206,11 +206,29 @@ function dns_resolution() {
 # 返回值: 0-连接成功 1-连接失败 (由 /dev/tcp 操作的退出码决定)
 # =============================================================================
 function test_tcp_connection() {
+    local host="${1:-}"
+    local port="${2:-}"
+    # 参数缺失时无需尝试连接: /dev/tcp//443 这类空 host 只会产生无意义的报错
+    [[ -n "${host}" && -n "${port}" ]] || return 1
     # 尝试打开到 host:port 的 TCP 连接，将输出重定向到 /dev/null
     # 成功则返回 0，失败（如连接被拒绝、超时）则返回非 0
     # 以重定向本身是否成功作为连接成败依据。
     # 注: 原来写 `return $?`, 会被读成"echo 的返回值"(SC2320) 且语义含糊。
-    if echo >/dev/tcp/"${1:-}"/"${2:-}" 2>/dev/null; then
+    #
+    # 超时保护: bash 内建的 /dev/tcp **没有超时概念** —— 对端若直接 DROP 数据包
+    #   (防火墙常见策略), connect 会一直阻塞到系统级 TCP 超时 (实测可达 ~2 分钟),
+    #   期间 --domain 校验与体检整体卡死且无任何提示。
+    #   这里用 coreutils 的 timeout 包一层子 shell 强制限时; 若系统没有 timeout
+    #   (极简镜像) 则退回原行为 —— 宁可损失保底能力, 也不引入新的硬依赖。
+    if cmd_exists 'timeout'; then
+        # bash -c 的位置参数: $0 占位, $1=host, $2=port
+        if timeout "${TCP_CONNECT_TIMEOUT:-5}" \
+            bash -c 'echo >/dev/tcp/"$1"/"$2"' _ "${host}" "${port}" 2>/dev/null; then
+            return 0
+        fi
+        return 1
+    fi
+    if echo >/dev/tcp/"${host}"/"${port}" 2>/dev/null; then
         return 0
     fi
     return 1
@@ -474,7 +492,17 @@ function get_tls_info() {
     # 向域名的 443 端口发起 TLS 1.3 连接请求，并指定 ALPN 为 h2
     # 使用 echo QUIT 发送退出命令，stdbuf -oL 确保输出行缓冲
     # 2>&1 将错误输出合并到标准输出，tr -d '\0' 过滤掉空字节
-    echo QUIT | stdbuf -oL openssl s_client -connect "${1:-}:443" -tls1_3 -alpn h2 2>&1 | tr -d '\0'
+    #
+    # 超时保护: 与 test_tcp_connection 同理 —— 目标不可达/DROP 时 openssl s_client
+    #   会长时间挂住。用 timeout 强制限时 (超时返回 124), 使调用方能及时给出
+    #   "TLS 探测失败" 的结论, 而不是把整个体检拖成假死。
+    #   系统无 timeout 时退回原行为。
+    if cmd_exists 'timeout'; then
+        echo QUIT | timeout "${TLS_PROBE_TIMEOUT:-10}" \
+            stdbuf -oL openssl s_client -connect "${1:-}:443" -tls1_3 -alpn h2 2>&1 | tr -d '\0'
+    else
+        echo QUIT | stdbuf -oL openssl s_client -connect "${1:-}:443" -tls1_3 -alpn h2 2>&1 | tr -d '\0'
+    fi
 }
 
 # =============================================================================
@@ -729,7 +757,11 @@ function check_domain_security() {
     # 获取域名的 TLS 信息
     _test "$(_i18n ".${CUR_FILE}.tls.info"): ${domain}"
     local tls_info=''
-    tls_info=$(get_tls_info "$domain")
+    # 注: 必须 `|| true` —— 在 set -Eeuo pipefail 下, openssl 连接失败(或上面 timeout
+    #   杀掉它)会让整条管道返回非 0, 赋值语句随即触发 ERR trap 中断整个体检,
+    #   下面"取不到 TLS 信息就 _fail 提示"的分支**永远走不到**。
+    #   接住后, 失败表现为 tls_info 为空串, 正常落到下方的 _fail, 给出可读提示。
+    tls_info=$(get_tls_info "$domain" || true)
 
     # 检查是否支持 TLS 1.3
     if ! echo "$tls_info" | grep -q "TLSv1.3"; then

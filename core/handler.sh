@@ -1046,13 +1046,22 @@ function handler_routing() {
     local rule_tag="${rule_type}-${rule_target}" # 构造规则标签
     # 检查 WARP 状态是否满足配置要求
     # 如果是 warp 规则但 WARP 未启用，则报错
-    if [[ "${rule_type}" == 'warp' && ${WARP_STATUS} -ne 1 ]]; then
+    # 注: 用 is_enabled 而非 -ne 1 —— jq 对缺失/null 字段输出字面 "null",
+    #     参与算术比较会在 set -u 下崩溃 (见 _common.sh:is_enabled 说明)。
+    if [[ "${rule_type}" == 'warp' ]] && ! is_enabled "${WARP_STATUS}"; then
         _error "$(_i18n ".${CUR_FILE}.warp.status")"
     fi
     # 调用 exec_read 读取用户输入的规则值
+    # 注: exec_read 把结果写入 CONFIG_DATA (见 handler.sh:exec_read 末行), 不是 XRAY_CONFIG。
     exec_read "${rule_tag}"
     # 调用 add_rule 将规则添加到 Xray 配置中
-    add_rule "${rule_tag}" "${rule_target}" "${XRAY_CONFIG[${rule_tag}]}" "${rule_type}"
+    # 修复: 原取 ${XRAY_CONFIG[${rule_tag}]} 有双重错误 ——
+    #   1) XRAY_CONFIG 是**标量**(share.sh 声明, 存的是服务端配置 JSON 全文), 取下标
+    #      语义就不对, 用户输入根本不在这里;
+    #   2) 下标 "block-ip" 之类的字符串会触发 bash **算术求值**, 在 set -u 下直接
+    #      "block: 未绑定的变量" 崩溃 —— 路由菜单 3/4/5/6 从未真正执行过 add_rule。
+    # 现改为从 CONFIG_DATA 取用户实际输入, 并用 :- 兜住键缺失。
+    add_rule "${rule_tag}" "${rule_target}" "${CONFIG_DATA[${rule_tag}]:-}" "${rule_type}"
 }
 
 # =============================================================================
@@ -1383,7 +1392,9 @@ function handler_xray_config() {
     local XRAY_RULES
     XRAY_RULES="$(echo "${SCRIPT_CONFIG}" | jq -r '.rules')"                   # 获取路由规则
     local WARP_STATUS
-    WARP_STATUS="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.warp')"              # 获取 WARP 状态
+    # 注: 与其它取 WARP 状态的调用点保持一致加 `|| true` —— jq 失败时取空串即可,
+    #     不应让 set -e 把整个配置生成流程打断 (下方 is_enabled 会把空串当未启用)。
+    WARP_STATUS="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.warp' || true)"      # 获取 WARP 状态
     # 加载对应配置标签的 Xray 配置模板
     XRAY_CONFIG="$(jq '.' ${SCRIPT_XRAY_DIR}/${CONFIG_TAG}.json)"
     # 如果配置标签不是 sni，则更新端口
@@ -1457,13 +1468,17 @@ function handler_xray_config() {
         ;;
     1)
         # 重置并添加默认路由规则
-        [[ "${XRAY_RULES_BT}" -eq 1 ]] && add_rule "bt" "protocol" "bittorrent" "block" 1
-        [[ "${XRAY_RULES_CN}" -eq 1 ]] && add_rule "cn-ip" "ip" "geoip:cn" "block" "after" "private-ip"
-        [[ "${XRAY_RULES_AD}" -eq 1 ]] && add_rule "ad-domain" "domain" "geosite:category-ads-all" "block"
+        # 修复: 这三个值的实际取值是用户输入的 "Y" / "N" (见 exec_read 的默认处理),
+        #       不是数字 —— 原 `-eq 1` 遇到 "Y" 会触发算术求值并在 set -u 下崩溃
+        #       (实测: bash: Y: 未绑定的变量), 用户一旦选择"阻止 BT"就直接中断。
+        #       现统一走 is_enabled, 语义与写入脚本配置时的判定 ($bt != "n") 一致。
+        is_enabled "${XRAY_RULES_BT}" && add_rule "bt" "protocol" "bittorrent" "block" 1
+        is_enabled "${XRAY_RULES_CN}" && add_rule "cn-ip" "ip" "geoip:cn" "block" "after" "private-ip"
+        is_enabled "${XRAY_RULES_AD}" && add_rule "ad-domain" "domain" "geosite:category-ads-all" "block"
         ;;
     esac
     # 处理 WARP 状态
-    if [[ ${WARP_STATUS} -eq 1 ]]; then
+    if is_enabled "${WARP_STATUS}"; then
         # 获取 WARP 容器 IP
         local container_ip
         container_ip="$(exec_docker '--obtain-container-ip')"
@@ -2753,7 +2768,7 @@ function handler_warp() {
     # 从 Xray 配置文件加载配置
     XRAY_CONFIG="$(jq '.' "${XRAY_CONFIG_PATH}")"
     # 如果 WARP 已启用 (状态为 1)
-    if [[ ${WARP_STATUS} -eq 1 ]]; then
+    if is_enabled "${WARP_STATUS}"; then
         WARP_STATUS=0 # 设置状态为禁用
         # 调用 docker.sh 禁用 WARP 容器
         exec_docker '--disable-warp'
@@ -2796,7 +2811,7 @@ function handler_reset_warp() {
     # 从 Xray 配置文件加载配置
     XRAY_CONFIG="$(jq '.' "${XRAY_CONFIG_PATH}")"
     # 如果 WARP 已启用 (状态为 1)
-    if [[ ${WARP_STATUS} -eq 1 ]]; then
+    if is_enabled "${WARP_STATUS}"; then
         # 清空 WARP 容器日志数据
         exec_docker '--clean-container-logs'
         # 调用 docker.sh 禁用 WARP 容器

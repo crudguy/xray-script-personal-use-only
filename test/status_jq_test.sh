@@ -135,6 +135,16 @@ _i18n() {
     esac
 }
 sysctl() { return 1; }
+# print_status 现依赖 _common.sh 的 is_enabled 做开关归一化 (null/Y/N 安全)。
+# 本桩环境不加载 _common.sh, 故在此提供同语义实现, 保证被抽取的函数体可独立运行。
+# 实现须与 core/_common.sh:is_enabled 保持一致, 否则本测试将失去对生产的校验意义。
+is_enabled() {
+    local value="${1:-}"
+    case "${value,,}" in
+    1 | true | yes | y | on) return 0 ;;
+    *) return 1 ;;
+    esac
+}
 PRELUDE
 
 # 真实的 print_status 函数体

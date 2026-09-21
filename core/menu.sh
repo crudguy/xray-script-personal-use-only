@@ -404,7 +404,14 @@ function print_status() {
     # 根据配置标签是否存在，设置显示颜色和文本
     [[ ${CONFIG_TAG} ]] && CONFIG_TAG="${GREEN}${CONFIG_TAG}${NC}" || CONFIG_TAG="${RED}${not_configured}${NC}"
     # 根据 WARP 状态 (1 或 0)，设置显示颜色和文本
-    [[ ${WARP_STATUS} -eq 1 ]] && WARP_STATUS="${GREEN}${enabled}${NC}" || WARP_STATUS="${RED}${disabled}${NC}"
+    # 修复: 原 `-eq 1` 在字段缺失/为 null 时会崩溃 —— jq -r 输出的是字面 "null",
+    #       算术求值在 set -u 下报 "null: 未绑定的变量", 主菜单状态栏直接挂掉。
+    #       导入备份 / 手工编辑配置 / 跨版本迁移都可能让 .xray.warp 缺失, 必须兜住。
+    if is_enabled "${WARP_STATUS}"; then
+        WARP_STATUS="${GREEN}${enabled}${NC}"
+    else
+        WARP_STATUS="${RED}${disabled}${NC}"
+    fi
 
     # BBR 状态摘要: 只看"当前是否生效"。持久化文件是否落盘属于体检(v2 项)的
     # 内容, 主页面不展开 —— 否则每次渲染都得多读两个文件, 收益不成比例。

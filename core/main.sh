@@ -278,12 +278,14 @@ function processes_full_installation() {
     # 显示一键安装菜单
 
     local choose=0
-    local reply=''
     choose="$(exec_menu '--full')"
     # 根据用户选择执行不同操作
+    # 注: 空回车(默认)与显式选 1 都直接执行一键安装 —— 与菜单上
+    #     "1. 一键安装 (默认)" 标注一致, 避免此前"敲回车反而取消/卡在二次确认"的
+    #     反直觉陷阱 (用户敲回车期望选默认项, 却落到一个需再输 y 的确认, 再回车即取消)。
     case ${choose} in
     1)
-        # 选择 1：显式执行快速安装 Vision (用户已明确输入编号, 不再二次确认)
+        # 选择 1：一键安装 Vision
         exec_handler '--quick' 'Vision'
         ;;
     2)
@@ -291,16 +293,9 @@ function processes_full_installation() {
         processes_xray 'n'
         ;;
     *)
-        # 其他情况 (含空回车 = 界面标注为「默认」的一键安装)：安装动作不可逆,
-        # 需二次确认; 无输入源 (EOF, 如 cron/管道) 时保守取消, 直接返回主菜单。
-        # 注: 此前 1 与「默认」共用本分支, 空回车会静默触发不可逆安装, 与
-        #     用户"只是敲了个回车"的预期不符; P2-4 拆分为显式 1 + 默认确认。
-        printf '%s' "$(_i18n ".${CUR_FILE}.full_installation.confirm_default")" >&2
-        read -r reply || reply=''
-        case "${reply,,}" in
-        y | yes) exec_handler '--quick' 'Vision' ;;
-        *) return 0 ;;
-        esac
+        # 默认(空回车)与其它未明确列出的选择: 直接执行一键安装 Vision,
+        # 与菜单上 "1. 一键安装 (默认)" 标注一致, 避免此前"敲回车反而取消/卡在二次确认"的陷阱。
+        exec_handler '--quick' 'Vision'
         ;;
     esac
 }

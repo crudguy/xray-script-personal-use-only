@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 # =============================================================================
-# P2-4 子项① 回归守卫: 破坏性默认项 (一键安装) 的二次确认
+# 完整安装子菜单 "默认/空回车" 行为守卫
 #
-# 背景: core/main.sh 的 processes_full_installation 原实现中, 菜单项 1 与"其他情况"
-#       共用 `*)` 分支 -> 空回车会**静默执行不可逆的快速安装** (exec_handler --quick Vision)。
-#       界面虽以「默认」(menu.status.default) 标注该默认项, 但"敲个回车就把服务装了"
-#       与用户预期不符, 且不可逆。
+# 背景: 此前 (P2-4) 把"菜单项 1(显式直装)"与"默认/空回车(*)"拆分, 默认项进入二次确认,
+#       需再输 y 才装。但提示文案自相矛盾 —— 写着"直接回车将执行一键安装", 代码却是
+#       "回车 = 取消"。于是用户敲回车 (想用默认项) 反而被导向一个需再输 y 的确认,
+#       再敲回车即取消、退回主菜单, 体感"光标不动且没装上"。
 #
-# 修复: 拆出显式 `1)` 分支(直装); `*)`(空回车/默认项) 改为二次确认, 仅 y/yes 才安装,
-#       无输入源(EOF, 如 cron/管道)时保守取消并返回主菜单。
+# 修复 (用户选定 "回车即装"): 默认/空回车与显式选 1 都直接执行一键安装, 与菜单
+#       "1. 一键安装 (默认)" 标注一致, 移除误导性的二次确认。
 #
-# 本测试抽取 core/main.sh **真实函数体** + 桩件驱动, 覆盖:
-#   显式 1 / 显式 2 / 空回车 + y / Y / n / EOF / 无效值。
+# 本测试抽取 core/main.sh 真实函数体 + 桩件驱动, 覆盖: 显式 1 / 空回车(0) / 选 2 / 无效值(9)。
 # 纯 bash, 不依赖 jq。
 # =============================================================================
 set -uo pipefail
@@ -49,15 +48,16 @@ assert_not_contains() {
 
 echo "== 静态守卫: core/main.sh =="
 MAIN_SRC="$(cat "$MAIN")"
-assert_contains "refs confirm_default key" "$MAIN_SRC" 'confirm_default'
-assert_contains "has read confirm" "$MAIN_SRC" 'read -r reply'
-assert_contains "confirms on y | yes" "$MAIN_SRC" 'y | yes'
-assert_not_contains "no silent default install" "$MAIN_SRC" '其他情况 (包括 1 和默认)：执行快速安装 Vision'
+assert_not_contains "no confirm_default key" "$MAIN_SRC" 'confirm_default'
+assert_not_contains "no read reply confirm" "$MAIN_SRC" 'read -r reply'
+assert_contains "has explicit 1 branch" "$MAIN_SRC" '1)'
+assert_contains "has detailed 2 branch" "$MAIN_SRC" '2)'
+assert_contains "has default * branch" "$MAIN_SRC" '*)'
+assert_contains "default install target" "$MAIN_SRC" "exec_handler '--quick' 'Vision'"
 
 FN="$(awk '/^function processes_full_installation\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$MAIN")"
 assert_contains "fn extracted" "$FN" 'processes_full_installation'
-assert_contains "fn has read confirm" "$FN" 'read -r reply'
-assert_contains "fn installs only on y" "$FN" 'y | yes) exec_handler'
+assert_not_contains "fn no read reply" "$FN" 'read -r reply'
 
 # 注: 不用裸 mktemp -d —— Windows/Git-Bash 下可能返回 "C:/..." 风格路径, MSYS 无法解析。
 #     改用项目内固定目录(约定 test/.tmp/)。
@@ -68,15 +68,11 @@ trap 'rm -rf "$TMPD" 2>/dev/null || true' EXIT
 BASH_BIN="$(command -v bash)"
 printf '%s\n' "$FN" > "$TMPD/fn.sh"
 
-# 组装 runner: 桩件 + 真实函数体
+# 组装 runner: 桩件 + 真实函数体 (无 confirm 相关桩件)
 {
     printf '%s\n' 'set -Eeuo pipefail'
-    printf '%s\n' 'trap "echo TRAP_HIT >&2" ERR'
     printf '%s\n' 'CUR_FILE="main"'
-    printf '%s\n' '_i18n() { case "$1" in'
-    printf '%s\n' '  *confirm_default) printf "%s" "CONFIRM? ";;'
-    printf '%s\n' '  *) printf "%s" "";;'
-    printf '%s\n' 'esac; }'
+    printf '%s\n' '_i18n() { printf "%s" ""; }'
     printf '%s\n' 'exec_menu() { cat "${CHFILE}"; }'
     printf '%s\n' 'exec_handler() { printf "HANDLER %s\n" "$*"; }'
     printf '%s\n' 'processes_xray() { printf "XRAY %s\n" "$*"; }'
@@ -85,36 +81,27 @@ printf '%s\n' "$FN" > "$TMPD/fn.sh"
     printf '%s\n' 'echo "RC=$?"'
 } > "$TMPD/runner.sh"
 
-run() { # $1=choose值  $2=stdin内容(可空 -> EOF)
+run() { # $1=choose值 (exec_menu 桩件回显)
     printf '%s' "$1" > "$TMPD/ch"
-    printf '%s' "${2-}" | CHFILE="$TMPD/ch" "$BASH_BIN" "$TMPD/runner.sh" 2>&1
+    CHFILE="$TMPD/ch" "$BASH_BIN" "$TMPD/runner.sh" 2>&1
 }
 
 echo "== 行为: 显式选择 =="
-out1="$(run 1 '')"
+out1="$(run 1)"
 assert_contains "1 -> install" "$out1" "HANDLER --quick Vision"
 assert_not_contains "1 -> no confirm prompt" "$out1" "CONFIRM?"
-out2="$(run 2 '')"
+out2="$(run 2)"
 assert_contains "2 -> xray flow" "$out2" "XRAY n"
 assert_not_contains "2 -> no install" "$out2" "HANDLER"
 
-echo "== 行为: 空回车 + 确认 =="
-out0y="$(run 0 $'y\n')"
-assert_contains "empty + y -> prompt" "$out0y" "CONFIRM?"
-assert_contains "empty + y -> install" "$out0y" "HANDLER --quick Vision"
-out0Y="$(run 0 $'Y\n')"
-assert_contains "empty + Y -> install" "$out0Y" "HANDLER --quick Vision"
-out0n="$(run 0 $'n\n')"
-assert_contains "empty + n -> prompt" "$out0n" "CONFIRM?"
-assert_not_contains "empty + n -> no install" "$out0n" "HANDLER"
-out0eof="$(run 0 '')"
-assert_contains "empty + EOF -> prompt" "$out0eof" "CONFIRM?"
-assert_not_contains "empty + EOF -> no install" "$out0eof" "HANDLER"
-assert_not_contains "empty + EOF -> no ERR trap" "$out0eof" "TRAP_HIT"
+echo "== 行为: 空回车 (默认) =="
+out0="$(run 0)"
+assert_contains "empty -> install" "$out0" "HANDLER --quick Vision"
+assert_not_contains "empty -> no confirm prompt" "$out0" "CONFIRM?"
 
-echo "== 行为: 无效值 (保守) =="
-out9="$(run 9 $'n\n')"
-assert_not_contains "9 + n -> no install" "$out9" "HANDLER"
+echo "== 行为: 无效值 (回车即装, 与默认一致) =="
+out9="$(run 9)"
+assert_contains "9 -> install" "$out9" "HANDLER --quick Vision"
 
 echo
 echo "==== PASS=$PASS FAIL=$FAIL ===="

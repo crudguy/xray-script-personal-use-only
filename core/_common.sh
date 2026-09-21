@@ -64,10 +64,13 @@ PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/snap/bi
 export PATH
 
 # 定义颜色代码，用于在终端输出带颜色的信息
-readonly GREEN='\033[32m'  # 绿色
-readonly YELLOW='\033[33m' # 黄色
-readonly RED='\033[31m'    # 红色
-readonly NC='\033[0m'      # 无颜色（重置）
+# 注: 必须用 ANSI-C 引号 $'...' 让 \033 成为真正的 ESC 控制字符, 而非字面反斜杠序列。
+#     否则在 printf '%s' "${GREEN}" 这类"转义在参数里"的调用中会被原样打印成
+#     "\033[32m" 乱码 (菜单的 echo -e 路径能解释, 但体检查看的 printf %s 不能)。
+readonly GREEN=$'\033[32m'  # 绿色
+readonly YELLOW=$'\033[33m' # 黄色
+readonly RED=$'\033[31m'    # 红色
+readonly NC=$'\033[0m'      # 无颜色（重置）
 
 # 获取当前脚本的目录、文件名（不含扩展名）和项目根目录的绝对路径。
 # 注 1: 必须用 $0 而不是 BASH_SOURCE —— source 不会改变 $0, 因此 $0 始终是"最初被

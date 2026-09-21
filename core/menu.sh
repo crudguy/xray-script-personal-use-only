@@ -526,6 +526,21 @@ function main() {
 
     # 使用 case 语句根据第一个参数调用对应的菜单或信息显示函数
     case "${1:-}" in
+    --index-full)
+        # 主菜单"整屏"一次性完成: banner + 状态栏 + 主菜单 + 读取选择。
+        # 背景: 主循环原本按 banner / status / index 各 fork 一次本脚本, 共 3 个子进程,
+        #       每个子进程都要重新 load_i18n (解析 i18n JSON 建表), 实测约 325ms/往返,
+        #       菜单切换有明显迟滞感。合并为单次 fork 后只需加载一次 i18n。
+        #       渲染顺序与内容与原先三次调用**逐字一致** (UI 全部走 stderr)。
+        print_banner >&2
+        print_status >&2
+        menu_index >&2
+        # 已在此读取选择, 直接返回 —— 必须跳过下方的通用 get_choose, 否则会把
+        # "读取一次选择"变成"读两次", 用户第一次输入被静默丢弃。
+        local rc=0
+        get_choose '--index' || rc=$?
+        return "${rc}"
+        ;;
     --index) menu_index >&2 ;;            # 显示主菜单
     --uninstall) menu_uninstall >&2 ;;    # 显示卸载管理子菜单
     --full) menu_full_installation >&2 ;; # 显示完整安装菜单

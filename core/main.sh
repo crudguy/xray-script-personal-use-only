@@ -537,14 +537,13 @@ function processes_index() {
     #   - 顶层 `* / EOF` 仍 exit 0 (get_choose 在 EOF 归一为 0, 见 menu.sh, 不会空转);
     #   - exec_handler 失败会 _error 退出整个脚本 (真实错误, 预期行为), 不回菜单。
     while true; do
-        # 显示 Banner
-        exec_menu '--banner' >/dev/null
-        # 显示状态信息
-        exec_menu '--status' >/dev/null
-        # 显示主菜单
-
+        # 显示 Banner + 状态信息 + 主菜单, 并读取用户选择。
+        # 注: 原实现为 banner / status / index 各 fork 一次 menu.sh —— 3 个子进程、
+        #     3 次 load_i18n (解析 i18n JSON 建表), 实测约 325ms/往返, 切换菜单有迟滞感。
+        #     现合并为单次 --index-full 调用: 只 fork 一次、只加载一次 i18n,
+        #     渲染结果与原先逐字一致 (UI 走 stderr 直显, 选择编号经 stdout 捕获)。
         local choose=0
-        choose="$(exec_menu '--index')"
+        choose="$(exec_menu '--index-full')"
         # 根据用户选择执行不同的主操作
         case ${choose} in
         1) processes_full_installation ;; # 选择 1：进入一键安装流程

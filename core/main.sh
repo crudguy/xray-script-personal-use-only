@@ -287,6 +287,7 @@ function processes_full_installation() {
     1)
         # 选择 1：一键安装 Vision
         exec_handler '--quick' 'Vision'
+        echo -e "${GREEN}$( _i18n '.main.install_done_tip')${NC}"
         ;;
     2)
         # 选择 2：进入详细的 Xray 安装流程 (不立即执行安装)
@@ -301,6 +302,7 @@ function processes_full_installation() {
         # 默认(空回车)与其它未明确列出的选择: 直接执行一键安装 Vision,
         # 与菜单上 "1. 一键安装 (默认)" 标注一致, 避免此前"敲回车反而取消/卡在二次确认"的陷阱。
         exec_handler '--quick' 'Vision'
+        echo -e "${GREEN}$( _i18n '.main.install_done_tip')${NC}"
         ;;
     esac
 }

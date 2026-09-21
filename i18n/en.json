@@ -63,7 +63,8 @@
       "option1": "One-click Install",
       "option2": "Custom Configuration",
       "info1": "Stable version, Vision+Reality, block bt, cn, ads, enable geodata auto-update",
-      "info2": "Custom version, custom config"
+      "info2": "Custom version, custom config",
+      "option0": "Back to main menu"
     },
     "xray_version": {
       "title": "Xray Version",

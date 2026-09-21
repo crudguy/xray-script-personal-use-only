@@ -63,7 +63,8 @@
       "option1": "一键安装",
       "option2": "自定义配置",
       "info1": "稳定版, Vision+Reality, 屏蔽 bt, cn, 广告, 开启 geodata 自动更新",
-      "info2": "自选版本,自选配置"
+      "info2": "自选版本,自选配置",
+      "option0": "返回主菜单"
     },
     "xray_version": {
       "title": "装载管理",

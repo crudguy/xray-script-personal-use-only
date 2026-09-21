@@ -54,6 +54,7 @@ assert_contains "has explicit 1 branch" "$MAIN_SRC" '1)'
 assert_contains "has detailed 2 branch" "$MAIN_SRC" '2)'
 assert_contains "has default * branch" "$MAIN_SRC" '*)'
 assert_contains "default install target" "$MAIN_SRC" "exec_handler '--quick' 'Vision'"
+assert_contains "has explicit 0->return (255) branch" "$MAIN_SRC" '255)'
 
 FN="$(awk '/^function processes_full_installation\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$MAIN")"
 assert_contains "fn extracted" "$FN" 'processes_full_installation'
@@ -102,6 +103,10 @@ assert_not_contains "empty -> no confirm prompt" "$out0" "CONFIRM?"
 echo "== 行为: 无效值 (回车即装, 与默认一致) =="
 out9="$(run 9)"
 assert_contains "9 -> install" "$out9" "HANDLER --quick Vision"
+
+echo "== 行为: 显式 0 (返回主菜单, get_choose 映射为 255) =="
+out255="$(run 255)"
+assert_not_contains "explicit 0 -> no install" "$out255" "HANDLER"
 
 echo
 echo "==== PASS=$PASS FAIL=$FAIL ===="

@@ -123,6 +123,7 @@ function menu_full_installation() {
     _menu_rule
     echo -e "1. $(_i18n ".${CUR_FILE}.full_installation.info1")"
     echo -e "2. $(_i18n ".${CUR_FILE}.full_installation.info2")"
+    echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.full_installation.option0")"
     _menu_rule
 }
 
@@ -486,6 +487,12 @@ function get_choose() {
             printf "${YELLOW}[%s]${NC} %s\n" "$(_i18n '.title.warn')" "$(_i18n ".${CUR_FILE}.choose_invalid")" >&2
         fi
         return 0
+    fi
+    # 显式输入字面 "0" 视作子菜单的 "0. 返回/取消" 项 (如「0. 返回主菜单」),
+    # 与空回车(默认项)区分开: 空回车已在上方 return 0 (默认), 这里仅对"用户主动敲 0"生效。
+    # 退出码 0 已被"默认/未选择"占用, 故把显式 0 映射到 255, 调用方据此识别为返回项。
+    if [[ "${choose}" == "0" ]]; then
+        return 255
     fi
     return "${num}"
 }

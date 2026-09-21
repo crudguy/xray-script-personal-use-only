@@ -190,7 +190,7 @@ bash ~/xray-script-personal-use-only.sh --export-config --with-docker --yes
 
 | 文件 | 格式 | 说明 |
 | --- | --- | --- |
-| `subscription-base64.txt` | v2rayN 风格 base64（单行） | 含全部节点与 XHTTP extra |
+| `subscription-base64.txt` | v2rayN / NekoBox / FoXray 通用 base64（单行） | 含全部节点与 XHTTP extra |
 | `subscription-clash.yaml` | Clash / mihomo YAML | 含 proxy-groups 与直连规则 |
 | `subscription-singbox.json` | sing-box 出站 JSON | sing-box 全平台通用 |
 
@@ -207,16 +207,24 @@ bash ~/xray-script-personal-use-only.sh --export-config --with-docker --yes
 
 ### 三、各客户端怎么用
 
+> **平台对照速记**：v2rayN **仅 Windows**；NekoBox **仅 Android**（官方维护）；FoXray / Shadowrocket / Stash **仅 iOS**；Clash Verge Rev 与 sing-box 桌面版覆盖 **Windows / macOS / Linux**；Hiddify 全平台。下面按系统给出推荐客户端与对应产物。
+
 | 系统 | 推荐客户端 | 用哪个产物 | 导入方式 |
 | --- | --- | --- | --- |
-| Windows | **v2rayN** | 屏幕链接 或 `base64` | 复制 `vless://` 链接 → 「服务器 → 从剪贴板导入」；或把 base64 内容加入「订阅分组设置」 |
-| Windows / macOS | **Clash Verge Rev** | `subscription-clash.yaml` | 「配置」→ 导入 / 新建 → 选择本地 YAML 文件（或粘贴内容） |
-| Win / mac / Linux | **NekoBox / Nekoray** | `base64` 或 `clash.yaml` | 按当前内核二选一：v2ray 内核用 base64 链接，Clash 内核用 YAML |
+| Windows | **v2rayN**（仅 Windows） | 屏幕链接 或 `base64` | 复制 `vless://` 链接 → 「服务器 → 从剪贴板导入」；或把 base64 内容加入「订阅分组设置」 |
+| Windows / macOS / Linux | **Clash Verge Rev** | `subscription-clash.yaml` | 「配置（Profiles）」→ 导入 / 新建 → 选择本地 YAML 文件（或粘贴内容） |
+| Windows / macOS / Linux | **sing-box**（桌面版） | `subscription-singbox.json` | 导入 JSON 配置（桌面版支持从文件导入） |
 | Android | **v2rayNG** | 屏幕二维码 或 `base64` | 直接扫码；或「订阅 → 添加订阅」导入 base64 内容 / 从文件导入 |
-| Android | **Clash for Android / sing-box** | `clash.yaml` / `singbox.json` | 「配置 → 从文件导入」 |
+| Android | **NekoBox**（官方仅 Android） | `base64` 或 `clash.yaml` | 按内核二选一：sing-box 内核用 base64 链接，Clash 内核用 YAML |
+| Android | **sing-box**（SFA） | `subscription-singbox.json` | 导入 JSON 配置（SFA 支持扫码或文件导入） |
 | iOS | **FoXray** | 屏幕链接 或 `base64` | 「从剪贴板导入」或「从二维码 / 文件导入」 |
-| iOS | **Shadowrocket / Stash** | 屏幕链接 或 `clash.yaml` | 粘贴链接；Stash 可直接导入 YAML 配置 |
-| 全平台 | **sing-box**（SFA / SFM / 桌面版） | `subscription-singbox.json` | 导入 JSON 配置（SFA 支持扫码或文件导入） |
+| iOS | **Shadowrocket** | 屏幕链接 或 `clash.yaml` | 粘贴链接；或从 Clash 配置导入 |
+| iOS | **Stash** | `clash.yaml` | 直接导入 YAML 配置 |
+| iOS | **sing-box**（SFM） | `subscription-singbox.json` | 导入 JSON 配置 |
+| 全平台 | **Hiddify**（Android / iOS / Windows / macOS / Linux，基于 sing-box） | `subscription-singbox.json` 或 `base64` | 导入订阅（支持 sing-box / V2Ray / Clash 格式） |
+
+> ⚠️ **Clash for Android（Kr328 版）已停止维护**，不再推荐；Android 端想要 Clash 类请改用 **Clash Meta for Android（CMFA）/ FlClash / NekoBox / sing-box（SFA）**。
+> ⚠️ **NekoRay（桌面端，与 NekoBox 同作者）仓库已于 2025-03 归档停更**，新用户不建议从它起步；桌面端优先用 Clash Verge Rev 或 sing-box 桌面版。
 
 ### 四、使用要点与已知限制
 

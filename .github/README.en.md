@@ -279,16 +279,24 @@ Difference from the screen links: the subscription files walk **every client inb
 
 ### 3. How to use each client
 
+> **Platform cheat-sheet**: v2rayN is **Windows only**; NekoBox is **Android only** (officially maintained); FoXray / Shadowrocket / Stash are **iOS only**; Clash Verge Rev and the sing-box desktop build cover **Windows / macOS / Linux**; Hiddify is cross-platform. Recommended clients per system:
+
 | System | Recommended client | Use this | How to import |
 | --- | --- | --- | --- |
-| Windows | **v2rayN** | Screen link or `base64` | Copy the `vless://` link → "Servers → Import from clipboard"; or add the base64 content under "Subscription group settings" |
-| Windows / macOS | **Clash Verge Rev** | `subscription-clash.yaml` | "Profiles" → import / new → pick the local YAML file (or paste its content) |
-| Win / mac / Linux | **NekoBox / Nekoray** | `base64` or `clash.yaml` | Pick by active core: v2ray core → base64 link, Clash core → YAML |
+| Windows | **v2rayN** (Windows only) | Screen link or `base64` | Copy the `vless://` link → "Servers → Import from clipboard"; or add the base64 content under "Subscription group settings" |
+| Windows / macOS / Linux | **Clash Verge Rev** | `subscription-clash.yaml` | "Profiles" → import / new → pick the local YAML file (or paste its content) |
+| Windows / macOS / Linux | **sing-box** (desktop) | `subscription-singbox.json` | Import the JSON config (desktop build imports from file) |
 | Android | **v2rayNG** | Screen QR or `base64` | Scan the QR; or "Subscription → add subscription" with the base64 content / import from file |
-| Android | **Clash for Android / sing-box** | `clash.yaml` / `singbox.json` | "Profiles → import from file" |
+| Android | **NekoBox** (Android only, officially maintained) | `base64` or `clash.yaml` | Pick by active core: sing-box core → base64 link, Clash core → YAML |
+| Android | **sing-box** (SFA) | `subscription-singbox.json` | Import the JSON config (SFA supports QR or file import) |
 | iOS | **FoXray** | Screen link or `base64` | "Import from clipboard", or import from QR / file |
-| iOS | **Shadowrocket / Stash** | Screen link or `clash.yaml` | Paste the link; Stash can import the YAML directly |
-| All platforms | **sing-box** (SFA / SFM / desktop) | `subscription-singbox.json` | Import the JSON config (SFA supports QR or file import) |
+| iOS | **Shadowrocket** | Screen link or `clash.yaml` | Paste the link; or import from a Clash config |
+| iOS | **Stash** | `clash.yaml` | Import the YAML config directly |
+| iOS | **sing-box** (SFM) | `subscription-singbox.json` | Import the JSON config |
+| All platforms | **Hiddify** (Android / iOS / Windows / macOS / Linux, built on sing-box) | `subscription-singbox.json` or `base64` | Import the subscription (supports sing-box / V2Ray / Clash formats) |
+
+> ⚠️ **Clash for Android (Kr328 build) is no longer maintained** and is not recommended; on Android use **Clash Meta for Android (CMFA) / FlClash / NekoBox / sing-box (SFA)** instead.
+> ⚠️ **NekoRay** (the desktop sibling of NekoBox, same author) was **archived in March 2025** and is no longer updated — new users should start with Clash Verge Rev or the sing-box desktop build instead.
 
 ### 4. Usage notes and known limits
 

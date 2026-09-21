@@ -3101,9 +3101,21 @@ function handler_change_domain() {
         rm -f "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf"
         rm -f "${NGINX_CONFIG_DIR}/sites-enabled/${CONFIG_DATA["${target_domain}"]:-}.conf"
         # 恢复备份的 Nginx 配置文件
-        mv -f "${SCRIPT_CONFIG_DIR}/stream.conf" "${NGINX_CONFIG_DIR}/modules-enabled/stream.conf"
-        [[ -n "${old_domain}" && -f "${SCRIPT_CONFIG_DIR}/${old_domain}.conf" ]] && mv -f "${SCRIPT_CONFIG_DIR}/${old_domain}.conf" "${NGINX_CONFIG_DIR}/sites-available/${old_domain}.conf"
-        ln -sf "${NGINX_CONFIG_DIR}/sites-available/${old_domain}.conf" "${NGINX_CONFIG_DIR}/sites-enabled/${old_domain}.conf"
+        # 修复: 原为裸 `mv -f` —— 备份不存在时 mv 返回非 0, 在 set -e 下会**立即中止
+        #       整个函数**, 于是下面的"恢复旧域名配置 / 重建软链 / 重启 Nginx"全部
+        #       执行不到。而新站点配置已在上方被删除, 结果是**新旧两侧配置都没有**,
+        #       站点彻底不可用且没有提示 —— 换域名失败本应可回退, 却变成了最坏结果。
+        #       回滚路径必须逐条容错: 能恢复多少恢复多少, 最后统一重启。
+        if [[ -f "${SCRIPT_CONFIG_DIR}/stream.conf" ]]; then
+            mv -f "${SCRIPT_CONFIG_DIR}/stream.conf" "${NGINX_CONFIG_DIR}/modules-enabled/stream.conf" || true
+        else
+            print_warn "$(_i18n ".${CUR_FILE}.nginx.rollback_backup_missing")"
+        fi
+        # 旧域名配置与软链成对恢复: 只有备份确实存在才建链, 避免指向不存在文件的坏链接
+        if [[ -n "${old_domain}" && -f "${SCRIPT_CONFIG_DIR}/${old_domain}.conf" ]]; then
+            mv -f "${SCRIPT_CONFIG_DIR}/${old_domain}.conf" "${NGINX_CONFIG_DIR}/sites-available/${old_domain}.conf" || true
+            ln -sf "${NGINX_CONFIG_DIR}/sites-available/${old_domain}.conf" "${NGINX_CONFIG_DIR}/sites-enabled/${old_domain}.conf"
+        fi
         # 重启或启动 Nginx
         handler_nginx_restart
         exit 1
@@ -3120,15 +3132,23 @@ function handler_change_domain() {
     local _only_change_domain="${CONFIG_DATA['only-change-domain']:-}"
     if [[ "${_only_change_domain,,}" == "y" ]]; then
         # 恢复备份的 Nginx 配置文件
-        mv -f "${SCRIPT_CONFIG_DIR}/${old_domain}.conf" "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf"
-        rm -f "${NGINX_CONFIG_DIR}/sites-enabled/${CONFIG_DATA["${target_domain}"]:-}.conf"
-        # 更新域名
-        _replace_in_file "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf" "${old_domain}" "${CONFIG_DATA["${target_domain}"]:-}"
-        # 恢复到位的配置同样要对齐 HTTP/3 能力 (备份件可能来自未做对齐的旧版本)
-        align_site_http3 "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf"
-        # 创建从 available 到 enabled 的软链接
-        ln -sf "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf" "${NGINX_CONFIG_DIR}/sites-enabled/${CONFIG_DATA["${target_domain}"]:-}.conf"
-        rebuild_stream_config "${SCRIPT_CONFIG}"
+        # 修复: 同为裸 `mv -f` —— 备份缺失时返回非 0, 在 set -e 下直接中止, 后面的
+        #       "替换域名 / 对齐 HTTP3 / 重建软链 / 重启 Nginx"全部跳过, 站点配置被
+        #       留在改了一半的状态。这里先确认备份存在再执行整段, 否则告警并跳过。
+        local _new_domain="${CONFIG_DATA["${target_domain}"]:-}"
+        if [[ -f "${SCRIPT_CONFIG_DIR}/${old_domain}.conf" ]]; then
+            mv -f "${SCRIPT_CONFIG_DIR}/${old_domain}.conf" "${NGINX_CONFIG_DIR}/sites-available/${_new_domain}.conf" || true
+            rm -f "${NGINX_CONFIG_DIR}/sites-enabled/${_new_domain}.conf"
+            # 更新域名
+            _replace_in_file "${NGINX_CONFIG_DIR}/sites-available/${_new_domain}.conf" "${old_domain}" "${_new_domain}"
+            # 恢复到位的配置同样要对齐 HTTP/3 能力 (备份件可能来自未做对齐的旧版本)
+            align_site_http3 "${NGINX_CONFIG_DIR}/sites-available/${_new_domain}.conf"
+            # 创建从 available 到 enabled 的软链接
+            ln -sf "${NGINX_CONFIG_DIR}/sites-available/${_new_domain}.conf" "${NGINX_CONFIG_DIR}/sites-enabled/${_new_domain}.conf"
+            rebuild_stream_config "${SCRIPT_CONFIG}"
+        else
+            print_warn "$(_i18n ".${CUR_FILE}.nginx.rollback_backup_missing")"
+        fi
     fi
     # 重启或启动 Nginx
     handler_nginx_restart

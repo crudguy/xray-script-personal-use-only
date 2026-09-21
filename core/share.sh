@@ -171,9 +171,22 @@ function urlencode() {
 # =============================================================================
 function cache_json_data() {
     # 读取 Xray 配置文件的完整 JSON 内容到全局变量 XRAY_CONFIG
+    # 前置校验 (原实现缺失): 未安装 / 已卸载 / 配置被清除时文件不存在, jq 以退出码 2
+    #   失败。在 set -Eeuo pipefail + ERR trap 下, 这会被当成"脚本内部错误",
+    #   打印内部行号与堆栈式诊断 —— 用户看到的不是"没装 Xray", 而是一堆看不懂的报错。
+    #   典型触发: 卸载后仍在主菜单选 7(分享链接) 或 11(生成订阅)。这里提前拦截。
+    if [[ ! -f "${XRAY_CONFIG_PATH}" ]]; then
+        _error "$(_i18n ".${CUR_FILE}.not_installed")"
+    fi
     XRAY_CONFIG="$(jq '.' "${XRAY_CONFIG_PATH}")"
     # 读取脚本配置文件的完整 JSON 内容到全局变量 SCRIPT_CONFIG
-    SCRIPT_CONFIG="$(jq '.' "${SCRIPT_CONFIG_PATH}")"
+    # 注: 脚本配置缺失不至于让分享/订阅整个不可用(仅少数字段为空), 故只做兜底;
+    #     若连它都缺, 上面的 Xray 校验通常也已先拦下(安装会同时生成两者)。
+    #     兜底必须是 '{}' 而非空串 —— jq 对**空输入**会以退出码 2 失败, 那样后续
+    #     `echo "${SCRIPT_CONFIG}" | jq -r ...` 仍会被 set -e 判为失败而崩溃;
+    #     给个合法空对象后取值为 null, 不会中断。
+    SCRIPT_CONFIG="$(jq '.' "${SCRIPT_CONFIG_PATH}" 2>/dev/null || true)"
+    [[ -z "${SCRIPT_CONFIG}" ]] && SCRIPT_CONFIG='{}'
 }
 
 # =============================================================================

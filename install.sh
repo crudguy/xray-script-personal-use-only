@@ -635,7 +635,19 @@ function _sync_script_version_label() {
     # 版本号一致时不做无谓写入
     [[ "${local_version}" != "${repo_version}" ]] || return 0
 
-    if ! jq --arg v "${repo_version}" '.version = $v' "${SCRIPT_CONFIG_PATH}" | _atomic_write "${SCRIPT_CONFIG_PATH}"; then
+    # 注: 原写法 `jq ... "${F}" | _atomic_write "${F}"` 是**同文件管道写**, 有实质风险:
+    #     jq 一旦失败(输入非法 JSON / 读取异常)就输出空内容, 而 _atomic_write 会忠实
+    #     地把收到的 0 字节写入临时文件并 rename 覆盖原路径 —— config.json 被**清空**,
+    #     且失败分支只打印一句提示, 用户往往事后才发现配置没了。
+    #     改为"先取结果 -> 判空 -> 再写", 与 main.sh 中既有的正确写法保持一致:
+    #     写失败或内容为空都只跳过本次同步(版本号仅用于展示), 绝不覆盖原文件。
+    local new_config=''
+    new_config="$(jq --arg v "${repo_version}" '.version = $v' "${SCRIPT_CONFIG_PATH}" 2>/dev/null || true)"
+    if [[ -z "${new_config}" ]]; then
+        echo -e "${YELLOW}[${I18N_DATA['tip']}]${NC} ${I18N_DATA['promptly']}" >&2
+        return 0
+    fi
+    if ! printf '%s\n' "${new_config}" | _atomic_write "${SCRIPT_CONFIG_PATH}"; then
         echo -e "${YELLOW}[${I18N_DATA['tip']}]${NC} ${I18N_DATA['promptly']}" >&2
     fi
 }

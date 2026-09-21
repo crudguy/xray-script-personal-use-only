@@ -46,6 +46,14 @@ set -Eeuo pipefail
 # shellcheck disable=SC2154
 # 未预期失败时给出可定位的诊断 (行号 + 命令), 避免"静默退出"
 trap 'rc=$?; printf "\033[31m[错误]\033[0m 脚本在第 %s 行意外失败 (退出码 %s): %s\n" "${LINENO}" "${rc}" "${BASH_COMMAND}" >&2; exit "${rc}"' ERR
+# Ctrl+C (SIGINT) / SIGTERM: 明确告知并以 130 走正常退出路径。
+# 为什么要有: 此前只有 ERR trap, 长操作 (下载源码 / 申请证书 / 编译 Nginx) 中途按
+#   Ctrl+C 会**直接终止进程**, 于是各脚本自己注册的 EXIT 清理逻辑全部不执行 ——
+#   典型后果是 ssl.sh 已挂上的 nginx.conf 备份恢复不触发, 站点配置停在改了一半的
+#   状态; 临时目录也会残留在磁盘上。这里显式 exit 130, 让 EXIT trap 有机会收尾。
+# 注: 用 exit (而非让信号默认终止) 才能触发 EXIT trap; 130 是 shell 对 SIGINT 的
+#   惯例退出码, 便于 cron / 外部脚本据此判断"是被人为中断的"。
+trap 'printf "\n\033[33m[提示]\033[0m 收到中断信号, 正在退出 (退出码 130)\n" >&2; exit 130' INT TERM
 # 临时调试开关 (排查问题时设置 XRAY_SCRIPT_DEBUG=1)
 if [[ "${XRAY_SCRIPT_DEBUG:-0}" == '1' ]]; then set -x; fi
 :

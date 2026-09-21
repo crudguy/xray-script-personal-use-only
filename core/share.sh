@@ -1099,7 +1099,16 @@ function main() {
     # 保存模式: 预先以 0600 创建输出文件, 避免明文先按默认权限落盘
     # 注: umask 只在子 shell 内生效, 不影响脚本其余部分创建的目录/文件。
     if [[ -n "${SHARE_SAVE_FILE}" ]]; then
-        mkdir -p "$(dirname "${SHARE_SAVE_FILE}")" 2>/dev/null
+        # 拒绝写入已存在的符号链接: 本脚本以 root 运行, 而 `: >文件` 这类重定向会
+        # **跟随**符号链接把它指向的目标文件截断清零 —— 传一个被预置的链接路径,
+        # 就能借本脚本的权限清空机器上任意文件。正常用法下这里应当是新建文件。
+        if [[ -L "${SHARE_SAVE_FILE}" ]]; then
+            echo -e "${RED}[$(_i18n_sub ".${CUR_FILE}.save_symlink_refused" '${path}' "${SHARE_SAVE_FILE}")]${NC}" >&2
+            exit 1
+        fi
+        # 父目录同样按 0700 创建: 默认 umask 下会生成可被任意用户遍历的目录,
+        # 即便文件本身是 0600, 也不该把"有哪些分享文件"暴露给同机其它用户。
+        (umask 077 && mkdir -p "$(dirname "${SHARE_SAVE_FILE}")") 2>/dev/null
         if ! (umask 077 && : >"${SHARE_SAVE_FILE}"); then
             echo -e "${RED}[$(_i18n_sub ".${CUR_FILE}.fail_save" '${path}' "${SHARE_SAVE_FILE}")]${NC}" >&2
             exit 1

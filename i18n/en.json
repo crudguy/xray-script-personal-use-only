@@ -22,6 +22,7 @@
     "install_done_tip": "Installation complete! Sharing info is shown above. The management menu is now open — press 0 to exit, or pick another number to keep configuring."
   },
   "menu": {
+    "banner_compact": "Xray Script - deploy and manage",
     "choose": "Please choose an option",
     "choose_invalid": "Invalid input; treated as \"not selected\" (only numbers 0-255 are accepted; press Enter for the default)",
     "status": {
@@ -424,6 +425,7 @@
     "warning": "WARNING: The following contains service secrets (uuid/password/public key). Do NOT screen-record, screen-share, or keep terminal logs; use --save to write a 0600 file.",
     "saved": "Share config written to file (mode 0600): ${path}",
     "fail_save": "Failed to create share output file: ${path}",
+    "save_symlink_refused": "Refusing to write: ${path} already exists and is a symbolic link. The script runs as root, so writing would follow the link and truncate the file it points to. Please choose another path",
     "fp_invalid": "Unsupported uTLS fingerprint, falling back to chrome (valid: chrome / firefox / safari / ios / android / edge / random)",
     "subscription": {
       "title": "One-click subscription",
@@ -738,6 +740,9 @@
   "ssl": {
     "domain": {
       "invalid": "Invalid domain format; please provide a domain such as example.com."
+    },
+    "email": {
+      "invalid": "Invalid email format; please provide an address such as you@example.com."
     },
     "install": {
       "already_installed": "acme.sh is already installed.",

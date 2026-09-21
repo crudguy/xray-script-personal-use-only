@@ -47,6 +47,14 @@ readonly SSL_CERT_PATH="${NGINX_CONFIG_PATH}/certs"
 # 用途: 校验证书域名参数, 防止 ".."、"*"、"/" 等非法字符进入 rm -rf / openssl / grep -E。
 readonly DOMAIN_REGEX="^([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
 
+# 邮箱格式正则 (与 core/check.sh 的 EMAIL_REGEX 保持一致)。
+# 用途: 校验 ACME 账号邮箱 —— 该值会以 `sh -s email=...` 作为位置参数传给 acme.sh
+# 安装器, 不校验的话畸形输入会一路带到证书签发, 最后以"acme.sh 报错"的形式暴露,
+# 用户无从判断是自己填错还是脚本坏了。与域名同等对待, 在入口就拦下。
+# 注: 本文件不加载 core/check.sh, 故按项目既有模式在此保留一份副本 (见上方
+#     DOMAIN_REGEX 的同类处理; test/ssl_test.sh 的 T6 亦锁定该模式)。
+readonly EMAIL_REGEX='^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+
 # --- 全局变量声明 ---
 declare ACTION=''
 declare DOMAIN=''
@@ -552,6 +560,8 @@ function main() {
         # 匹配邮箱选项
         --email=*)
             ACCOUNT_EMAIL="${1#*=}" # 提取邮箱
+            # 与 --domain 同等对待: 入口即校验, 不让畸形邮箱一路带到 acme.sh
+            [[ "${ACCOUNT_EMAIL}" =~ ${EMAIL_REGEX} ]] || print_error "$(_i18n ".${CUR_FILE}.email.invalid")"
             ;;
         --ca=*)
             CA_SERVER="${1#*=}"

@@ -757,7 +757,6 @@ function _do_import() {
     _info "$(_i18n '.backup.import.stopping')"
     _service_stop nginx
     _service_stop xray
-    echo "[debug] 停服完成, 即将还原 (stage=${stage})" >&2
 
     _info "$(_i18n '.backup.import.restoring')"
     restored="$(_restore_payload "${stage}")" || restored=0

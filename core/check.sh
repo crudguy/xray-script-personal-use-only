@@ -550,7 +550,12 @@ function check_port() {
     if [[ -z "${port}" ]]; then
         _pass "$(_i18n ".${CUR_FILE}.port.empty")"
     # 检查端口号是否在 1-65535 范围内
-    elif [[ "${port}" =~ ^[0-9]+$ ]] && ((port >= 1 && port <= 65535)); then
+    # 注: 必须写 10#${port} 强制十进制 —— bash 的算术上下文会把带前导 0 的
+    #     字面量当八进制, 于是用户敲 "08" / "080" 这类补零写法时, 不是被正常
+    #     判定为合法端口, 而是先甩出一行内部噪声
+    #     `((: 08: value too great for base (error token is "08"))`
+    #     再被当成非法端口, 用户完全看不懂自己错在哪。
+    elif [[ "${port}" =~ ^[0-9]+$ ]] && ((10#${port} >= 1 && 10#${port} <= 65535)); then
         _pass "$(_i18n ".${CUR_FILE}.port.valid")$port"
     else
         # 如果超出范围，则为无效

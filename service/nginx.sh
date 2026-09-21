@@ -477,12 +477,50 @@ function gen_cflags() {
 # 参数: 无
 # 返回值: 无 (执行下载、配置和编译过程)
 # =============================================================================
+# =============================================================================
+# 函数名称: _fetch_github_tag
+# 功能描述: 取远端仓库 tags 列表中第一个匹配的标签名。
+#
+# 为什么先把整段响应收进变量再处理: 原写法是 wget | grep | cut | grep | head 的长管道,
+#   head 取够 1 行就退出, 而仍在写的 wget 随即收到 SIGPIPE 并以 141 退出 —— 末尾虽
+#   有 `|| true` 兜底不至于中断脚本, 但在 pipefail 下整条管道的退出码已被污染, 且
+#   取到的可能是"写到一半"的内容。先把输出完整收进变量, 后续只处理本地字符串,
+#   网络进程就不会被中途掐断。
+#
+# 同时收敛重复: 此前"取 nginx 版本 / 取 openssl 版本"这同一段管道在 source_compile
+#   与 source_update 里各写了一整遍, 改一处忘一处就会让安装与更新取到不同版本。
+# 参数:
+#   $1: GitHub tags API 地址
+#   $2: 标签过滤正则 (grep -Ei)
+#   $3: 可选的归一化 sed 表达式 (省略则原样输出)
+# 返回值: 打印标签名 (取不到时打印空串), 退出码恒 0
+# =============================================================================
+function _fetch_github_tag() {
+    local url="${1:-}" filter="${2:-}" rewrite="${3:-}"
+    [[ -n "${url}" && -n "${filter}" ]] || return 0
+
+    local tags
+    tags="$(wget -qO- --timeout=30 --tries=2 "$(_gh_url "${url}")" 2>/dev/null || true)"
+    [[ -n "${tags}" ]] || return 0
+
+    local name
+    name="$(printf '%s\n' "${tags}" | grep 'name' | cut -d\" -f4 | grep -Ei "${filter}" | head -1 || true)"
+    [[ -n "${name}" ]] || return 0
+
+    if [[ -n "${rewrite}" ]]; then
+        printf '%s' "${name}" | sed "${rewrite}"
+    else
+        printf '%s' "${name}"
+    fi
+    return 0
+}
+
 function source_compile() {
     cd "${TMPFILE_DIR}" # 切换到临时目录
     print_info "$(_i18n '.nginx.compile.fetch_versions')"
     # 从 GitHub API 获取最新的 Nginx release 标签名
     local nginx_version
-    nginx_version="$(wget -qO- --timeout=30 --tries=2 "$(_gh_url 'https://api.github.com/repos/nginx/nginx/tags')" | grep 'name' | cut -d\" -f4 | grep 'release' | head -1 | sed 's/release/nginx/' || true)"
+    nginx_version="$(_fetch_github_tag 'https://api.github.com/repos/nginx/nginx/tags' 'release' 's/release/nginx/')"
     # 白名单校验: 标签经 `sed 's/release/nginx/'` 后应为 nginx-x.y.z; 未校验就流入下方
     # eval (nginx.sh 内 _error_detect 的 `curl -o ${nginx_version}...`), 一旦 GitHub API
     # 被劫持/返回异常, 可能注入命令 (与 openssl_version 的约束对齐, 纵深防御)。
@@ -491,7 +529,7 @@ function source_compile() {
     fi
     # 获取最新的 OpenSSL 标签名 (格式为 openssl-x.y.z)
     local openssl_version
-    openssl_version="openssl-$(wget -qO- --timeout=30 --tries=2 "$(_gh_url 'https://api.github.com/repos/openssl/openssl/tags')" | grep 'name' | cut -d\" -f4 | grep -Eoi '^openssl-([0-9]\.?){3}$' | head -1 || true)"
+    openssl_version="openssl-$(_fetch_github_tag 'https://api.github.com/repos/openssl/openssl/tags' '^openssl-([0-9]\.?){3}$')"
 
     # 生成编译器优化标志
     gen_cflags
@@ -614,9 +652,9 @@ function source_update() {
     print_info "$(_i18n '.nginx.update.fetch_versions')"
     # 获取最新的版本号
     local latest_nginx_version
-    latest_nginx_version="$(wget -qO- --timeout=30 --tries=2 "$(_gh_url 'https://api.github.com/repos/nginx/nginx/tags')" | grep 'name' | cut -d\" -f4 | grep 'release' | head -1 | sed 's/release/nginx/' || true)"
+    latest_nginx_version="$(_fetch_github_tag 'https://api.github.com/repos/nginx/nginx/tags' 'release' 's/release/nginx/')"
     local latest_openssl_version
-    latest_openssl_version="$(wget -qO- --timeout=30 --tries=2 "$(_gh_url 'https://api.github.com/repos/openssl/openssl/tags')" | grep 'name' | cut -d\" -f4 | grep -Eoi '^openssl-([0-9]\.?){3}$' | head -1 || true)"
+    latest_openssl_version="$(_fetch_github_tag 'https://api.github.com/repos/openssl/openssl/tags' '^openssl-([0-9]\.?){3}$')"
 
     print_info "$(_i18n '.nginx.update.read_current_versions')"
     # 获取当前安装的 Nginx 和 OpenSSL 版本

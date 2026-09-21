@@ -22,6 +22,7 @@
     "install_done_tip": "安装完成！分享信息见上方。已自动进入管理菜单 —— 按 0 退出脚本，或选择其它数字继续配置。"
   },
   "menu": {
+    "banner_compact": "Xray Script —— 一键部署与管理",
     "choose": "请选择操作",
     "choose_invalid": "输入无效，已按「未选择」处理（仅支持 0-255 的数字，直接回车为默认项）",
     "status": {
@@ -424,6 +425,7 @@
     "warning": "警告: 以下内容包含服务密钥(uuid/密码/公钥)，请勿录屏、共屏或留存终端日志；可用 --save 写入 0600 文件。",
     "saved": "分享配置已写入文件(权限 0600): ${path}",
     "fail_save": "无法创建分享输出文件: ${path}",
+    "save_symlink_refused": "拒绝写入: ${path} 已存在且是符号链接。脚本以 root 运行, 写入会跟随链接截断指向的目标文件, 请改用其它路径",
     "fp_invalid": "不支持的 uTLS 指纹，已回落 chrome（可选: chrome / firefox / safari / ios / android / edge / random）",
     "subscription": {
       "title": "一键订阅生成",
@@ -738,6 +740,9 @@
   "ssl": {
     "domain": {
       "invalid": "域名格式不合法，请输入形如 example.com 的域名。"
+    },
+    "email": {
+      "invalid": "邮箱格式不合法，请输入形如 you@example.com 的邮箱。"
     },
     "install": {
       "already_installed": "acme.sh 已安装。",

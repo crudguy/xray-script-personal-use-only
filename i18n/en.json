@@ -195,7 +195,8 @@
   "handler": {
     "unknown_option": "Unknown or unsupported option",
     "script": {
-      "config_update": "Updating script configuration"
+      "config_update": "Updating script configuration",
+      "private_key_hidden": "Generated and written to the script config; not echoed here (long-term key, kept out of terminal scrollback/screencast/logs). Set SHOW_PRIVATE_KEY=1 and re-run to display it"
     },
     "xray": {
       "config_update": "Updating Xray configuration"

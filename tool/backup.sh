@@ -526,6 +526,7 @@ function _restore_payload() {
     local dest=''
     local src=''
     local restored=0
+    local errmsg=''
 
     [[ -f "${stage}/${MANIFEST_NAME}" ]] || return 1
 
@@ -546,37 +547,35 @@ function _restore_payload() {
         file)
             # 单文件成员: payload/<id>/<basename> -> dest
             dstdir="$(dirname -- "${dest}")"
-            if ! mkdir -p "${dstdir}" 2>"/tmp/bk_mk_$$.log"; then
-                echo "[restore-fail] id=${id} mkdir 失败 dir=${dstdir}: $(cat "/tmp/bk_mk_$$.log" 2>/dev/null)" >&2
-                rm -f "/tmp/bk_mk_$$.log"
+            # 注: 原实现把 stderr 重定向到 /tmp/bk_mk_$$.log 这类**可预测文件名**
+            #     (仅由 PID 决定)。本脚本以 root 运行, 若 /tmp 下被预建同名符号链接
+            #     指向 /etc/shadow 等敏感文件, shell 的 `>` 会**跟随链接并截断覆盖**
+            #     目标 —— 这正是经典的 /tmp 符号链接竞态 (CWE-377 一类问题)。
+            #     现改为把 stderr 直接捕获进变量: 既彻底消除竞态, 也不再需要临时
+            #     文件与随之而来的创建/清理/残留逻辑, 代码同时变短。
+            if ! errmsg="$(mkdir -p "${dstdir}" 2>&1)"; then
+                echo "[restore-fail] id=${id} mkdir 失败 dir=${dstdir}: ${errmsg}" >&2
                 return 1
             fi
-            rm -f "/tmp/bk_mk_$$.log"
             # 用 -f 而非 -a: 还原场景归属本机当前运行用户, 无需保留归档里的
             # ownership/特殊属性; cp -a 的 --preserve=all 在容器/overlay 文件
             # 系统或跨 ownership 时容易非 0 退出, 反而让还原失败。主配置权限由
             # 紧随其后的 chmod 600 统一约束。
-            if ! cp -f "${src}/$(basename -- "${dest}")" "${dest}" 2>"/tmp/bk_cp_$$.log"; then
-                echo "[restore-fail] id=${id} cp 失败 src=${src}/$(basename -- "${dest}") dest=${dest}: $(cat "/tmp/bk_cp_$$.log" 2>/dev/null)" >&2
-                rm -f "/tmp/bk_cp_$$.log"
+            if ! errmsg="$(cp -f "${src}/$(basename -- "${dest}")" "${dest}" 2>&1)"; then
+                echo "[restore-fail] id=${id} cp 失败 src=${src}/$(basename -- "${dest}") dest=${dest}: ${errmsg}" >&2
                 return 1
             fi
-            rm -f "/tmp/bk_cp_$$.log"
             ;;
         *)
             # 目录类成员: 合并式还原 (保留 payload 里没有的既有文件)
-            if ! mkdir -p "${dest}" 2>"/tmp/bk_mk_$$.log"; then
-                echo "[restore-fail] id=${id} mkdir 失败 dir=${dest}: $(cat "/tmp/bk_mk_$$.log" 2>/dev/null)" >&2
-                rm -f "/tmp/bk_mk_$$.log"
+            if ! errmsg="$(mkdir -p "${dest}" 2>&1)"; then
+                echo "[restore-fail] id=${id} mkdir 失败 dir=${dest}: ${errmsg}" >&2
                 return 1
             fi
-            rm -f "/tmp/bk_mk_$$.log"
-            if ! cp -Rf "${src}/." "${dest}/" 2>"/tmp/bk_cp_$$.log"; then
-                echo "[restore-fail] id=${id} cp 失败 src=${src}/. dest=${dest}: $(cat "/tmp/bk_cp_$$.log" 2>/dev/null)" >&2
-                rm -f "/tmp/bk_cp_$$.log"
+            if ! errmsg="$(cp -Rf "${src}/." "${dest}/" 2>&1)"; then
+                echo "[restore-fail] id=${id} cp 失败 src=${src}/. dest=${dest}: ${errmsg}" >&2
                 return 1
             fi
-            rm -f "/tmp/bk_cp_$$.log"
             ;;
         esac
         restored=$((restored + 1))

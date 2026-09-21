@@ -563,7 +563,12 @@ function check_port() {
 # =============================================================================
 # 函数名称: check_uuid
 # 功能描述: 验证 UUID 是否符合标准格式。
-#           注意：此函数的逻辑似乎与注释描述有出入，它将空 UUID 和非标准格式视为 "pass"。
+#   语义澄清 (此前注释自相矛盾, 说"似乎有出入", 实为**有意设计**):
+#     1) 空值    -> 交给上层 exec_generate 自动生成 (见 i18n: uuid.empty);
+#     2) 非标准格式 -> Xray 支持把任意字符串映射为 VLESS id (见 i18n: uuid.string);
+#     3) 标准格式 -> 直接使用。
+#   三种都是合法输入, 故恒返回 0 —— 这与 i18n 文案完全一致, 不是缺陷。
+#   注意: 因此本函数**不做拦截**, 调用方若需强制标准 UUID 应另行校验。
 # 参数:
 #   $1: 待检查的 UUID 字符串 (uuid)
 # 返回值: 总是返回 0 (并打印相应的提示信息到 >&2)
@@ -572,9 +577,11 @@ function check_uuid() {
     local uuid="${1:-}" # 获取 UUID 参数
 
     # 打印正在检查的信息
+    # 注: UUID 属于**节点标识**而非口令, 且随后会以分享链接/二维码形式完整展示给用户,
+    #     用户需要据此核对自己输入的是哪一份, 因此这里保留回显(与其它口令类字段不同)。
     _info "$(_i18n ".${CUR_FILE}.uuid.check")${uuid}"
 
-    # 如果 UUID 为空，则认为是有效的（可能表示使用默认值或自动生成）
+    # 如果 UUID 为空，则认为是有效的（表示自动生成）
     if [[ -z "${uuid}" ]]; then
         _pass "$(_i18n ".${CUR_FILE}.uuid.empty")"
     # 如果 UUID 不符合标准格式，则认为是有效的字符串（可能表示使用普通字符串）
@@ -589,18 +596,26 @@ function check_uuid() {
 
 # =============================================================================
 # 函数名称: check_password
-# 功能描述: 验证密码是否符合基本安全要求（非空、无空格、长度>=8）。
+# 功能描述: 验证密码是否符合基本安全要求（无空格、长度>=8）。
+#   空值是**合法输入**: 表示"不指定, 由上层自动生成" (见 i18n: password.empty),
+#   故走 _pass + return 0。此前注释写的"空则无效"与实现相反, 属注释错误, 已订正。
 # 参数:
-#   $1: 待检查的密码 (password)
+#   $1: 待检查的密码 (password)。同时用于 Trojan 密码与 mKCP seed —— 均为真实凭据。
 # 返回值: 0-有效 1-无效 (并打印相应的提示信息到 >&2)
+# 注: 本函数**不得回显明文**。此前的实现在 _info/_pass/_fail 四处把密码原样打到
+#     stderr, 而 stderr 不随管道消失 —— 终端回滚、screen/tmux 日志、运维录屏、
+#     `2>log` 重定向都会永久留存 Trojan 密码与 mKCP seed。现统一改为掩码+长度。
 # =============================================================================
 function check_password() {
     local password="${1:-}" # 获取密码参数
+    # 掩码显示: 只暴露长度, 不暴露内容。用户仍可据此判断是否"填错成空/过短"。
+    local masked="****"
+    [[ -n "${password}" ]] && masked="****(${#password} 字符)"
 
     # 打印正在检查的信息
-    _info "$(_i18n ".${CUR_FILE}.password.check")${password}"
+    _info "$(_i18n ".${CUR_FILE}.password.check")${masked}"
 
-    # 如果密码为空，则认为无效
+    # 如果密码为空，则视为"交由上层自动生成"，合法
     if [[ -z "${password}" ]]; then
         _pass "$(_i18n ".${CUR_FILE}.password.empty")"
         return 0
@@ -610,18 +625,18 @@ function check_password() {
     # 注: 原写法 `=~ *\ *` 是非法 ERE, bash 会报 "invalid regular expression"
     #     且 [[ ]] 返回 2, 在 if 中恒为假 => 该校验此前从未生效 (SC2049)。
     if [[ "${password}" =~ [[:space:]] ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.password.space_error")$password"
+        _fail "$(_i18n ".${CUR_FILE}.password.space_error")${masked}"
         return 1
     fi
 
     # 检查密码长度是否小于 8
     if ((${#password} < 8)); then
-        _fail "$(_i18n ".${CUR_FILE}.password.length_error")$password"
+        _fail "$(_i18n ".${CUR_FILE}.password.length_error")${masked}"
         return 1
     fi
 
     # 如果所有检查都通过，则密码有效
-    _pass "$(_i18n ".${CUR_FILE}.password.valid")$password"
+    _pass "$(_i18n ".${CUR_FILE}.password.valid")${masked}"
     return 0
 }
 

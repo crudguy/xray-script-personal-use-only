@@ -1332,7 +1332,16 @@ function handler_x25519_config() {
     # 输出显示 x25519 密钥对
     # 注: 原写法 `"...${NC} "${KEY}""` 中间那对引号实际闭合在外层引号之后,
     #     ${KEY} 处于**未加引号**状态会被 IFS 拆词 (SC2027)。
-    echo -e "${GREEN}[Private Key]${NC} ${PRIVATE_KEY}" >&2
+    #
+    # 私钥默认**不回显**: Reality 私钥是长期密钥, 一旦落到终端回滚 / screen 或 tmux
+    # 日志 / 运维录屏 / `2>log` 重定向里, 等同永久泄露, 且它并不需要给到客户端
+    # (客户端只需 Public Key 与 Short ID)。私钥已写入脚本配置, 需要时读该文件即可。
+    # 仅当显式设置 SHOW_PRIVATE_KEY=1 时才打印明文, 供迁移/调试等确有必要的场景。
+    if is_enabled "${SHOW_PRIVATE_KEY:-0}"; then
+        echo -e "${GREEN}[Private Key]${NC} ${PRIVATE_KEY}" >&2
+    else
+        echo -e "${YELLOW}[Private Key]${NC} $(_i18n ".${CUR_FILE}.script.private_key_hidden")" >&2
+    fi
     echo -e "${GREEN}[Public Key]${NC} ${PUBLIC_KEY}" >&2
     echo -e "${GREEN}[Hash32]${NC} ${HASH32}" >&2
     # 更新脚本配置中的私钥和公钥，以及哈希值

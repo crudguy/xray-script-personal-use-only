@@ -207,11 +207,11 @@ bash ~/xray-script-personal-use-only.sh --export-config --with-docker --yes
 
 ### 三、各客户端怎么用
 
-> **平台对照速记**：v2rayN **仅 Windows**；NekoBox **仅 Android**（官方维护）；FoXray / Shadowrocket / Stash **仅 iOS**；Clash Verge Rev 与 sing-box 桌面版覆盖 **Windows / macOS / Linux**；Hiddify 全平台。下面按系统给出推荐客户端与对应产物。
+> **平台对照速记**：v2rayN **跨平台**（v7.x 起 Avalonia 重写，覆盖 Windows / macOS / Linux）；NekoBox **仅 Android**（官方维护）；v2rayNG **仅 Android**；FoXray / Shadowrocket / Stash **仅 iOS**；Clash Verge Rev 与 sing-box 桌面版覆盖 **Windows / macOS / Linux**；Hiddify 全平台。下面按系统给出推荐客户端与对应产物。
 
 | 系统 | 推荐客户端 | 用哪个产物 | 导入方式 |
 | --- | --- | --- | --- |
-| Windows | **v2rayN**（仅 Windows） | 屏幕链接 或 `base64` | 复制 `vless://` 链接 → 「服务器 → 从剪贴板导入」；或把 base64 内容加入「订阅分组设置」 |
+| Windows / macOS / Linux | **v2rayN**（v7.x 跨平台；macOS 需 `xattr -cr` 解除隔离，Linux 需 .NET 8 / deb·rpm） | 屏幕链接 或 `base64` | 复制 `vless://` 链接 → 「服务器 → 从剪贴板导入」；或把 base64 内容加入「订阅分组设置」 |
 | Windows / macOS / Linux | **Clash Verge Rev** | `subscription-clash.yaml` | 「配置（Profiles）」→ 导入 / 新建 → 选择本地 YAML 文件（或粘贴内容） |
 | Windows / macOS / Linux | **sing-box**（桌面版） | `subscription-singbox.json` | 导入 JSON 配置（桌面版支持从文件导入） |
 | Android | **v2rayNG** | 屏幕二维码 或 `base64` | 直接扫码；或「订阅 → 添加订阅」导入 base64 内容 / 从文件导入 |

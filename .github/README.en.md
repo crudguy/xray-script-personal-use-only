@@ -279,11 +279,11 @@ Difference from the screen links: the subscription files walk **every client inb
 
 ### 3. How to use each client
 
-> **Platform cheat-sheet**: v2rayN is **Windows only**; NekoBox is **Android only** (officially maintained); FoXray / Shadowrocket / Stash are **iOS only**; Clash Verge Rev and the sing-box desktop build cover **Windows / macOS / Linux**; Hiddify is cross-platform. Recommended clients per system:
+> **Platform cheat-sheet**: v2rayN is **cross-platform** (Avalonia rewrite since v7.x — Windows / macOS / Linux); NekoBox is **Android only** (officially maintained); v2rayNG is **Android only**; FoXray / Shadowrocket / Stash are **iOS only**; Clash Verge Rev and the sing-box desktop build cover **Windows / macOS / Linux**; Hiddify is cross-platform. Recommended clients per system:
 
 | System | Recommended client | Use this | How to import |
 | --- | --- | --- | --- |
-| Windows | **v2rayN** (Windows only) | Screen link or `base64` | Copy the `vless://` link → "Servers → Import from clipboard"; or add the base64 content under "Subscription group settings" |
+| Windows / macOS / Linux | **v2rayN** (cross-platform since v7.x; macOS needs `xattr -cr` to lift quarantine, Linux needs .NET 8 / deb·rpm) | Screen link or `base64` | Copy the `vless://` link → "Servers → Import from clipboard"; or add the base64 content under "Subscription group settings" |
 | Windows / macOS / Linux | **Clash Verge Rev** | `subscription-clash.yaml` | "Profiles" → import / new → pick the local YAML file (or paste its content) |
 | Windows / macOS / Linux | **sing-box** (desktop) | `subscription-singbox.json` | Import the JSON config (desktop build imports from file) |
 | Android | **v2rayNG** | Screen QR or `base64` | Scan the QR; or "Subscription → add subscription" with the base64 content / import from file |

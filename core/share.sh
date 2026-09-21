@@ -109,7 +109,8 @@ function resolve_share_fp() {
         # 注: 告警刻意不做占位符替换 —— want 来自环境变量, 走 sed 时含正则元字符
         #     (如 "[") 会让 sed 返回非零, 在 set -e 下整个分享流程被一条告警拖死;
         #     走 bash 参数替换 (${tpl//pat/rep}) 时 "&" 又会被解释成匹配文本。
-        #     故改为在文案后另附原值, 用 echo -e (颜色变量是字面量 "\033", 必须 -e)。
+        #     故改为在文案后另附原值。此处用 echo -e 输出 (颜色变量现为 ANSI-C 引号的
+        #     真 ESC, echo -e / printf '%s' 均能正确上色; 历史沿用 echo -e 写法)。
         echo -e "${YELLOW}[$(_i18n ".${CUR_FILE}.fp_invalid")] XRAY_SCRIPT_FP=${want}${NC}" >&2
         ;;
     esac

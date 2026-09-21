@@ -219,7 +219,8 @@
       "verify_failed": "Xray did not become active after start; please check the Xray logs or port conflicts."
     },
     "install": {
-      "fail_download": "Failed to download or verify the Xray installation script, please check your network and retry."
+      "fail_download": "Failed to download or verify the Xray installation script, please check your network and retry.",
+      "fail_runtime": "The Xray install script finished but the xray binary is missing — installation likely failed. Check systemd status (systemctl status xray) and retry."
     },
     "subscription": {
       "refresh_failed": "Config updated, but the subscription could not be regenerated — the files are stale; regenerate them via menu 11."

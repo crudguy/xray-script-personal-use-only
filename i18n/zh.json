@@ -219,7 +219,8 @@
       "verify_failed": "Xray 启动后未能进入运行状态，请检查 Xray 日志或端口占用。"
     },
     "install": {
-      "fail_download": "Xray 安装脚本下载或校验失败，请检查网络后重试。"
+      "fail_download": "Xray 安装脚本下载或校验失败，请检查网络后重试。",
+      "fail_runtime": "Xray 安装脚本已执行，但 xray 二进制未就位，安装疑似失败，请检查 systemd 状态（systemctl status xray）后重试。"
     },
     "subscription": {
       "refresh_failed": "配置已更新，但订阅重建失败，订阅文件仍是旧的，请到主菜单 11 手动生成。"

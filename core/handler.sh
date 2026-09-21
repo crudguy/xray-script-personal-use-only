@@ -1973,8 +1973,18 @@ function handler_install() {
             _error "$(_i18n ".${CUR_FILE}.install.fail_download")"
         fi
         # 调用 Xray-install 脚本进行安装 ($0 仅影响其帮助/报错文案, 不影响行为)
-        bash "${install_script}" install -u root --version "${CONFIG_DATA['version']:-}"
+        # 注: install-release.sh 在全新安装时会 `rm`(无 -f) 删除尚不存在的 systemd
+        #     drop-in 文件 (10-donot_touch_multi_conf.conf 等) 而返回非零; 该非零
+        #     不代表 Xray 本体安装失败。故先接住其退出码, 再用 `cmd_exists xray`
+        #     做产物校验来裁定成败 (与 BBR/日志轮转的 `|| true` 容错思路一致)。
+        #     否则 set -Eeuo pipefail 会把这种可容忍错误当成脚本崩溃, 直接跳过后续
+        #     "生成配置 / 启动 / 分享链接" 步骤, 表现为装完无分享信息。
+        bash "${install_script}" install -u root --version "${CONFIG_DATA['version']:-}" || true
         rm -f "${install_script}"
+        # 安装产物校验: xray 二进制应已就位, 否则视为安装失败
+        if ! cmd_exists 'xray'; then
+            _error "$(_i18n ".${CUR_FILE}.install.fail_runtime")"
+        fi
         # 审计留痕
         _audit_log 'install' "xray version=${CONFIG_DATA['version']:-}"
     fi

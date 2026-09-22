@@ -27,6 +27,55 @@ suffix for additional releases on the same day).
 
 ---
 
+## [v2026-09-22]
+
+本版为 `v2026-09-21.1` 之后的累计批次：安全加固 + 多轮缺陷修复 + 巨型函数拆分与常量收敛 +
+测试与 CI 门禁补齐（31 个文件，+1844 / −441 行）。
+
+### 安全 Security
+
+- **自更新固定名竞态加固（CWE-367）**：`install.sh` 的备份目录由 PID 可预测名 `${PROJECT_ROOT}.old.$$` 改为 `mktemp -u ...XXXXXX` 不可预测随机名，并在移动/删除前显式 `[[ -L ]]` 拒绝符号链接（防 root 下被预植链接穿透删除目标树）；安装器自身的原子替换由固定名改 `umask 077; mktemp ...XXXXXX`（0600）。
+- **Nginx 编译期注入面收敛**：`service/nginx.sh` 的 `_error_detect` 受控 `eval` 入口保留，但把外部可控来源加白名单 —— `NGX_BROTLI_REF` 限 `^[A-Za-z0-9._/-]+$`（非法即中止 Brotli 安装）、`openssl_dir`（取自解包顶层名）限 `^[A-Za-z0-9._+-]+$`（非法回退源名并告警）。
+- **规则写入杜绝字符串插值**：`core/handler.sh` 的 `add_rule` 改用 `jq -nc --arg/--argjson` 构造 JSON —— 规则含 `"`/`\`/换行时原字符串拼接会生成非法 JSON，致 jq 失败、persist 中断。
+- **geodata 临时文件随机化**：`tool/geodata.sh` 的 `download_verified` 由固定名 `${dst}.new` / `${dst}.sha256sum` 改为 `mktemp --suffix` 随机名（保留后缀以兼容测试桩件；macOS 不支持 `--suffix` 时回退固定名），失败统一清理。
+- **凭据不再落终端/日志**：`core/check.sh` 的 `check_password` 四处明文回显改掩码 `****(N 字符)`（Trojan 密码 / mKCP seed 不再进终端回滚、screen/tmux、录屏与 `2>log`）；`handler_x25519_config` 默认不回显 Reality 私钥，需显式 `SHOW_PRIVATE_KEY=1`。
+- **去除可预测临时文件**：`tool/backup.sh` 还原流程的 `/tmp/bk_*_$$.log` 改为把 stderr 捕获进变量，消除 root 下 `/tmp` 符号链接截断覆盖竞态。
+- **`share.sh --save` 拒绝写入符号链接**：root 下 `: >文件` 会**跟随**链接截断其指向的目标文件；改为显式拒绝，且保存目录按 `0700` 创建。
+
+### 修复 Fixed
+
+- **止血：三处崩溃/卡死** —— ①`handler_routing` 取错变量（`${XRAY_CONFIG[...]}` → `${CONFIG_DATA[...]}`），下标触发 bash 算术求值在 `set -u` 下 "unbound variable" 崩溃，致路由菜单 3/4/5/6 从未真正执行；②新增 `_common.sh:is_enabled` 统一开关归一化，修复 `jq -r` 输出的字面串 `"null"` 与用户输入的 `"Y"/"N"` 参与 `-eq` 算术比较在 `set -u` 下崩溃（主菜单状态栏 / WARP / 阻止规则）；③`test_tcp_connection` 与 `get_tls_info` 加 `timeout`，修复 DROP 目标下体检卡死约 2 分钟（`get_tls_info` 另补 `|| true`，否则 pipefail 下探测失败直接中断、走不到友好分支）。
+- **体检汇总行渲染错位（ShellCheck SC2183）**：`core/check.sh` 的 `_health_summary` 在拆分时丢掉了格式串里的 `: `（10 个 `%s` 变 9 个，实参仍 10 个），printf 整体错位吃参 —— 标签与统计数字粘连，且**末尾 `${NC}` 被吞**，终端保持红色并渗染后续全部输出。
+- **三处高优先级缺陷** —— ①`share.sh:cache_json_data` 未安装时给出可读提示（原本 jq 退出码 2 被 ERR trap 当成内部错误、打印陌生行号诊断），脚本配置兜底 `{}`；②`install.sh` 版本同步的**同文件管道写**改为"先取结果 → 判空 → 再写"，避免 jq 失败时把 `config.json` 覆盖成 0 字节；③换域名两条回滚路径的裸 `mv -f` 加存在性判断与容错，修复备份缺失时 `set -e` 中止导致新旧站点配置双失。
+- **多项中优先级缺陷** —— `install.sh check_os` 加空值守卫（`_os_ver` 为空串时被算术上下文当成 0 → 恒成立 → 明明只是"识别不出版本"却报"版本过低"把用户拦在门外）；`nginx.sh` 的 `check_os` 改名 `check_os_nginx_build` 消除同名漂移（编译基线刻意高于通用基线，两者不应互相拉齐）；自更新由"先删后拷"改临时文件 + 原子 rename（原地覆写会让正在按偏移读取的 bash 读到新旧混杂内容），失败保留旧安装器并告警；默认配置下载失败不再静默跳过（原会写出空 `config.json`，致后续任何菜单崩溃而真因淹没）；`main.sh --health` CLI 直调 `check.sh` 并透传退出码，修复 cron 假绿；`check_xray_version_exists` 改走加速前缀并区分网络不可达（`000`）与版本不存在（404）；`ssl.sh` 私钥收紧失败不再静默回落 644，改为明确告警；geodata/nginx cron 未安装时补告警（原静默零反馈）；`share.sh` 两处 `--argjson port` 加数字守卫（空串/非数字会让 jq 报错并在 `set -e` 下中断整轮订阅生成）；英文 `ubuntu` 文案 "18+" 订正为 "16+"。
+- **一键安装装完却没有分享链接**：`install.sh` 对第三方 `install-release.sh` 的可容忍非零退出码做容错（`rm` 删除不存在的 systemd drop-in 会使其非零退出，被 `set -Eeuo` 误当致命而中断），改用 xray 二进制产物做校验。
+- **体检输出显示字面 `\033`**：颜色变量改用 ANSI-C 引号（`$'\033[...'`），修复查看体检结果时的转义乱码。
+- **完整安装子菜单交互**：「默认 / 空回车」改为直接进入一键安装，移除与之矛盾的二次确认。
+- **`source_update` 升级备份**：旧二进制缺失时跳过备份（原裸 `mv` 在 `set -e` 下会让刚完成的重编译半途而废）；备份名由天精度 `date +%F` 改秒精度 `%Y%m%d_%H%M%S`，防同日二次升级静默覆盖前次备份；缺失时 `print_warn`。
+- **测试框架自身缺陷**：`menu_loop_test` ①桩件仍认 `exec_menu --index`，而产品早已改成单次 `--index-full`，导致队列永不消费、断言必挂；②结尾只打印 FAIL 却没有 `exit` 非零，而 `run_tests.sh`/CI 只按退出码计成败 —— 两者叠加使该失效用例长期静默假绿。
+
+### 变更 Changed
+
+- **主菜单读取性能**：主循环每轮 3 次 fork `menu.sh`（banner / status / index）合并为单次 `--index-full`，只加载一次 i18n —— 实测约 64ms 降至约 22ms；渲染 37 行与原先逐字一致，选择语义（`5→5` / `1→1` / `0→255`）端到端验证等价。
+- **巨型函数拆分（可维护性，行为逐字符等价）**：`check_health_report`（539 行）→ 编排器 + 8 个 `_health_*` 分区 + `_health_summary`；`check_net_status`（163 行）→ 编排器 + `_net_collect`（只读采集）+ `_net_render`（渲染并算退出码）；`handler_xray_config`（140 行）→ 编排器 + 4 个 `_xray_*`；`handler_custom_site_update`（110 行）与 `handler_change_domain`（101 行）同样拆分；`show_sni_config`（48 行）→ 编排器 + 5 个 `_sni_block_*`。统一复用 bash 动态作用域做到零参数传递样板。
+- **常量/正则单一来源**：`DOMAIN_REGEX`、`EMAIL_REGEX` 各两份副本收敛到 `core/_common.sh`（消除"改一处漏一处"的副本漂移）；用法错误退出码由散落 3 处的裸 `exit 2` 收口为 `readonly EXIT_USAGE=2`。
+- **DRY**：新增 `_remove_site_conf <domain>` 收口散落的站点清理 `rm` 对；`nginx.sh` 抽取 `_fetch_github_tag` 收敛两处逐字重复的版本获取管道，并改为先把响应收进变量再处理（消除 `head -1` 让仍在写的 `wget` 收到 SIGPIPE 141、污染整条管道退出码）。
+- **健壮性与体验**：`menu.sh` banner 在窄终端（<80 列）降级为单行标题，避免约 70 字符的 ASCII art 折行乱版；`_common.sh` 加 INT/TERM trap（明确提示并以 130 退出，便于区分"被中断"与"脚本出错"）；`check_port` 用 `10#${port}` 强制十进制，修复输入 `08` 时先甩出 bash 内部算术噪声；完整安装子菜单新增「0. 返回主菜单」；交互式一键安装完成后加过渡提示（行为不变，分享信息照常展示后回到管理菜单）。
+
+### 移除 Removed
+
+- 删除 `core/handler.sh` 中零调用的 `_sed_in_place`：它与 `_common.sh:_replace_in_file` 确立的"读-改-写"原子写方向相反，留着会诱导复发。
+- 删除 `tool/backup.sh` 遗留的 `[debug]` echo。
+
+### 文档 Docs
+
+- **README 客户端对照表订正**：NekoBox 仅 Android、NekoRay 已停更、Clash for Android 已停更、补齐 Linux、补 Hiddify；v2rayN 标注为跨平台（v7.x 起 Avalonia 重写）并合并至桌面三平台行；补 v2rayNG 仅 Android。
+- 补全 `XRAY_INSTALL_REF` 硬编码 commit 的自文档化注记（可核验的 commit URL + REF/SHA256 成对更新流程 + fail-closed 不变量）；订正 `CHANGELOG` 前言中已过时的"更新判据"说法（实际以 commit SHA 比对为准，版本号仅供展示）。
+- **测试补齐**：新增 `valid_domain`、`clash_build_proxy`、`gen_cflags`、`systemctl_config_nginx`、`handler_net_tune`、`show_sni_config`、`health_summary` 单测，以及 `install.sh` / `_common.sh` 的 OS 检测防漂移同步守卫（均含负向校验）；修复 `menu_loop_test` 的两处既存缺陷（见「修复」末条）。
+- **CI**：修复本批次引入的 8 处 ShellCheck `-S warning` 门禁回归（4×SC2155、2×SC2034、1×SC2154、1×SC2183），恢复主门禁 rc=0 与存量债务棘轮 0/0/0。
+
+---
+
 ## [v2026-09-21.1]
 
 ### 安全 Security

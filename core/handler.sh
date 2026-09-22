@@ -1357,45 +1357,56 @@ function handler_x25519_config() {
 function handler_xray_config() {
     # 打印绿色的 Xray 配置更新提示
     echo -e "${GREEN}[$(_i18n '.title.config')]${NC} $(_i18n ".${CUR_FILE}.xray.config_update")" >&2
-    # 从脚本配置中读取各项参数
-    local CONFIG_TAG
+    # 采集参数 (声明为 local, 供下方 _xray_* 子函数经由 bash 动态作用域读取, 避免 20+ 处重复声明)
+    local CONFIG_TAG XRAY_PORT XRAY_UUID FALLBACK_UUID TROJAN_PASSWORD KCP_SEED \
+          TARGET_DOMAIN SERVER_NAMES PRIVATE_KEY SHORT_IDS XHTTP_PATH \
+          XRAY_RULES_STATUS XRAY_RULES_BT XRAY_RULES_CN XRAY_RULES_AD XRAY_RULES WARP_STATUS
+    _xray_collect_params   # 从 SCRIPT_CONFIG 读取并填充上述 local + 加载配置模板到全局 XRAY_CONFIG
+    _xray_apply_inbounds   # 按 CONFIG_TAG 应用 inbound 字段, 并做 REALITY serverNames 守卫
+    _xray_apply_rules      # 按 XRAY_RULES_STATUS 保留/重置路由规则
+    _xray_apply_warp       # 启用 WARP 时追加 socks 出站
+    # 回写路由规则到脚本配置并持久化
+    XRAY_RULES="$(echo "${XRAY_CONFIG}" | jq '.routing.rules')"
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson rules "${XRAY_RULES}" '.rules = $rules')"
+    persist_script_config
+    persist_xray_config
+}
+
+# =============================================================================
+# 子函数名称: _xray_collect_params
+# 功能描述: 从 SCRIPT_CONFIG 读取 Xray 各项参数填充父函数的 local 变量, 并加载配置模板到全局 XRAY_CONFIG。
+#           (动态作用域: 此处赋值均写回 handler_xray_config 已声明的 local, 不另起 local)
+# =============================================================================
+function _xray_collect_params() {
     CONFIG_TAG="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.tag')"                # 获取配置标签
-    local XRAY_PORT
     XRAY_PORT="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.port')"                # 获取端口
-    local XRAY_UUID
     XRAY_UUID="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.uuid')"                # 获取 UUID
-    local FALLBACK_UUID
     FALLBACK_UUID="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.fallback')"        # 获取 Fallback UUID
-    local TROJAN_PASSWORD
     TROJAN_PASSWORD="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.trojan')"        # 获取 Trojan 密码
-    local KCP_SEED
     KCP_SEED="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.kcp')"                  # 获取 mKCP Seed
-    local TARGET_DOMAIN
     TARGET_DOMAIN="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.target')"          # 获取目标域名
-    local SERVER_NAMES
     SERVER_NAMES="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.serverNames')"      # 获取服务器名称
-    local PRIVATE_KEY
     PRIVATE_KEY="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.privateKey')"        # 获取私钥
-    local SHORT_IDS
     SHORT_IDS="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.shortIds')"            # 获取 Short IDs
-    local XHTTP_PATH
     XHTTP_PATH="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.path')"               # 获取路径
-    local XRAY_RULES_STATUS
     XRAY_RULES_STATUS="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.reset')" # 获取规则状态
-    local XRAY_RULES_BT
     XRAY_RULES_BT="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.bt')"        # 获取 bt 规则状态
-    local XRAY_RULES_CN
     XRAY_RULES_CN="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.cn')"        # 获取 cn 规则状态
-    local XRAY_RULES_AD
     XRAY_RULES_AD="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.ad')"        # 获取 ad 规则状态
-    local XRAY_RULES
     XRAY_RULES="$(echo "${SCRIPT_CONFIG}" | jq -r '.rules')"                   # 获取路由规则
-    local WARP_STATUS
     # 注: 与其它取 WARP 状态的调用点保持一致加 `|| true` —— jq 失败时取空串即可,
     #     不应让 set -e 把整个配置生成流程打断 (下方 is_enabled 会把空串当未启用)。
     WARP_STATUS="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.warp' || true)"      # 获取 WARP 状态
-    # 加载对应配置标签的 Xray 配置模板
+    # 加载对应配置标签的 Xray 配置模板 (写入全局 XRAY_CONFIG)
     XRAY_CONFIG="$(jq '.' ${SCRIPT_XRAY_DIR}/${CONFIG_TAG}.json)"
+}
+
+# =============================================================================
+# 子函数名称: _xray_apply_inbounds
+# 功能描述: 按 CONFIG_TAG 应用 inbound 字段更新 + REALITY serverNames 守卫。
+#           (动态作用域: 读父 local 的 CONFIG_TAG/XRAY_* 等, 改写全局 XRAY_CONFIG; 不另起同名 local)
+# =============================================================================
+function _xray_apply_inbounds() {
     # 如果配置标签不是 sni，则更新端口
     if [[ "${CONFIG_TAG,,}" != 'sni' ]]; then
         XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson port "${XRAY_PORT}" '.inbounds[1].port = $port')"
@@ -1403,18 +1414,14 @@ function handler_xray_config() {
     # 根据配置标签更新特定字段 (第一部分)
     case "${CONFIG_TAG,,}" in
     mkcp | vision | xhttp | fallback | sni)
-        # 更新客户端 UUID
         XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg uuid "${XRAY_UUID}" '.inbounds[1].settings.clients[0].id = $uuid')"
         ;;
     trojan)
-        # 更新 Trojan 客户端密码
         XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg password "${TROJAN_PASSWORD}" '.inbounds[1].settings.clients[0].password = $password')"
         ;;
     esac
     # P-优化: REALITY serverNames 守卫 —— 防手滑把占位符/空值写进 .xray.serverNames,
     #   导致握手失败或把伪装目标暴露成 example.com。
-    #   - 非空且非占位符 example.com;
-    #   - 非 sni 模板时, serverNames 必须包含 target 域名 (REALITY 要求 SNI 命中其中一个)。
     case "${CONFIG_TAG,,}" in
     vision | xhttp | trojan | fallback | sni)
         if [[ -z "${SERVER_NAMES}" || "${SERVER_NAMES}" == '[]' || "${SERVER_NAMES}" == 'null' ]]; then
@@ -1433,15 +1440,12 @@ function handler_xray_config() {
     # 根据配置标签更新特定字段 (第二部分)
     case "${CONFIG_TAG,,}" in
     mkcp)
-        # 更新 mKCP Seed
         XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg seed "${KCP_SEED}" '.inbounds[1].streamSettings.kcpSettings.seed = $seed')"
         ;;
     vision | xhttp | trojan | fallback | sni)
-        # 如果不是 sni 配置，更新 Reality 目标
         if [[ "${CONFIG_TAG,,}" != 'sni' ]]; then
             XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg target "${TARGET_DOMAIN}:443" '.inbounds[1].streamSettings.realitySettings.target = $target')"
         fi
-        # 更新 Reality 服务器名称、私钥和 Short IDs
         XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson serverNames "${SERVER_NAMES}" '.inbounds[1].streamSettings.realitySettings.serverNames = $serverNames')"
         XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg privateKey "${PRIVATE_KEY}" '.inbounds[1].streamSettings.realitySettings.privateKey = $privateKey')"
         XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson shortIds "${SHORT_IDS}" '.inbounds[1].streamSettings.realitySettings.shortIds = $shortIds')"
@@ -1450,16 +1454,20 @@ function handler_xray_config() {
     # 根据配置标签更新特定字段 (第三部分)
     case "${CONFIG_TAG,,}" in
     xhttp | trojan)
-        # 更新 XHTTP 路径
         XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg path "${XHTTP_PATH}" '.inbounds[1].streamSettings.xhttpSettings.path = $path')"
         ;;
     fallback | sni)
-        # 更新 Fallback 客户端 UUID 和 XHTTP 路径
         XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg uuid "${FALLBACK_UUID}" '.inbounds[2].settings.clients[0].id = $uuid')"
         XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg path "${XHTTP_PATH}" '.inbounds[2].streamSettings.xhttpSettings.path = $path')"
         ;;
     esac
-    # 处理路由规则
+}
+
+# =============================================================================
+# 子函数名称: _xray_apply_rules
+# 功能描述: 按 XRAY_RULES_STATUS 保留现有路由规则或重置为默认规则 (调用 add_rule)。
+# =============================================================================
+function _xray_apply_rules() {
     case "${XRAY_RULES_STATUS}" in
     0)
         # 保留当前路由规则
@@ -1467,16 +1475,18 @@ function handler_xray_config() {
         ;;
     1)
         # 重置并添加默认路由规则
-        # 修复: 这三个值的实际取值是用户输入的 "Y" / "N" (见 exec_read 的默认处理),
-        #       不是数字 —— 原 `-eq 1` 遇到 "Y" 会触发算术求值并在 set -u 下崩溃
-        #       (实测: bash: Y: 未绑定的变量), 用户一旦选择"阻止 BT"就直接中断。
-        #       现统一走 is_enabled, 语义与写入脚本配置时的判定 ($bt != "n") 一致。
         is_enabled "${XRAY_RULES_BT}" && add_rule "bt" "protocol" "bittorrent" "block" 1
         is_enabled "${XRAY_RULES_CN}" && add_rule "cn-ip" "ip" "geoip:cn" "block" "after" "private-ip"
         is_enabled "${XRAY_RULES_AD}" && add_rule "ad-domain" "domain" "geosite:category-ads-all" "block"
         ;;
     esac
-    # 处理 WARP 状态
+}
+
+# =============================================================================
+# 子函数名称: _xray_apply_warp
+# 功能描述: 启用 WARP 时获取容器 IP 并追加 socks 出站到全局 XRAY_CONFIG。
+# =============================================================================
+function _xray_apply_warp() {
     if is_enabled "${WARP_STATUS}"; then
         # 获取 WARP 容器 IP
         local container_ip
@@ -1486,14 +1496,8 @@ function handler_xray_config() {
         # 将 WARP 出站配置添加到 Xray 配置中
         XRAY_CONFIG=$(echo "${XRAY_CONFIG}" | jq --argjson socks_config "${socks_config}" '.outbounds += $socks_config')
     fi
-    # 获取更新后的路由规则
-    XRAY_RULES="$(echo "${XRAY_CONFIG}" | jq '.routing.rules')"
-    # 更新脚本配置中的路由规则
-    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson rules "${XRAY_RULES}" '.rules = $rules')"
-    # 将更新后的脚本配置和 Xray 配置写入文件
-    persist_script_config
-    persist_xray_config
 }
+
 
 # =============================================================================
 # 函数名称: handler_read_xray_config

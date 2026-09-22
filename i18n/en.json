@@ -244,7 +244,8 @@
       "purge_refused": "Uninstall refused: the current Nginx is not a build of this project, so nothing was changed.",
       "http3_stripped": "The local Nginx was built without HTTP/3 support; quic listeners and Alt-Svc were removed from the site config so Nginx does not fail to start on the unknown parameter.",
       "verify_failed": "Nginx did not become active; please check the Nginx logs or port 80/443 conflicts.",
-    "rollback_backup_missing": "No rollback backup found (stream.conf or the old domain config); that restore step was skipped. If the site is unavailable, check Nginx's sites-available config."
+    "rollback_backup_missing": "No rollback backup found (stream.conf or the old domain config); that restore step was skipped. If the site is unavailable, check Nginx's sites-available config.",
+    "update_backup_skipped": "Old nginx binary not found; backup skipped and the upgrade will continue writing the new binary."
     },
     "custom_sites": {
       "empty": "No custom sites configured",

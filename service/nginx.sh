@@ -679,7 +679,13 @@ function source_update() {
         source_compile # 重新编译新版本
         print_info "$(_i18n '.nginx.update.start_update')"
         # 备份旧的 nginx 二进制文件
-        mv "${NGINX_PATH}/sbin/nginx" "${NGINX_PATH}/sbin/nginx_$(date +%F)"
+        # 守卫: 旧二进制不存在时跳过备份, 避免 set -e 让刚完成的重编译半途而废;
+        #   备份名精确到秒 (原 date +%F 仅到天), 避免同日重复升级静默覆盖当日已备份的旧二进制。
+        if [[ -f "${NGINX_PATH}/sbin/nginx" ]]; then
+            mv "${NGINX_PATH}/sbin/nginx" "${NGINX_PATH}/sbin/nginx_$(date +%Y%m%d_%H%M%S)"
+        else
+            print_warn "$(_i18n '.nginx.update.backup_skipped')"
+        fi
         # 备份旧的动态模块
         backup_files "${NGINX_PATH}/modules"
         # 复制新编译的 nginx 二进制文件和动态模块

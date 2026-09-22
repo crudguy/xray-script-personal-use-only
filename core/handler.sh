@@ -1803,8 +1803,15 @@ function _custom_site_prepare() {
     old_link_path="${NGINX_CONFIG_DIR}/sites-enabled/${old_domain}.conf"
     new_link_path="${NGINX_CONFIG_DIR}/sites-enabled/${new_domain}.conf"
     old_conf_backup="${SCRIPT_CONFIG_DIR}/${old_domain}.custom-site.bak.conf"
-    [[ -f "${old_conf_path}" ]] && cp -f "${old_conf_path}" "${old_conf_backup}"
-    [[ -f "${NGINX_CONFIG_DIR}/modules-enabled/stream.conf" ]] && cp -f "${NGINX_CONFIG_DIR}/modules-enabled/stream.conf" "${stream_backup}"
+    # 与 share.sh:cache_json_data 同样的坑: 不用 `[[ 条件 ]] && 动作` —— 它一旦成为
+    # 函数最后一条命令, 条件为假就会让函数返回 1, 调用处被 set -e + ERR trap 判成
+    # "脚本内部错误"而中断。旧站 conf / stream.conf 不存在都属正常情况, 本就该静默跳过。
+    if [[ -f "${old_conf_path}" ]]; then
+        cp -f "${old_conf_path}" "${old_conf_backup}"
+    fi
+    if [[ -f "${NGINX_CONFIG_DIR}/modules-enabled/stream.conf" ]]; then
+        cp -f "${NGINX_CONFIG_DIR}/modules-enabled/stream.conf" "${stream_backup}"
+    fi
 }
 
 # =============================================================================

@@ -46,8 +46,10 @@ download_verified() {
     #           目录确保 mv -f 原子就位; macOS 不支持 --suffix 时自动回退为固定名, 行为与原版一致。
     local dst_dir="${dst%/*}"
     [[ "${dst_dir}" != "${dst}" ]] || dst_dir="."
-    local tmp_new="$(mktemp --suffix=.new "${dst_dir}/.geo.XXXXXX" 2>/dev/null || printf '%s.new' "${dst}")"
-    local tmp_sum="$(mktemp --suffix=.sha256sum "${dst_dir}/.geo.XXXXXX" 2>/dev/null || printf '%s.sha256sum' "${dst}")"
+    local tmp_new
+    local tmp_sum
+    tmp_new="$(mktemp --suffix=.new "${dst_dir}/.geo.XXXXXX" 2>/dev/null || printf '%s.new' "${dst}")"
+    tmp_sum="$(mktemp --suffix=.sha256sum "${dst_dir}/.geo.XXXXXX" 2>/dev/null || printf '%s.sha256sum' "${dst}")"
 
     # 下载数据文件与官方摘要文件 (任一失败即清理并返回)
     curl -L --connect-timeout 15 --retry 2 --max-time 900 -o "${tmp_new}" "$url" || { rm -f "${tmp_new}" "${tmp_sum}"; return 1; }

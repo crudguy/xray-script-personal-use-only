@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034  # CLASH_NAMES 由下方 eval 注入的 clash_build_proxy 写入 (shellcheck 数据流不跨 eval); 断言读的是 CLASH_PROXIES。
 # clash_build_proxy 功能回归测试 (依赖 jq)
 # 锁定订阅 Clash 配置块生成: vless/reality、trojan/reality、vless/tls、vless/none(kcp)
 # 四个分支的输出形态 (trojan 不显式加 tls 行、trojan 用 password 而非 uuid、kcp 加 kcp-opts)。

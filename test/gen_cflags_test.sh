@@ -69,6 +69,9 @@ run_cflags() {
         export MOCK_GCC_HELP="$helpfile"
         export MOCK_GCC_E_RC="$e_rc"
         eval "$FUNC_SRC"
+        # 显式置空: gen_cflags 自身会重置该数组, 这里预置是为了让"从干净状态出发"成立,
+        # 同时消除 shellcheck 的 SC2154 (赋值发生在 eval 注入的函数体里, 数据流不跨 eval)。
+        cflags=()
         gen_cflags
         printf '%s' "${cflags[*]}"
     )

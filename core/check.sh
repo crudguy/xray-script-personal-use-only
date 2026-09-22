@@ -1995,9 +1995,10 @@ function _health_summary() {
     fi
 
     printf '\n%s\n' '------------------------------------------------------' >&2
-    # 4 组 %s%s%s: 标签 + 三档各 (颜色, 文本, 复位); 格式符个数与参数个数必须一一对上,
-    # 多一个 %s: 会让 printf 吃错参数 (只读复检时抓过一次)
-    printf '  %s%s%s  %s%s%s  %s%s%s\n' \
+    # 标签 + ": " + 三档各 (颜色, 文本, 复位) —— 共 10 个 %s, 与下方 10 个实参严格一一对应。
+    # 格式符与实参个数必须相等: 少一个 %s 会让 printf 吃错参数 (末尾 ${NC} 被吞掉, 终端颜色
+    # 渗染后续输出), 多一个 %s 同样错位 —— 由 shellcheck SC2183 与 CI 门禁兜底。
+    printf '  %s: %s%s%s  %s%s%s  %s%s%s\n' \
         "$(_i18n ".${CUR_FILE}.health.summary")" \
         "${GREEN}" "$(_i18n ".${CUR_FILE}.health.summary_pass") ${pass}" "${NC}" \
         "${YELLOW}" "$(_i18n ".${CUR_FILE}.health.summary_warn") ${warn}" "${NC}" \

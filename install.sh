@@ -697,7 +697,8 @@ function _update_xray_script() {
     # 安全加固: 备份名改用 mktemp -u 生成的不可预测随机后缀 (替代原 PID 名 ${PROJECT_ROOT}.old.$$),
     #           消除 root 下"可预测临时名被预植符号链接"的 TOCTOU 竞态 (CWE-367);
     #           并在删除/移动前显式拒绝已存在的符号链接, 防 rm -rf/mv 跟随链接穿透目标树。
-    local backup_dir="$(mktemp -u "${PROJECT_ROOT}.old.XXXXXX" 2>/dev/null || printf '%s.old.%s' "${PROJECT_ROOT}" "$$")"
+    local backup_dir
+    backup_dir="$(mktemp -u "${PROJECT_ROOT}.old.XXXXXX" 2>/dev/null || printf '%s.old.%s' "${PROJECT_ROOT}" "$$")"
     if [[ -L "${backup_dir}" ]]; then
         _error "${I18N_DATA['failed']}: 检测到备份路径被符号链接占用, 已中止自更新以防误删数据"
         return 1
@@ -722,7 +723,8 @@ function _update_xray_script() {
     # 后续读到新旧混杂的内容; rename 是原子的, 执行中的进程继续持有旧 inode, 不受影响。
     # 原子替换安装器: 用 mktemp 生成 0600 随机临时文件 (替代原固定名 ${CUR_FILE}.new.$$),
     # 避免 root 下固定名被预植符号链接导致 cp 穿透写入目标之外的文件; 写毕 mv -f 原子覆盖。
-    local self_new="$(umask 077; mktemp "${CUR_DIR}/.${CUR_FILE}.new.XXXXXX" 2>/dev/null || printf '%s/.%s.new.%s' "${CUR_DIR}" "${CUR_FILE}" "$$")"
+    local self_new
+    self_new="$(umask 077; mktemp "${CUR_DIR}/.${CUR_FILE}.new.XXXXXX" 2>/dev/null || printf '%s/.%s.new.%s' "${CUR_DIR}" "${CUR_FILE}" "$$")"
     if cp -f "${PROJECT_ROOT}/install.sh" "${self_new}" 2>/dev/null &&
         mv -f "${self_new}" "${CUR_DIR}/${CUR_FILE}" 2>/dev/null; then
         : # 替换成功

@@ -77,7 +77,13 @@ declare -A CONFIG_DATA # 用于临时存储用户输入的配置数据
 # --- 第三方引导脚本固定版本 (供应链防篡改) ---
 # XTLS install-release.sh: 固定到经验证的 commit, 并锁定其 SHA256 做逐字节校验,
 # 避免上游 main 分支被替换/投毒时静默执行恶意脚本。
-# 跟随上游最新版本时: 设 XRAY_INSTALL_REF=main 且 XRAY_INSTALL_SHA256= (置空即跳过摘要比对)。
+# 当前锁定 commit: e741a4f56d368afbb9e5be3361b40c4552d3710d
+#   可核验: https://github.com/XTLS/Xray-install/commit/e741a4f56d368afbb9e5be3361b40c4552d3710d
+# 更新流程 (REF 与 SHA256 必须成对更新, 缺一不可):
+#   1) 把 XRAY_INSTALL_REF 改为目标 commit;
+#   2) 重新计算摘要: curl -fsSL "${XRAY_INSTALL_URL}" | sha256sum, 输出填入 XRAY_INSTALL_SHA256;
+#   3) 二者任一过期都会让 _download_verified 校验失败 (fail-closed), 不会静默放行。
+# 跟随上游最新版本 (放弃固定): 设 XRAY_INSTALL_REF=main 且 XRAY_INSTALL_SHA256= (置空即跳过摘要比对)。
 declare XRAY_INSTALL_REF="${XRAY_INSTALL_REF-e741a4f56d368afbb9e5be3361b40c4552d3710d}"
 declare XRAY_INSTALL_URL="${XRAY_INSTALL_URL-https://raw.githubusercontent.com/XTLS/Xray-install/${XRAY_INSTALL_REF}/install-release.sh}"
 declare XRAY_INSTALL_SHA256="${XRAY_INSTALL_SHA256-7f70c95f6b418da8b4f4883343d602964915e28748993870fd554383afdbe555}"

@@ -971,7 +971,10 @@ function add_rule() {
         fi
     else
         # 规则不存在，创建新的规则 JSON 对象
-        local new_rule="[{\"ruleTag\":\"${rule_tag}\",\"${domain_or_ip}\":${value},\"outboundTag\":\"${outboundTag}\"}]"
+        # 安全加固: 改用 jq 构造 new_rule, 避免对 ${rule_tag}/${outboundTag}/${domain_or_ip} 做字符串插值后喂 --argjson
+        #           (含引号/反斜杠/换行会导致 jq 解析失败并中断规则持久化); 动态键用 ($domainOrIp) 实现。
+        local new_rule
+        new_rule="$(jq -nc --arg ruleTag "${rule_tag}" --arg ot "${outboundTag}" --arg domainOrIp "${domain_or_ip}" --argjson dom "${value}" '{ruleTag:$ruleTag, ($domainOrIp):$dom, outboundTag:$ot}')"
         # 如果指定了 target_tag
         if [[ -n "${target_tag}" ]]; then
             # 检查 target_tag 对应的规则是否存在

@@ -57,7 +57,7 @@ suffix for additional releases on the same day).
 ### 变更 Changed
 
 - **主菜单读取性能**：主循环每轮 3 次 fork `menu.sh`（banner / status / index）合并为单次 `--index-full`，只加载一次 i18n —— 实测约 64ms 降至约 22ms；渲染 37 行与原先逐字一致，选择语义（`5→5` / `1→1` / `0→255`）端到端验证等价。
-- **巨型函数拆分（可维护性，行为逐字符等价）**：`check_health_report`（539 行）→ 编排器 + 8 个 `_health_*` 分区 + `_health_summary`；`check_net_status`（163 行）→ 编排器 + `_net_collect`（只读采集）+ `_net_render`（渲染并算退出码）；`handler_xray_config`（140 行）→ 编排器 + 4 个 `_xray_*`；`handler_custom_site_update`（110 行）与 `handler_change_domain`（101 行）同样拆分；`show_sni_config`（48 行）→ 编排器 + 5 个 `_sni_block_*`。统一复用 bash 动态作用域做到零参数传递样板。
+- **巨型函数拆分（可维护性，行为逐字符等价）**：`check_health_report`（528 行）→ 编排器 + 8 个 `_health_*` 分区 + `_health_summary`；`check_net_status`（163 行）→ 编排器 + `_net_collect`（只读采集）+ `_net_render`（渲染并算退出码）；`handler_xray_config`（140 行）→ 编排器 + 4 个 `_xray_*`；`handler_custom_site_update`（110 行）与 `handler_change_domain`（101 行）同样拆分；`show_sni_config`（48 行）→ 编排器 + 5 个 `_sni_block_*`。统一复用 bash 动态作用域做到零参数传递样板。
 - **常量/正则单一来源**：`DOMAIN_REGEX`、`EMAIL_REGEX` 各两份副本收敛到 `core/_common.sh`（消除"改一处漏一处"的副本漂移）；用法错误退出码由散落 3 处的裸 `exit 2` 收口为 `readonly EXIT_USAGE=2`。
 - **DRY**：新增 `_remove_site_conf <domain>` 收口散落的站点清理 `rm` 对；`nginx.sh` 抽取 `_fetch_github_tag` 收敛两处逐字重复的版本获取管道，并改为先把响应收进变量再处理（消除 `head -1` 让仍在写的 `wget` 收到 SIGPIPE 141、污染整条管道退出码）。
 - **健壮性与体验**：`menu.sh` banner 在窄终端（<80 列）降级为单行标题，避免约 70 字符的 ASCII art 折行乱版；`_common.sh` 加 INT/TERM trap（明确提示并以 130 退出，便于区分"被中断"与"脚本出错"）；`check_port` 用 `10#${port}` 强制十进制，修复输入 `08` 时先甩出 bash 内部算术噪声；完整安装子菜单新增「0. 返回主菜单」；交互式一键安装完成后加过渡提示（行为不变，分享信息照常展示后回到管理菜单）。
@@ -106,7 +106,7 @@ suffix for additional releases on the same day).
 ### 安全 Security
 
 - **修复 acme.sh 安装脚本缺失供应链校验（P0）**：`service/ssl.sh` 原先引用一个全项目从未定义的 `ACME_SH_INSTALL_SHA256`，因 `:-` 兜底恒为空，导致 `_download_verified` 的 SHA256 摘要体检被**静默跳过**，只剩「体积 ≥512B」与「`bash -n`」两道弱校验，而下载物随后以 root 身份执行。
-  - 影响面：同为第三方安装脚本的 Xray（`core/handler.sh:83`）与 Docker（`service/docker.sh:54`）都内置了摘要常量，唯独 acme.sh 这一处绕开了项目在 `core/_common.sh:691` 自立的「三重体检」安全模型。
+  - 影响面：同为第三方安装脚本的 Xray（`core/handler.sh:83`）与 Docker（`service/docker.sh:54`）都内置了摘要常量，唯独 acme.sh 这一处绕开了项目在 `core/_common.sh` 的 `_download_verified`（约 755 行起）自立的「三重体检」安全模型。
   - 修复：新增 `declare ACME_SH_INSTALL_SHA256`（实测值，同一 URL 三次独立拉取逐字节一致）与 `declare ACME_SH_REF=3.1.6`，调用点传入摘要并通过 `BRANCH=` 前缀钉住第二阶段地址（上游默认取浮动的 `master`）。两者沿用 `${VAR-default}` 约定，可用环境变量覆盖。
   - 实测验证：正确摘要通过 / 篡改摘要被拒绝并清理临时文件 / 留空摘要仍通过 —— 三条结果与预期一致，反证旧路径确实毫无摘要保护。
   - ⚠️ 残余风险：官方 bootstrap 内部执行 `$_get "$_url" | sh`，**第二阶段仍是「边下边执行」且无摘要校验**，属上游自带写法。本次修复保证第一阶段来源可信；彻底消除需改用离线安装方式（取 pinned tag 的 acme.sh 本体 + 校验摘要 + `--install`），未在本改动中实施。

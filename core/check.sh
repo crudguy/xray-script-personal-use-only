@@ -44,7 +44,7 @@ readonly IPV4_REGEX='^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-
 readonly IPV6_REGEX='^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}$'                                            # IPv6 (简化版)
 readonly HEX_REGEX='^[0-9a-fA-F]+$'                                                                         # 十六进制字符串
 readonly UUID_REGEX='^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}$' # UUID
-readonly EMAIL_REGEX='^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'                                     # 邮箱地址
+# 注: EMAIL_REGEX 已迁至 core/_common.sh 作为单一来源 (与 service/ssl.sh 共用), 此处不再重复定义。
 
 # =============================================================================
 # 函数名称: _info

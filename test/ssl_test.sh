@@ -201,6 +201,19 @@ else
     bad "T6 DOMAIN_REGEX 守卫缺失 (src=$src_ok use=$use_ok noDupSsl=$no_dup_ssl noDupCheck=$no_dup_check)"
 fi
 
+# T6b 静态守卫: EMAIL_REGEX 单一来源 (_common.sh), ssl.sh / check.sh 均不重复定义且仍在使用
+esrc_ok=1; eno_dup_ssl=1; eno_dup_check=1; euse_ssl=1; euse_check=1
+grep -qE '^readonly EMAIL_REGEX=' "${SB}/core/_common.sh" && esrc_ok=0
+! grep -qE '^readonly EMAIL_REGEX=' "${SB}/service/ssl.sh" && eno_dup_ssl=0
+! grep -qE '^readonly EMAIL_REGEX=' "${REPO}/core/check.sh" && eno_dup_check=0
+grep -q '=~ ${EMAIL_REGEX}' "${SB}/service/ssl.sh" && euse_ssl=0
+grep -q '=~ $EMAIL_REGEX' "${REPO}/core/check.sh" && euse_check=0
+if [[ $esrc_ok -eq 0 ]] && [[ $eno_dup_ssl -eq 0 ]] && [[ $eno_dup_check -eq 0 ]] && [[ $euse_ssl -eq 0 ]] && [[ $euse_check -eq 0 ]]; then
+    ok "T6b EMAIL_REGEX 单一来源(_common.sh)且 ssl.sh/check.sh 无重复定义并仍使用"
+else
+    bad "T6b EMAIL_REGEX 守卫缺失 (src=$esrc_ok noDupSsl=$eno_dup_ssl noDupCheck=$eno_dup_check useSsl=$euse_ssl useCheck=$euse_check)"
+fi
+
 # T7 i18n: ssl.sh 引用的 .ssl.* 键在 zh.json 全部存在
 keys="$(grep -oE '_i18n "\.\$\{CUR_FILE\}\.[a-zA-Z0-9._-]+"' "${SB}/service/ssl.sh" \
         | sed -E 's/_i18n "\.\$\{CUR_FILE\}\.//; s/"//' | sort -u)"

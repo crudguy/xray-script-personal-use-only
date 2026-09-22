@@ -116,6 +116,8 @@ readonly SCRIPT_CONFIG_PATH="${SCRIPT_CONFIG_DIR}/config.json" # 脚本主配置
 # 校验共用, 防止 ".."、"*"、"/" 等非法字符进入 rm -rf / openssl / grep -E。集中定义可
 # 杜绝副本漂移 (历史上 check.sh 与 ssl.sh 各有一份, 改一处漏一处)。
 readonly DOMAIN_REGEX="^([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
+readonly EMAIL_REGEX='^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$' # 邮箱地址 (单一来源,
+#  与 DOMAIN_REGEX 同理: core/check.sh 与 service/ssl.sh 共用, 消除副本漂移)
 
 # --- 全局变量声明 ---
 # 语言参数: main.sh / install.sh 在解析 --lang 时写入, 供 load_i18n 优先采用。

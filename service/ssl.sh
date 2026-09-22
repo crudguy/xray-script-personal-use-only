@@ -47,13 +47,11 @@ readonly SSL_CERT_PATH="${NGINX_CONFIG_PATH}/certs"
 # valid_domain() 共用), 此处不再重复定义, 直接复用 _common.sh 注入的 DOMAIN_REGEX。
 # 用途: 校验证书域名参数, 防止 ".."、"*"、"/" 等非法字符进入 rm -rf / openssl / grep -E。
 
-# 邮箱格式正则 (与 core/check.sh 的 EMAIL_REGEX 保持一致)。
+# 邮箱格式正则 (单一来源: core/_common.sh 的 EMAIL_REGEX; 与 DOMAIN_REGEX 同类处理,
+#  由 _common.sh 注入本文件, 不再保留副本 —— test/ssl_test.sh 的 T6b 锁定该模式)。
 # 用途: 校验 ACME 账号邮箱 —— 该值会以 `sh -s email=...` 作为位置参数传给 acme.sh
 # 安装器, 不校验的话畸形输入会一路带到证书签发, 最后以"acme.sh 报错"的形式暴露,
 # 用户无从判断是自己填错还是脚本坏了。与域名同等对待, 在入口就拦下。
-# 注: 本文件不加载 core/check.sh, 故按项目既有模式在此保留一份副本 (见上方
-#     DOMAIN_REGEX 的同类处理; test/ssl_test.sh 的 T6 亦锁定该模式)。
-readonly EMAIL_REGEX='^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
 
 # --- 全局变量声明 ---
 declare ACTION=''

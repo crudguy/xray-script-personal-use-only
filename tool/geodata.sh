@@ -41,23 +41,31 @@ download_verified() {
     local want_sum=''
     local got_sum=''
 
-    # 下载数据文件与官方摘要文件 (任一失败即返回)
-    curl -L --connect-timeout 15 --retry 2 --max-time 900 -o "${dst}.new" "$url" || return 1
-    curl -L --connect-timeout 15 --retry 2 --max-time 60 -o "${dst}.sha256sum" "$sum_url" || return 1
+    # 安全加固: 临时文件前缀随机化 (mktemp --suffix 在 Linux 生效, 防预植符号链接), 后缀保留 .new/.sha256sum
+    #           以保持既有约定 (geodata_test.sh 的 mock curl 用后缀区分摘要/数据文件); 临时文件生成于 dst 同级
+    #           目录确保 mv -f 原子就位; macOS 不支持 --suffix 时自动回退为固定名, 行为与原版一致。
+    local dst_dir="${dst%/*}"
+    [[ "${dst_dir}" != "${dst}" ]] || dst_dir="."
+    local tmp_new="$(mktemp --suffix=.new "${dst_dir}/.geo.XXXXXX" 2>/dev/null || printf '%s.new' "${dst}")"
+    local tmp_sum="$(mktemp --suffix=.sha256sum "${dst_dir}/.geo.XXXXXX" 2>/dev/null || printf '%s.sha256sum' "${dst}")"
+
+    # 下载数据文件与官方摘要文件 (任一失败即清理并返回)
+    curl -L --connect-timeout 15 --retry 2 --max-time 900 -o "${tmp_new}" "$url" || { rm -f "${tmp_new}" "${tmp_sum}"; return 1; }
+    curl -L --connect-timeout 15 --retry 2 --max-time 60 -o "${tmp_sum}" "$sum_url" || { rm -f "${tmp_new}" "${tmp_sum}"; return 1; }
 
     # 摘要文件格式为 "<64位HEX>  <文件名>", 取第一列
-    want_sum="$(awk 'NR==1 {print $1}' "${dst}.sha256sum")"
-    got_sum="$(sha256sum "${dst}.new" | awk '{print $1}')"
-    rm -f "${dst}.sha256sum"
+    want_sum="$(awk 'NR==1 {print $1}' "${tmp_sum}")"
+    got_sum="$(sha256sum "${tmp_new}" | awk '{print $1}')"
+    rm -f "${tmp_sum}"
 
     # 摘要不一致说明下载被截断/被篡改, 丢弃新文件并报错
     if [ -z "$want_sum" ] || [ "$want_sum" != "$got_sum" ]; then
-        rm -f "${dst}.new"
+        rm -f "${tmp_new}"
         return 1
     fi
 
     # 校验通过后才原子替换, 避免校验失败时破坏已有数据
-    mv -f "${dst}.new" "${dst}"
+    mv -f "${tmp_new}" "${dst}"
     return 0
 }
 

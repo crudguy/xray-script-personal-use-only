@@ -1100,6 +1100,7 @@ function check_list_index() {
 # 返回值: 0-拥塞控制/qdisc/持久化三项均达标 1-存在未达标项
 # =============================================================================
 function check_net_status() {
+    # 所有采集/渲染共享变量集中声明, 供 _net_collect / _net_render 经 bash 动态作用域读写
     local bbr_module_file='/etc/modules-load.d/xray-script-personal-use-only-bbr.conf'
     local bbr_sysctl_file='/etc/sysctl.d/99-xray-script-personal-use-only-bbr.conf'
     local net_tune_file='/etc/sysctl.d/99-xray-script-personal-use-only-net.conf'
@@ -1109,16 +1110,26 @@ function check_net_status() {
     local total=0 hits=0 walked=0
     local persist_mod=0 persist_sysctl=0 persist_tune=0
     local ok_persist=0 rc=0
-    local txt_mod='' txt_cc='' txt_qdisc='' txt_avail=''
 
-    # ---------- 采集 (只读) ----------
+    _net_collect
+    _net_render
+    return "${rc}"
+}
+
+# =============================================================================
+# 函数名称: _net_collect
+# 功能描述: 采集网络优化状态 (只读), 结果写入 check_net_status 的共享 local 变量。
+#           分为: 内核版本 / BBR 模块状态 / 拥塞控制 / qdisc / 可用算法 /
+#           持久化标记 / 实时 BBR 采样。子函数不重复声明共享变量, 经由动态作用域回写父函数。
+# =============================================================================
+function _net_collect() {
     kver="$(uname -r 2>/dev/null || true)"
-    if [[ -z "${kver}" ]]; then kver='?'; fi
+    [[ -z "${kver}" ]] && kver='?'
 
     if cmd_exists 'lsmod'; then
         # 整段落变量再比对, 不用 `lsmod | grep -q` (见函数头 SIGPIPE 说明)
         mods="$(lsmod 2>/dev/null || true)"
-        if [[ "${mods}" == *'tcp_bbr'* ]]; then mod_state='yes'; fi
+        [[ "${mods}" == *'tcp_bbr'* ]] && mod_state='yes'
     else
         mod_state='unknown'
     fi
@@ -1129,13 +1140,13 @@ function check_net_status() {
         avail="$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || true)"
     fi
 
-    if [[ -e "${bbr_module_file}" ]]; then persist_mod=1; fi
-    if [[ -e "${bbr_sysctl_file}" ]]; then persist_sysctl=1; fi
-    if [[ -e "${net_tune_file}" ]]; then persist_tune=1; fi
+    [[ -e "${bbr_module_file}" ]] && persist_mod=1
+    [[ -e "${bbr_sysctl_file}" ]] && persist_sysctl=1
+    [[ -e "${net_tune_file}" ]] && persist_tune=1
     # 持久化达标 = 模块自加载 + 内核参数两份都落盘
-    if [[ "${persist_mod}" -eq 1 && "${persist_sysctl}" -eq 1 ]]; then ok_persist=1; fi
+    [[ "${persist_mod}" -eq 1 && "${persist_sysctl}" -eq 1 ]] && ok_persist=1
 
-    # ---------- 实时连接采样 ----------
+    # 实时连接采样
     # 用 sed -n '1,Np' 而不是 head: head 读够行数即退出, 上游 ss 收 SIGPIPE(141),
     # 在 pipefail 下整条管道被判失败 (head 是本项目已登记的坑)。
     if cmd_exists 'ss'; then
@@ -1148,18 +1159,16 @@ function check_net_status() {
                 continue
             fi
             # 只有信息行带前导空白 (表头行与 ESTAB 行顶格)
-            if [[ "${line}" != ' '* && "${line}" != $'\t'* ]]; then continue; fi
+            [[ "${line}" != ' '* && "${line}" != $'\t'* ]] && continue
             walked=$((walked + 1))
             ((walked <= 24)) || continue
             first=''
-            if [[ "${line}" =~ ^[[:space:]]*([^[:space:]]+) ]]; then
-                first="${BASH_REMATCH[1]}"
-            fi
+            [[ "${line}" =~ ^[[:space:]]*([^[:space:]]+) ]] && first="${BASH_REMATCH[1]}"
             [[ -n "${first}" ]] || continue
             # 信息行首个字段即该连接的拥塞控制算法名
             if [[ "${first}" == 'bbr' ]]; then
                 hits=$((hits + 1))
-                if [[ -z "${hit_sample}" ]]; then hit_sample="${line}"; fi
+                [[ -z "${hit_sample}" ]] && hit_sample="${line}"
             elif [[ -z "${miss_sample}" ]]; then
                 miss_sample="${line}"
             fi
@@ -1168,18 +1177,20 @@ function check_net_status() {
 
     # 从命中样例里挑几个能直接说明"真在走 BBR"的字段
     if [[ -n "${hit_sample}" ]]; then
-        if [[ "${hit_sample}" =~ pacing_gain:([0-9.]+) ]]; then
-            detail="${detail} pacing_gain=${BASH_REMATCH[1]}"
-        fi
-        if [[ "${hit_sample}" =~ (cwnd:[0-9]+) ]]; then
-            detail="${detail} ${BASH_REMATCH[1]}"
-        fi
-        if [[ "${hit_sample}" =~ (rtt:[0-9.]+/[0-9.]+) ]]; then
-            detail="${detail} ${BASH_REMATCH[1]}"
-        fi
+        [[ "${hit_sample}" =~ pacing_gain:([0-9.]+) ]] && detail="${detail} pacing_gain=${BASH_REMATCH[1]}"
+        [[ "${hit_sample}" =~ (cwnd:[0-9]+) ]] && detail="${detail} ${BASH_REMATCH[1]}"
+        [[ "${hit_sample}" =~ (rtt:[0-9.]+/[0-9.]+) ]] && detail="${detail} ${BASH_REMATCH[1]}"
     fi
+}
 
-    # ---------- 报告 ----------
+# =============================================================================
+# 函数名称: _net_render
+# 功能描述: 渲染网络优化状态报告 (写 >&2), 并据 cc/qdisc/持久化 计算退出码 rc。
+#           仅读取共享变量; rc 写回父函数共享 local (不在此处声明 local rc)。
+# =============================================================================
+function _net_render() {
+    local txt_mod='' txt_cc='' txt_qdisc='' txt_avail=''
+
     printf '\n%s\n' '======================================================' >&2
     printf '%s%s%s\n' "${GREEN}" "$(_i18n ".${CUR_FILE}.net_status.title")" "${NC}" >&2
     printf '%s\n' '======================================================' >&2
@@ -1259,8 +1270,6 @@ function check_net_status() {
         printf '%s%s%s\n' "${RED}" "$(_i18n ".${CUR_FILE}.net_status.done_bad")" "${NC}" >&2
     fi
     printf '\n' >&2
-
-    return "${rc}"
 }
 
 # =============================================================================

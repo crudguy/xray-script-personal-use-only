@@ -621,51 +621,55 @@ function show_fallback_config() {
 # 返回值: 无 (调用其他函数进行显示)
 # =============================================================================
 function show_sni_config() {
-    # 设置第一个配置的标签为 'sni_vision_reality'
+    # SNI 模式的 5 组配置按固定顺序展示。每组抽成 _sni_block_* 便于单读单改,
+    # 本编排器只保留"有哪几组、什么顺序"这一层信息。
+    # 注: 第 5 组 (reality_down) 不在此处 show_config —— 其调用方 (见本文件底部
+    #     `sni) show_sni_config; show_config ;;`) 会在本函数返回后统一补一次展示。
+    _sni_block_vision_reality
+    _sni_block_xhttp_reality
+    _sni_block_tls_down
+    _sni_block_xhttp_cdn
+    _sni_block_reality_down
+}
+
+# 组 1: SNI Vision Reality —— 直接使用当前 CLIENT_CONFIG, 不重取 common
+function _sni_block_vision_reality() {
     CLIENT_CONFIG[tag]='sni_vision_reality'
-    # 生成 Vision 分享链接
     get_vision_share_link
-    # 显示第一个配置
     show_config
+}
 
-    # 重新获取第二个 inbound (index 2) 的通用配置
+# 组 2: SNI XHTTP Reality
+function _sni_block_xhttp_reality() {
     get_common_config 2
-    # 设置第二个配置的标签为 'sni_xhttp_reality'
     CLIENT_CONFIG[tag]='sni_xhttp_reality'
-    # 生成 fallback 的 XHTTP 分享链接
     get_fallback_xhttp_share_link
-    # 显示第二个配置
     show_config
+}
 
-    # 重新获取第二个 inbound (index 2) 的通用配置
+# 组 3: SNI TLS Down
+function _sni_block_tls_down() {
     get_common_config 2
-    # 设置第三个配置的标签为 'sni_tls_down'
     CLIENT_CONFIG[tag]='sni_tls_down'
-    # 生成 TLS 下行的额外配置
     get_tls_down_json
-    # 生成 SNI TLS Down 分享链接
     get_sni_tls_down_share_link
-    # 显示第三个配置
     show_config
+}
 
-    # 重新获取第二个 inbound (index 2) 的通用配置
+# 组 4: SNI XHTTP CDN
+function _sni_block_xhttp_cdn() {
     get_common_config 2
-    # 设置第四个配置的标签为 'sni_xhttp_cdn'
     CLIENT_CONFIG[tag]='sni_xhttp_cdn'
-    # 清空额外配置
     XHTTP_EXTRA=""
-    # 生成 SNI TLS 分享链接
     get_sni_tls_share_link
-    # 显示第四个配置
     show_config
+}
 
-    # 重新获取第二个 inbound (index 2) 的通用配置
+# 组 5: SNI Reality Down —— 由调用方补 show_config, 故此处不调
+function _sni_block_reality_down() {
     get_common_config 2
-    # 设置第五个配置的标签为 'sni_reality_down'
     CLIENT_CONFIG[tag]='sni_reality_down'
-    # 生成 Reality 下行的额外配置
     get_reality_down_json
-    # 生成 SNI Reality Down 分享链接
     get_sni_reality_down_share_link
 }
 

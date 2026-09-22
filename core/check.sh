@@ -1429,7 +1429,6 @@ function check_health_report() {
     local audit_bytes='' xraylog_bytes=''
     local sub_count=0 sub_newest='' cfg_mtime=''
     local out='' line='' tmp='' tmp2=''
-
     local pass=0 warn=0 fail=0 item='' lvl=''
 
     # 每次调用都重置累计数组 —— 否则重复调用 (如测试里连续跑) 会叠加历史结论
@@ -1439,7 +1438,31 @@ function check_health_report() {
     printf '%s%s%s\n' "${GREEN}" "$(_i18n ".${CUR_FILE}.health.title")" "${NC}" >&2
     printf '%s\n' '======================================================' >&2
 
-    # ================= 1. 系统资源 =================
+    # 八个分区逐项巡检 —— 各自封装为 _health_* 子函数, 共享上面声明的采集变量
+    # (bash 动态作用域: 父函数 local 对调用的子函数可见), 既拆分巨型单函数、
+    # 又不引入参数传递样板。每节只负责往 _HEALTH_ITEMS 追加结论后由 _health_summary 汇总。
+    _health_system
+    _health_deps
+    _health_xray
+    _health_nginx
+    _health_ports
+    _health_certs
+    _health_kernel
+    _health_script
+
+    _health_summary
+    if [[ "${fail}" -gt 0 ]]; then return 1; fi
+    return 0
+}
+
+# =============================================================================
+# 函数名称: _health_system
+# 功能描述: 体检分区 1 —— 系统资源 (OS 版本 / 内核 / 可用内存 / 根分区可用空间)。
+#   磁盘/内存不足是"服务跑着跑着自己挂"的最常见底层原因。
+# 参数: 无 (读写 check_health_report 的采集变量)
+# 返回值: 无 (结论通过 _health_item 追加)
+# =============================================================================
+function _health_system() {
     _health_section "$(_i18n ".${CUR_FILE}.health.sec_system")"
 
     kver="$(uname -r 2>/dev/null || true)"
@@ -1504,8 +1527,16 @@ function check_health_report() {
     else
         _health_item 'skip' "$(_i18n ".${CUR_FILE}.health.disk_label")$(_i18n ".${CUR_FILE}.health.unknown")"
     fi
+}
 
-    # ================= 2. 依赖命令 =================
+# =============================================================================
+# 函数名称: _health_deps
+# 功能描述: 体检分区 2 —— 依赖命令。必需命令缺失会让核心流程直接不可用 (FAIL),
+#   可选命令缺失只影响个别功能 (WARN)。
+# 参数: 无
+# 返回值: 无
+# =============================================================================
+function _health_deps() {
     _health_section "$(_i18n ".${CUR_FILE}.health.sec_deps")"
 
     if cmd_exists 'systemctl'; then has_systemctl=1; fi
@@ -1535,8 +1566,15 @@ function check_health_report() {
     else
         _health_item 'pass' "$(_i18n ".${CUR_FILE}.health.deps_opt_label")$(_i18n ".${CUR_FILE}.health.deps_ok")"
     fi
+}
 
-    # ================= 3. Xray 服务 =================
+# =============================================================================
+# 函数名称: _health_xray
+# 功能描述: 体检分区 3 —— Xray 服务。单元 / 进程 / 二进制 / 配置四件套 + 访问日志目录权限。
+# 参数: 无
+# 返回值: 无
+# =============================================================================
+function _health_xray() {
     _health_section "$(_i18n ".${CUR_FILE}.health.sec_xray")"
 
     if [[ "${has_systemctl}" -eq 1 ]]; then
@@ -1588,8 +1626,16 @@ function check_health_report() {
     else
         _health_item 'warn' "$(_i18n ".${CUR_FILE}.health.xray_log_label")$(_i18n ".${CUR_FILE}.health.xray_log_open")"
     fi
+}
 
-    # ================= 4. Nginx 服务 =================
+# =============================================================================
+# 函数名称: _health_nginx
+# 功能描述: 体检分区 4 —— Nginx 服务。仅 SNI 场景存在, 故用 skip 语义而非硬判失败。
+#   检查单元 / 进程 / 配置语法 (-t) / HTTP3 模块 / worker 是否降权。
+# 参数: 无
+# 返回值: 无
+# =============================================================================
+function _health_nginx() {
     _health_section "$(_i18n ".${CUR_FILE}.health.sec_nginx")"
 
     if [[ -x "${ngx_prefix}/sbin/nginx" ]]; then ngx_present=1; fi
@@ -1601,6 +1647,7 @@ function check_health_report() {
     if [[ "${ngx_present}" -eq 0 ]]; then
         _health_item 'skip' "$(_i18n ".${CUR_FILE}.health.nginx_absent")"
     else
+        local ngx_pid='' ngx_user=''
         ngx_unit_ok=0 ngx_active=''
         if [[ "${has_systemctl}" -eq 1 ]]; then
             if systemctl cat 'nginx' >/dev/null 2>&1; then ngx_unit_ok=1; fi
@@ -1633,7 +1680,6 @@ function check_health_report() {
                 _health_item 'warn' "$(_i18n ".${CUR_FILE}.health.h3_module_label")$(_i18n ".${CUR_FILE}.health.h3_module_missing")"
             fi
             # Worker 用户是否仍为 root: 主配置 user nginx; 后, worker 应已降权
-            local ngx_pid='' ngx_user=''
             ngx_pid="$(cat /run/nginx.pid 2>/dev/null || true)"
             if [[ -n "${ngx_pid}" && -r "/proc/${ngx_pid}/status" ]]; then
                 ngx_user="$(awk -F': ' '/^Uid:/{print $2; exit}' "/proc/${ngx_pid}/status" 2>/dev/null | awk '{print $1}')"
@@ -1645,8 +1691,16 @@ function check_health_report() {
             fi
         fi
     fi
+}
 
-    # ================= 5. 端口归属 =================
+# =============================================================================
+# 函数名称: _health_ports
+# 功能描述: 体检分区 5 —— 端口归属。SNI 下 443 归 nginx、直连下归 xray, 归属错了会
+#   "看着在跑但连不上"; 顺带查 H3(UDP/443) 监听与防火墙放行、80 端口。
+# 参数: 无
+# 返回值: 无
+# =============================================================================
+function _health_ports() {
     _health_section "$(_i18n ".${CUR_FILE}.health.sec_port")"
 
     # SNI 模式判据: 配了主域名即认为走 SNI (与 backup.sh 的 _domains_in_use 同源)
@@ -1721,8 +1775,16 @@ function check_health_report() {
     else
         _health_item 'pass' "$(_i18n ".${CUR_FILE}.health.port80_label")${port80_name}"
     fi
+}
 
-    # ================= 6. TLS 证书 =================
+# =============================================================================
+# 函数名称: _health_certs
+# 功能描述: 体检分区 6 —— TLS 证书。对主域名 / CDN 域名 / 自定义站点域名去重后逐个查
+#   证书文件是否存在、剩余天数, 提前暴露"某天突然不能用"的到期问题。
+# 参数: 无
+# 返回值: 无
+# =============================================================================
+function _health_certs() {
     _health_section "$(_i18n ".${CUR_FILE}.health.sec_cert")"
 
     custom_doms=''
@@ -1776,8 +1838,15 @@ function check_health_report() {
             fi
         done
     fi
+}
 
-    # ================= 7. 内核网络 =================
+# =============================================================================
+# 函数名称: _health_kernel
+# 功能描述: 体检分区 7 —— 内核网络。复用 check_net_status 的判据, 但只出结论不重印整段报告。
+# 参数: 无
+# 返回值: 无
+# =============================================================================
+function _health_kernel() {
     _health_section "$(_i18n ".${CUR_FILE}.health.sec_net")"
 
     cc='' qdisc=''
@@ -1806,8 +1875,16 @@ function check_health_report() {
     else
         _health_item 'warn' "$(_i18n ".${CUR_FILE}.health.net_persist_label")$(_i18n ".${CUR_FILE}.health.net_persist_missing")"
     fi
+}
 
-    # ================= 8. 脚本配置与日志 =================
+# =============================================================================
+# 函数名称: _health_script
+# 功能描述: 体检分区 8 —— 脚本配置与日志。config.json 可解析性 + version/tag/path 一致性
+#   + 日志体积 + 日志轮转 + 订阅产物新鲜度。
+# 参数: 无
+# 返回值: 无
+# =============================================================================
+function _health_script() {
     _health_section "$(_i18n ".${CUR_FILE}.health.sec_script")"
 
     cfg_ok=0
@@ -1838,7 +1915,6 @@ function check_health_report() {
     if [[ -z "${audit_bytes}" && -z "${xraylog_bytes}" ]]; then
         _health_item 'skip' "$(_i18n ".${CUR_FILE}.health.log_label")$(_i18n ".${CUR_FILE}.health.unknown")"
     else
-        tmp=''
         lvl='pass'
         if [[ "${audit_bytes}" =~ ^[0-9]+$ ]] && ((10#${audit_bytes} > log_warn_bytes)); then lvl='warn'; fi
         if [[ "${xraylog_bytes}" =~ ^[0-9]+$ ]] && ((10#${xraylog_bytes} > log_warn_bytes)); then lvl='warn'; fi
@@ -1889,8 +1965,15 @@ function check_health_report() {
             _health_item 'pass' "$(_i18n ".${CUR_FILE}.health.sub_label")${sub_count}$(_i18n ".${CUR_FILE}.health.sub_unit")$(_i18n ".${CUR_FILE}.health.sub_sync")"
         fi
     fi
+}
 
-    # ================= 汇总 =================
+# =============================================================================
+# 函数名称: _health_summary
+# 功能描述: 汇总 _HEALTH_ITEMS 的三档结论, 打印合计与总体判断。
+# 参数: 无 (读写 check_health_report 的 pass/warn/fail 计数器与 _HEALTH_ITEMS)
+# 返回值: 无 (计数结果留在父函数的 pass/warn/fail 局部变量供 return 使用)
+# =============================================================================
+function _health_summary() {
     if [[ "${#_HEALTH_ITEMS[@]}" -gt 0 ]]; then
         for item in "${_HEALTH_ITEMS[@]}"; do
             lvl="${item%%|*}"
@@ -1905,7 +1988,7 @@ function check_health_report() {
     printf '\n%s\n' '------------------------------------------------------' >&2
     # 4 组 %s%s%s: 标签 + 三档各 (颜色, 文本, 复位); 格式符个数与参数个数必须一一对上,
     # 多一个 %s: 会让 printf 吃错参数 (只读复检时抓过一次)
-    printf '  %s: %s%s%s  %s%s%s  %s%s%s\n' \
+    printf '  %s%s%s  %s%s%s  %s%s%s\n' \
         "$(_i18n ".${CUR_FILE}.health.summary")" \
         "${GREEN}" "$(_i18n ".${CUR_FILE}.health.summary_pass") ${pass}" "${NC}" \
         "${YELLOW}" "$(_i18n ".${CUR_FILE}.health.summary_warn") ${warn}" "${NC}" \
@@ -1919,12 +2002,8 @@ function check_health_report() {
     fi
     printf '  %s\n' "$(_i18n ".${CUR_FILE}.health.no_probe_note")" >&2
     printf '\n' >&2
-
-    if [[ "${fail}" -gt 0 ]]; then
-        return 1
-    fi
-    return 0
 }
+
 
 # =============================================================================
 # 函数名称: main

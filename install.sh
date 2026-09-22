@@ -174,7 +174,8 @@ function _atomic_write() {
 # 以下 _os / _os_full / _os_ver / _gh_url / _atomic_write / load_i18n 与
 # core/_common.sh 中的同名函数同源 —— install.sh 被单独下载到 ${HOME} 执行,
 # 运行当时仓库尚不存在, 必须保持单文件自包含 (详见 _common.sh 文件头注释)。
-# 修改任一侧时请同步另一侧。
+# 修改任一侧时请同步另一侧: 两份实现的"代码体"一致性由 test/os_detect_sync_test.sh
+# 静态锁定, 任一侧改了函数逻辑而未同步另一侧时该测试立即失败 (仅注释措辞差异不触发)。
 # =============================================================================
 function _os() {
     local os=""

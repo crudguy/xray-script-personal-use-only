@@ -585,10 +585,20 @@ function source_compile() {
     local openssl_dir=''
     openssl_dir="$(tar -tzf "${openssl_version}.tar.gz" 2>/dev/null | head -1 | cut -d/ -f1)"
     [[ -n "${openssl_dir}" ]] || openssl_dir="${openssl_srcname}"
+    # 安全加固: openssl_dir 取自 tar 包顶层目录名 (外部可控), 加白名单防止路径穿越 / 命令注入进入 --with-openssl 参数
+    if [[ ! "${openssl_dir}" =~ ^[A-Za-z0-9._+-]+$ ]]; then
+        print_warn "OpenSSL 源码目录名异常 (${openssl_dir}), 已回退为 ${openssl_srcname}"
+        openssl_dir="${openssl_srcname}"
+    fi
 
     # 如果启用了 Brotli，则下载并初始化 ngx_brotli 模块
     if [[ "${is_enable_brotli}" =~ ^[Yy]$ ]]; then
         print_info "$(_i18n '.nginx.compile.fetch_brotli')"
+        # 安全加固: NGX_BROTLI_REF 可被环境变量覆盖, 加白名单拒绝 shell 元字符 (; & | $ 等), 防 eval 注入
+        if [[ ! "${NGX_BROTLI_REF}" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            print_error "NGX_BROTLI_REF 值非法 (${NGX_BROTLI_REF}), 已中止 Brotli 模块安装"
+            return 1
+        fi
         # 固定到经验证的 commit 后再初始化子模块 (避免跟随上游默认分支)
         _error_detect "git clone $(_gh_url https://github.com/google/ngx_brotli) && cd ngx_brotli && git checkout ${NGX_BROTLI_REF} && git submodule update --init"
         cd "${TMPFILE_DIR}" # 返回临时目录

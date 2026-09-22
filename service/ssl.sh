@@ -43,9 +43,9 @@ readonly NGINX_CONFIG_PATH='/usr/local/nginx/conf'
 readonly ACME_WEBROOT_PATH='/var/www/_zerossl'
 readonly SSL_CERT_PATH="${NGINX_CONFIG_PATH}/certs"
 
-# 域名格式正则 (与 core/check.sh 的 DOMAIN_REGEX 保持一致): 仅允许字母/数字/连字符/点。
+# 域名格式正则: 定义已迁至 core/_common.sh 作为单一来源 (与 core/check.sh 的
+# valid_domain() 共用), 此处不再重复定义, 直接复用 _common.sh 注入的 DOMAIN_REGEX。
 # 用途: 校验证书域名参数, 防止 ".."、"*"、"/" 等非法字符进入 rm -rf / openssl / grep -E。
-readonly DOMAIN_REGEX="^([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
 
 # 邮箱格式正则 (与 core/check.sh 的 EMAIL_REGEX 保持一致)。
 # 用途: 校验 ACME 账号邮箱 —— 该值会以 `sh -s email=...` 作为位置参数传给 acme.sh

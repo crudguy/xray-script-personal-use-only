@@ -39,7 +39,7 @@ readonly CONFIG_XRAY_DIR="${CONFIG_DIR}/xray"                  # Xray 配置文�
 
 # --- 正则表达式常量 ---
 # 定义各种数据格式的正则表达式，用于验证输入
-readonly DOMAIN_REGEX="^([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"                      # 域名
+# 注: DOMAIN_REGEX 已迁至 core/_common.sh 作为单一来源 (与 service/ssl.sh 共用), 此处不再重复定义。
 readonly IPV4_REGEX='^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$' # IPv4
 readonly IPV6_REGEX='^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}$'                                            # IPv6 (简化版)
 readonly HEX_REGEX='^[0-9a-fA-F]+$'                                                                         # 十六进制字符串

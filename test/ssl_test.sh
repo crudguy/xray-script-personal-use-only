@@ -189,12 +189,16 @@ else
     bad "T5 --issue 全链路失败 (rc=$rc)"; tail -20 "${SB}/t5.out" | sed 's/^/    /'
 fi
 
-# T6 静态守卫: DOMAIN_REGEX 定义且 --domain 已校验
-if grep -qE '^readonly DOMAIN_REGEX=' "${SB}/service/ssl.sh" && \
-   grep -q '\[\[ "${DOMAIN}" =~ ${DOMAIN_REGEX} \]\]' "${SB}/service/ssl.sh"; then
-    ok "T6 DOMAIN_REGEX 定义且 --domain 已校验"
+# T6 静态守卫: DOMAIN_REGEX 单一来源 (_common.sh), ssl.sh 使用且不重复定义, check.sh 不重复定义
+src_ok=1; use_ok=1; no_dup_ssl=1; no_dup_check=1
+grep -qE '^readonly DOMAIN_REGEX=' "${SB}/core/_common.sh" && src_ok=0
+grep -q '\[\[ "${DOMAIN}" =~ ${DOMAIN_REGEX} \]\]' "${SB}/service/ssl.sh" && use_ok=0
+! grep -qE '^readonly DOMAIN_REGEX=' "${SB}/service/ssl.sh" && no_dup_ssl=0
+! grep -qE '^readonly DOMAIN_REGEX=' "${REPO}/core/check.sh" && no_dup_check=0
+if [[ $src_ok -eq 0 ]] && [[ $use_ok -eq 0 ]] && [[ $no_dup_ssl -eq 0 ]] && [[ $no_dup_check -eq 0 ]]; then
+    ok "T6 DOMAIN_REGEX 单一来源(_common.sh)且 ssl.sh 使用 / 两处均无重复定义"
 else
-    bad "T6 DOMAIN_REGEX 守卫缺失"
+    bad "T6 DOMAIN_REGEX 守卫缺失 (src=$src_ok use=$use_ok noDupSsl=$no_dup_ssl noDupCheck=$no_dup_check)"
 fi
 
 # T7 i18n: ssl.sh 引用的 .ssl.* 键在 zh.json 全部存在

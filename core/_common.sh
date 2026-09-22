@@ -112,6 +112,11 @@ readonly I18N_DIR="${PROJECT_ROOT}/i18n"                       # 国际化文件
 readonly CONFIG_DIR="${PROJECT_ROOT}/config"                   # 配置文件目录
 readonly SCRIPT_CONFIG_PATH="${SCRIPT_CONFIG_DIR}/config.json" # 脚本主配置文件路径
 
+# 域名格式正则 (单一来源): core/check.sh 的 valid_domain() 与 service/ssl.sh 的 --domain
+# 校验共用, 防止 ".."、"*"、"/" 等非法字符进入 rm -rf / openssl / grep -E。集中定义可
+# 杜绝副本漂移 (历史上 check.sh 与 ssl.sh 各有一份, 改一处漏一处)。
+readonly DOMAIN_REGEX="^([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
+
 # --- 全局变量声明 ---
 # 语言参数: main.sh / install.sh 在解析 --lang 时写入, 供 load_i18n 优先采用。
 # 注: 其它脚本不写它, 但保留声明可让 `${LANG_PARAM}` 在 set -u 下安全引用。

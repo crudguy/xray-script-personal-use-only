@@ -1742,8 +1742,30 @@ function handler_custom_site_update() {
     CONFIG_DATA['site-count']="${custom_site_count}"
     exec_read 'site-index'
     site_index="${CONFIG_DATA['site-index']:-}"
-    current_site="$(get_custom_site_json_by_index "${site_index}")"
 
+    _custom_site_read_inputs
+    _custom_site_prepare
+
+    if [[ "${new_domain}" == "${old_domain}" ]]; then
+        _custom_site_apply_same
+    else
+        _custom_site_apply_change
+    fi
+
+    rm -f "${old_conf_backup}" "${stream_backup}"
+    SCRIPT_CONFIG="${updated_script_config}"
+    persist_script_config
+    echo -e "${GREEN}[$(_i18n '.title.info')]${NC} $(_i18n ".${CUR_FILE}.custom_sites.updated")${new_domain}" >&2
+}
+
+# =============================================================================
+# 函数名称: _custom_site_read_inputs
+# 功能描述: 提取选中自定义站点的旧值, 交互读取新的域名/代理目标, 计算 updated_script_config。
+# 参数: 无 (读写父函数 local: site_index / current_site / old_* / new_* / updated_script_config)
+# 返回值: 无
+# =============================================================================
+function _custom_site_read_inputs() {
+    current_site="$(get_custom_site_json_by_index "${site_index}")"
     old_domain="$(echo "${current_site}" | jq -r '.domain')"
     old_scheme="$(echo "${current_site}" | jq -r '.scheme')"
     old_host="$(echo "${current_site}" | jq -r '.host')"
@@ -1761,7 +1783,15 @@ function handler_custom_site_update() {
         --arg host "${new_host}" \
         --argjson port "${new_port}" \
         '.nginx.custom_sites[$idx] = {"domain": $domain, "scheme": $scheme, "host": $host, "port": $port}')"
+}
 
+# =============================================================================
+# 函数名称: _custom_site_prepare
+# 功能描述: 计算新旧站点配置/软链路径, 并备份旧站点 conf 与 stream.conf。
+# 参数: 无 (读写父函数 local: old_conf_path / new_conf_path / old_link_path / new_link_path / old_conf_backup)
+# 返回值: 无
+# =============================================================================
+function _custom_site_prepare() {
     old_conf_path="${NGINX_CONFIG_DIR}/sites-available/${old_domain}.conf"
     new_conf_path="${NGINX_CONFIG_DIR}/sites-available/${new_domain}.conf"
     old_link_path="${NGINX_CONFIG_DIR}/sites-enabled/${old_domain}.conf"
@@ -1769,60 +1799,73 @@ function handler_custom_site_update() {
     old_conf_backup="${SCRIPT_CONFIG_DIR}/${old_domain}.custom-site.bak.conf"
     [[ -f "${old_conf_path}" ]] && cp -f "${old_conf_path}" "${old_conf_backup}"
     [[ -f "${NGINX_CONFIG_DIR}/modules-enabled/stream.conf" ]] && cp -f "${NGINX_CONFIG_DIR}/modules-enabled/stream.conf" "${stream_backup}"
+}
 
-    if [[ "${new_domain}" == "${old_domain}" ]]; then
-        [[ "${new_proxy_target}" != "${old_proxy_target}" ]] && echo -e "${GREEN}[$(_i18n '.title.info')]${NC} $(_i18n ".${CUR_FILE}.custom_sites.upstream_only")" >&2
-        if ! render_custom_site_config "${new_domain}" "${new_scheme}" "${new_host}" "${new_port}" "${new_conf_path}"; then
-            [[ -f "${old_conf_backup}" ]] && mv -f "${old_conf_backup}" "${old_conf_path}"
-            rollback_stream_config_backup "${stream_backup}"
-            _error "failed to render custom site config"
-        fi
-        if ! ln -sf "${new_conf_path}" "${new_link_path}"; then
-            [[ -f "${old_conf_backup}" ]] && mv -f "${old_conf_backup}" "${old_conf_path}"
-            rollback_stream_config_backup "${stream_backup}"
-            _error "failed to enable custom site config"
-        fi
-        rebuild_stream_config "${updated_script_config}"
-
-        if ! test_and_reload_nginx; then
-            [[ -f "${old_conf_backup}" ]] && mv -f "${old_conf_backup}" "${old_conf_path}"
-            ln -sf "${old_conf_path}" "${old_link_path}" || true
-            rollback_stream_config_backup "${stream_backup}"
-            test_and_reload_nginx || true
-            _error "failed to update custom site ${old_domain}"
-        fi
-    else
-        exec_ssl '--issue' "--domain=${new_domain}" || _error "failed to issue certificate for ${new_domain}"
-        if ! render_custom_site_config "${new_domain}" "${new_scheme}" "${new_host}" "${new_port}" "${new_conf_path}"; then
-            rollback_stream_config_backup "${stream_backup}"
-            exec_ssl '--stop-renew' "--domain=${new_domain}" || true
-            _error "failed to render custom site config"
-        fi
-        if ! ln -sf "${new_conf_path}" "${new_link_path}"; then
-            rm -f "${new_conf_path}"
-            rollback_stream_config_backup "${stream_backup}"
-            exec_ssl '--stop-renew' "--domain=${new_domain}" || true
-            _error "failed to enable custom site config"
-        fi
-        rm -f "${old_conf_path}" "${old_link_path}"
-        rebuild_stream_config "${updated_script_config}"
-
-        if ! test_and_reload_nginx; then
-            rm -f "${new_conf_path}" "${new_link_path}"
-            [[ -f "${old_conf_backup}" ]] && mv -f "${old_conf_backup}" "${old_conf_path}"
-            ln -sf "${old_conf_path}" "${old_link_path}" || true
-            rollback_stream_config_backup "${stream_backup}"
-            exec_ssl '--stop-renew' "--domain=${new_domain}" || true
-            test_and_reload_nginx || true
-            _error "failed to switch custom site domain ${old_domain} -> ${new_domain}"
-        fi
-        exec_ssl '--stop-renew' "--domain=${old_domain}" || true
+# =============================================================================
+# 函数名称: _custom_site_apply_same
+# 功能描述: 同域名仅更新 upstream (代理目标): 渲染 conf -> 建链 -> 重建 stream -> 重载 Nginx。
+#           任一环节失败则从备份回滚并 _error。
+# 参数: 无 (使用父函数 local: new_domain / old_domain / new_conf_path / new_link_path /
+#           old_conf_backup / stream_backup / updated_script_config / old_proxy_target)
+# 返回值: 无
+# =============================================================================
+function _custom_site_apply_same() {
+    [[ "${new_proxy_target}" != "${old_proxy_target}" ]] && echo -e "${GREEN}[$(_i18n '.title.info')]${NC} $(_i18n ".${CUR_FILE}.custom_sites.upstream_only")" >&2
+    if ! render_custom_site_config "${new_domain}" "${new_scheme}" "${new_host}" "${new_port}" "${new_conf_path}"; then
+        [[ -f "${old_conf_backup}" ]] && mv -f "${old_conf_backup}" "${old_conf_path}"
+        rollback_stream_config_backup "${stream_backup}"
+        _error "failed to render custom site config"
     fi
+    if ! ln -sf "${new_conf_path}" "${new_link_path}"; then
+        [[ -f "${old_conf_backup}" ]] && mv -f "${old_conf_backup}" "${old_conf_path}"
+        rollback_stream_config_backup "${stream_backup}"
+        _error "failed to enable custom site config"
+    fi
+    rebuild_stream_config "${updated_script_config}"
 
-    rm -f "${old_conf_backup}" "${stream_backup}"
-    SCRIPT_CONFIG="${updated_script_config}"
-    persist_script_config
-    echo -e "${GREEN}[$(_i18n '.title.info')]${NC} $(_i18n ".${CUR_FILE}.custom_sites.updated")${new_domain}" >&2
+    if ! test_and_reload_nginx; then
+        [[ -f "${old_conf_backup}" ]] && mv -f "${old_conf_backup}" "${old_conf_path}"
+        ln -sf "${old_conf_path}" "${old_link_path}" || true
+        rollback_stream_config_backup "${stream_backup}"
+        test_and_reload_nginx || true
+        _error "failed to update custom site ${old_domain}"
+    fi
+}
+
+# =============================================================================
+# 函数名称: _custom_site_apply_change
+# 功能描述: 换域名: 申请新证书 -> 渲染 conf -> 建链 -> 删旧 -> 重建 stream -> 重载 Nginx。
+#           任一环节失败则从备份回滚、停止新域名续签并 _error。
+# 参数: 无 (使用父函数 local: new_domain / old_domain / new_conf_path / new_link_path /
+#           old_conf_path / old_link_path / old_conf_backup / stream_backup / updated_script_config)
+# 返回值: 无
+# =============================================================================
+function _custom_site_apply_change() {
+    exec_ssl '--issue' "--domain=${new_domain}" || _error "failed to issue certificate for ${new_domain}"
+    if ! render_custom_site_config "${new_domain}" "${new_scheme}" "${new_host}" "${new_port}" "${new_conf_path}"; then
+        rollback_stream_config_backup "${stream_backup}"
+        exec_ssl '--stop-renew' "--domain=${new_domain}" || true
+        _error "failed to render custom site config"
+    fi
+    if ! ln -sf "${new_conf_path}" "${new_link_path}"; then
+        rm -f "${new_conf_path}"
+        rollback_stream_config_backup "${stream_backup}"
+        exec_ssl '--stop-renew' "--domain=${new_domain}" || true
+        _error "failed to enable custom site config"
+    fi
+    rm -f "${old_conf_path}" "${old_link_path}"
+    rebuild_stream_config "${updated_script_config}"
+
+    if ! test_and_reload_nginx; then
+        rm -f "${new_conf_path}" "${new_link_path}"
+        [[ -f "${old_conf_backup}" ]] && mv -f "${old_conf_backup}" "${old_conf_path}"
+        ln -sf "${old_conf_path}" "${old_link_path}" || true
+        rollback_stream_config_backup "${stream_backup}"
+        exec_ssl '--stop-renew' "--domain=${new_domain}" || true
+        test_and_reload_nginx || true
+        _error "failed to switch custom site domain ${old_domain} -> ${new_domain}"
+    fi
+    exec_ssl '--stop-renew' "--domain=${old_domain}" || true
 }
 
 # =============================================================================
@@ -3055,105 +3098,124 @@ function handler_ssl_install() {
 # 返回值: 无 (通过文件操作和调用其他脚本执行)
 # =============================================================================
 function handler_change_domain() {
-    # 获取 XHTTP PATH
     local XHTTP_PATH
-    XHTTP_PATH="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.path')"
-    # 获取目标域名类型参数
     local target_domain="${1:-}"
-    # 获取管理停止证书签发服务参数
     local stop_cert_service="${2:-y}"
-    # 从脚本配置中获取旧域名
     local old_domain
+    local _new_domain=''
+    local _only_change_domain=''
+
+    _change_domain_read_inputs
+    _change_domain_render
+    _change_domain_issue
+
+    # 更新脚本配置中的域名 (nginx[target] / xray.target / xray.serverNames)
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg key "${target_domain}" --arg domain "${CONFIG_DATA["${target_domain}"]:-}" '.nginx[$key] = $domain')"
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg key "${target_domain}" --arg domain "${old_domain}" 'if $key == "domain" then del(.target[$key]) else . end')"
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg key "${target_domain}" --arg domain "${CONFIG_DATA["${target_domain}"]:-}" 'if $key == "domain" then .xray.target = $domain else . end')"
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg key "${target_domain}" --arg domain "${CONFIG_DATA["${target_domain}"]:-}" 'if $key == "domain" then .xray.serverNames = [$domain] else . end')"
+    rebuild_stream_config "${SCRIPT_CONFIG}"
+    persist_script_config
+
+    _change_domain_only_branch
+
+    handler_nginx_restart
+}
+
+# =============================================================================
+# 函数名称: _change_domain_read_inputs
+# 功能描述: 读取 XHTTP PATH 与旧域名, 同步 Nginx 支撑文件, 并按 stop_cert_service 决定
+#           是否交互读取新域名 (否则沿用旧域名)。
+# 参数: 无 (读写父函数 local: XHTTP_PATH / old_domain / target_domain / stop_cert_service / CONFIG_DATA)
+# 返回值: 无
+# =============================================================================
+function _change_domain_read_inputs() {
+    XHTTP_PATH="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.path')"
     old_domain="$(echo "${SCRIPT_CONFIG}" | jq -r --arg key "${target_domain}" '.nginx[$key]')"
     ensure_nginx_support_files || _error "failed to sync nginx support files"
-    # 如果 CONFIG_DATA 中没有新域名，且 stop_cert_service 为 "y"，则读取用户输入
+    # 若 CONFIG_DATA 无新域名且需停止证书服务, 则交互读取; 否则沿用旧域名
     if [[ -z "${CONFIG_DATA["${target_domain}"]:-}" && "${stop_cert_service}" == "y" ]]; then
         [[ "${old_domain}" ]] && exec_read 'only-change-domain'
         exec_read "${target_domain}"
     else
         CONFIG_DATA["${target_domain}"]="${old_domain}"
     fi
-    # 备份旧域名的 Nginx 配置文件
+}
+
+# =============================================================================
+# 函数名称: _change_domain_render
+# 功能描述: 备份旧域名的 stream.conf 与站点 conf, 删除旧 available/enabled, 复制模板 ->
+#           替换 example.com 与 /yourpath -> 对齐 HTTP/3 能力 -> 建立 available/enabled 软链。
+# 参数: 无 (使用父函数 local: target_domain / old_domain / XHTTP_PATH / CONFIG_DATA)
+# 返回值: 无
+# =============================================================================
+function _change_domain_render() {
     [[ -e "${NGINX_CONFIG_DIR}/modules-enabled/stream.conf" ]] && cp -f "${NGINX_CONFIG_DIR}/modules-enabled/stream.conf" "${SCRIPT_CONFIG_DIR}/stream.conf"
     if [[ -n "${old_domain}" && -e "${NGINX_CONFIG_DIR}/sites-available/${old_domain}.conf" ]]; then
         cp -f "${NGINX_CONFIG_DIR}/sites-available/${old_domain}.conf" "${SCRIPT_CONFIG_DIR}/${old_domain}.conf"
-        # 删除旧域名的 Nginx 配置文件 (available 与 enabled)
         rm -f "${NGINX_CONFIG_DIR}/sites-available/${old_domain}.conf"
         rm -f "${NGINX_CONFIG_DIR}/sites-enabled/${old_domain}.conf"
     fi
-    # 复制站点配置模板到 available 目录
     cp -f "${CONFIG_DIR}/nginx/conf/sites-available/${target_domain}.example.com.conf" "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf"
-    # 替换配置文件中的 example.com 为实际域名
     _replace_in_file "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf" "example.com" "${CONFIG_DATA["${target_domain}"]:-}"
-    # 替换配置文件中的 /yourpath 为 xhttp path
     _replace_in_file "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf" "/yourpath" "${XHTTP_PATH}"
-    # HTTP/3 指令与本地 Nginx 能力对齐 (未编译 http_v3 时剥离 quic, 见 align_site_http3)
     align_site_http3 "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf"
-    # 创建从 available 到 enabled 的软链接
     ln -sf "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf" "${NGINX_CONFIG_DIR}/sites-enabled/${CONFIG_DATA["${target_domain}"]:-}.conf"
-    # 为新域名申请 SSL 证书
+}
+
+# =============================================================================
+# 函数名称: _change_domain_issue
+# 功能描述: 为新域名申请 SSL 证书。成功且存在旧域名时停止旧域名续签; 失败则逐条容错回滚
+#           (恢复 stream.conf / 旧站点 conf 与软链 / 重启 Nginx) 后 exit 1, 避免站点落入
+#           新旧俱无的不可用状态 (修复: 原裸 mv 在 set -e 下中止导致回滚不完整)。
+# 参数: 无 (使用父函数 local: target_domain / old_domain / stop_cert_service)
+# 返回值: 无 (失败 exit 1)
+# =============================================================================
+function _change_domain_issue() {
     if exec_ssl '--issue' --domain="${CONFIG_DATA["${target_domain}"]:-}"; then
-        # 如果旧域名存在
         if [[ -n "${old_domain}" && "${stop_cert_service}" == "y" ]] && exec_ssl '--status' --domain="${old_domain}"; then
-            # 停止旧域名的证书续签
             exec_ssl '--stop-renew' --domain="${old_domain}"
         fi
     else
-        # 删除新配置 (available 与 enabled)
         rm -f "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf"
         rm -f "${NGINX_CONFIG_DIR}/sites-enabled/${CONFIG_DATA["${target_domain}"]:-}.conf"
-        # 恢复备份的 Nginx 配置文件
-        # 修复: 原为裸 `mv -f` —— 备份不存在时 mv 返回非 0, 在 set -e 下会**立即中止
-        #       整个函数**, 于是下面的"恢复旧域名配置 / 重建软链 / 重启 Nginx"全部
-        #       执行不到。而新站点配置已在上方被删除, 结果是**新旧两侧配置都没有**,
-        #       站点彻底不可用且没有提示 —— 换域名失败本应可回退, 却变成了最坏结果。
-        #       回滚路径必须逐条容错: 能恢复多少恢复多少, 最后统一重启。
+        # 回滚路径必须逐条容错: 能恢复多少恢复多少, 最后统一重启, 绝不因单条失败中止
         if [[ -f "${SCRIPT_CONFIG_DIR}/stream.conf" ]]; then
             mv -f "${SCRIPT_CONFIG_DIR}/stream.conf" "${NGINX_CONFIG_DIR}/modules-enabled/stream.conf" || true
         else
             print_warn "$(_i18n ".${CUR_FILE}.nginx.rollback_backup_missing")"
         fi
-        # 旧域名配置与软链成对恢复: 只有备份确实存在才建链, 避免指向不存在文件的坏链接
         if [[ -n "${old_domain}" && -f "${SCRIPT_CONFIG_DIR}/${old_domain}.conf" ]]; then
             mv -f "${SCRIPT_CONFIG_DIR}/${old_domain}.conf" "${NGINX_CONFIG_DIR}/sites-available/${old_domain}.conf" || true
             ln -sf "${NGINX_CONFIG_DIR}/sites-available/${old_domain}.conf" "${NGINX_CONFIG_DIR}/sites-enabled/${old_domain}.conf"
         fi
-        # 重启或启动 Nginx
         handler_nginx_restart
         exit 1
     fi
-    # 更新脚本配置中的域名
-    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg key "${target_domain}" --arg domain "${CONFIG_DATA["${target_domain}"]:-}" '.nginx[$key] = $domain')"
-    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg key "${target_domain}" --arg domain "${old_domain}" 'if $key == "domain" then del(.target[$key]) else . end')"
-    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg key "${target_domain}" --arg domain "${CONFIG_DATA["${target_domain}"]:-}" 'if $key == "domain" then .xray.target = $domain else . end')"
-    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg key "${target_domain}" --arg domain "${CONFIG_DATA["${target_domain}"]:-}" 'if $key == "domain" then .xray.serverNames = [$domain] else . end')"
-    rebuild_stream_config "${SCRIPT_CONFIG}"
-    # 将更新后的脚本配置写入文件
-    persist_script_config
-    # 如果仅更新域名
-    local _only_change_domain="${CONFIG_DATA['only-change-domain']:-}"
+}
+
+# =============================================================================
+# 函数名称: _change_domain_only_branch
+# 功能描述: 仅更新域名分支: 将备份的旧站点 conf 改名为新域名 conf, 替换其中旧域名为新域名,
+#           对齐 HTTP/3 能力并重建软链; 备份缺失则告警跳过 (修复: 原裸 mv 在 set -e 下中止)。
+# 参数: 无 (使用父函数 local: target_domain / old_domain / CONFIG_DATA)
+# 返回值: 无
+# =============================================================================
+function _change_domain_only_branch() {
+    _only_change_domain="${CONFIG_DATA['only-change-domain']:-}"
     if [[ "${_only_change_domain,,}" == "y" ]]; then
-        # 恢复备份的 Nginx 配置文件
-        # 修复: 同为裸 `mv -f` —— 备份缺失时返回非 0, 在 set -e 下直接中止, 后面的
-        #       "替换域名 / 对齐 HTTP3 / 重建软链 / 重启 Nginx"全部跳过, 站点配置被
-        #       留在改了一半的状态。这里先确认备份存在再执行整段, 否则告警并跳过。
-        local _new_domain="${CONFIG_DATA["${target_domain}"]:-}"
+        _new_domain="${CONFIG_DATA["${target_domain}"]:-}"
         if [[ -f "${SCRIPT_CONFIG_DIR}/${old_domain}.conf" ]]; then
             mv -f "${SCRIPT_CONFIG_DIR}/${old_domain}.conf" "${NGINX_CONFIG_DIR}/sites-available/${_new_domain}.conf" || true
             rm -f "${NGINX_CONFIG_DIR}/sites-enabled/${_new_domain}.conf"
-            # 更新域名
             _replace_in_file "${NGINX_CONFIG_DIR}/sites-available/${_new_domain}.conf" "${old_domain}" "${_new_domain}"
-            # 恢复到位的配置同样要对齐 HTTP/3 能力 (备份件可能来自未做对齐的旧版本)
             align_site_http3 "${NGINX_CONFIG_DIR}/sites-available/${_new_domain}.conf"
-            # 创建从 available 到 enabled 的软链接
             ln -sf "${NGINX_CONFIG_DIR}/sites-available/${_new_domain}.conf" "${NGINX_CONFIG_DIR}/sites-enabled/${_new_domain}.conf"
             rebuild_stream_config "${SCRIPT_CONFIG}"
         else
             print_warn "$(_i18n ".${CUR_FILE}.nginx.rollback_backup_missing")"
         fi
     fi
-    # 重启或启动 Nginx
-    handler_nginx_restart
 }
 
 # =============================================================================

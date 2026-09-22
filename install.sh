@@ -692,8 +692,15 @@ function _update_xray_script() {
     mkdir -vp "${temp_dir}"
     # 下载最新文件到临时目录 (钉在目标 commit 上, 保证与随后记录的 commit 一致)
     download_xray_script_files "${temp_dir}" "${target_sha}"
-    # 升级前把旧项目目录重命名为同级备份 (而非直接删除), 失败时可回滚
-    local backup_dir="${PROJECT_ROOT}.old.$$"
+    # 升级前把旧项目目录重命名为同级备份 (而非直接删除), 失败时可回滚。
+    # 安全加固: 备份名改用 mktemp -u 生成的不可预测随机后缀 (替代原 PID 名 ${PROJECT_ROOT}.old.$$),
+    #           消除 root 下"可预测临时名被预植符号链接"的 TOCTOU 竞态 (CWE-367);
+    #           并在删除/移动前显式拒绝已存在的符号链接, 防 rm -rf/mv 跟随链接穿透目标树。
+    local backup_dir="$(mktemp -u "${PROJECT_ROOT}.old.XXXXXX" 2>/dev/null || printf '%s.old.%s' "${PROJECT_ROOT}" "$$")"
+    if [[ -L "${backup_dir}" ]]; then
+        _error "${I18N_DATA['failed']}: 检测到备份路径被符号链接占用, 已中止自更新以防误删数据"
+        return 1
+    fi
     if [[ -d "${PROJECT_ROOT}" ]]; then
         rm -rf "${backup_dir}" 2>/dev/null || true
         mv -f "${PROJECT_ROOT}" "${backup_dir}" 2>/dev/null || backup_dir=''
@@ -712,7 +719,9 @@ function _update_xray_script() {
     # 在 ${PROJECT_ROOT} 就位, 本可以下次运行自然生效, 不该为此搭上整个入口。
     # 直接 cp 原地覆盖同样不行: 当前进程正按偏移读取这个脚本, 原地覆写会让 bash
     # 后续读到新旧混杂的内容; rename 是原子的, 执行中的进程继续持有旧 inode, 不受影响。
-    local self_new="${CUR_DIR}/.${CUR_FILE}.new.$$"
+    # 原子替换安装器: 用 mktemp 生成 0600 随机临时文件 (替代原固定名 ${CUR_FILE}.new.$$),
+    # 避免 root 下固定名被预植符号链接导致 cp 穿透写入目标之外的文件; 写毕 mv -f 原子覆盖。
+    local self_new="$(umask 077; mktemp "${CUR_DIR}/.${CUR_FILE}.new.XXXXXX" 2>/dev/null || printf '%s/.%s.new.%s' "${CUR_DIR}" "${CUR_FILE}" "$$")"
     if cp -f "${PROJECT_ROOT}/install.sh" "${self_new}" 2>/dev/null &&
         mv -f "${self_new}" "${CUR_DIR}/${CUR_FILE}" 2>/dev/null; then
         : # 替换成功

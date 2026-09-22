@@ -27,7 +27,7 @@ ok(){ if [[ $1 -eq 0 ]]; then pass=$((pass+1)); else fail=$((fail+1)); fi; }
 # ---------------------------------------------------------------------------
 extract core/handler.sh main > "$SB/h.sh"
 grep -Eq '^[[:space:]]*\*\)' "$SB/h.sh"; ok $? && echo "[T1a] handler.sh main() 含 * 默认分支" || echo "[FAIL T1a] handler.sh main() 缺少 * 默认分支"
-grep -q 'exit 2' "$SB/h.sh";            ok $? && echo "[T1b] handler.sh * 分支退出码为 2"      || echo "[FAIL T1b] handler.sh * 分支未 exit 2"
+grep -q 'EXIT_USAGE' "$SB/h.sh";        ok $? && echo "[T1b] handler.sh * 分支退出码为 EXIT_USAGE" || echo "[FAIL T1b] handler.sh * 分支未用 EXIT_USAGE"
 grep -q "handler.unknown_option" "$SB/h.sh"; ok $? && echo "[T1c] handler.sh 引用 i18n handler.unknown_option" || echo "[FAIL T1c] handler.sh 未引用 handler.unknown_option"
 
 # ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ grep -q "handler.unknown_option" "$SB/h.sh"; ok $? && echo "[T1c] handler.sh 引
 # ---------------------------------------------------------------------------
 extract core/generate.sh main > "$SB/g.sh"
 grep -Eq '^[[:space:]]*\*\)' "$SB/g.sh"; ok $? && echo "[T2a] generate.sh main() 含 * 默认分支" || echo "[FAIL T2a] generate.sh main() 缺少 * 默认分支"
-grep -q 'exit 2' "$SB/g.sh";            ok $? && echo "[T2b] generate.sh * 分支退出码为 2"    || echo "[FAIL T2b] generate.sh * 分支未 exit 2"
+grep -q 'EXIT_USAGE' "$SB/g.sh";        ok $? && echo "[T2b] generate.sh * 分支退出码为 EXIT_USAGE" || echo "[FAIL T2b] generate.sh * 分支未用 EXIT_USAGE"
 grep -q 'Unknown or unsupported option' "$SB/g.sh"; ok $? && echo "[T2c] generate.sh 打印 Unknown 用法" || echo "[FAIL T2c] generate.sh 未打印 Unknown 用法"
 
 # ---------------------------------------------------------------------------
@@ -69,7 +69,7 @@ grep -q '"unknown_option":' i18n/en.json; ok $? && echo "[T5b] en.json 含 handl
 # ---------------------------------------------------------------------------
 extract core/check.sh main > "$SB/c.sh"
 grep -Eq '^[[:space:]]*\*\)' "$SB/c.sh"; ok $? && echo "[T6a] check.sh main() 含 *) 默认分支"  || echo "[FAIL T6a] check.sh main() 缺少 *) 默认分支"
-grep -q 'exit 2' "$SB/c.sh";            ok $? && echo "[T6b] check.sh *) 分支退出码为 2"       || echo "[FAIL T6b] check.sh *) 分支未 exit 2"
+grep -q 'EXIT_USAGE' "$SB/c.sh";        ok $? && echo "[T6b] check.sh *) 分支退出码为 EXIT_USAGE" || echo "[FAIL T6b] check.sh *) 分支未用 EXIT_USAGE"
 grep -q 'unknown_option' "$SB/c.sh";    ok $? && echo "[T6c] check.sh 引用 unknown_option 文案" || echo "[FAIL T6c] check.sh 未引用 unknown_option 文案"
 
 # ---------------------------------------------------------------------------
@@ -81,6 +81,12 @@ check_block_has_key() { # $1=语言文件
 }
 check_block_has_key i18n/zh.json; ok $? && echo "[T7a] zh.json 的 check 段含 unknown_option" || echo "[FAIL T7a] zh.json 的 check 段缺 unknown_option"
 check_block_has_key i18n/en.json; ok $? && echo "[T7b] en.json 的 check 段含 unknown_option" || echo "[FAIL T7b] en.json 的 check 段缺 unknown_option"
+
+# ---------------------------------------------------------------------------
+# T8 [_common.sh] 必须定义 readonly EXIT_USAGE=2 作为用法错误退出码的单一来源
+#     (P1-3 收口: 三处 main() 的 `*` 分支原本各写裸 `exit 2`, 改为引用此常量)
+# ---------------------------------------------------------------------------
+grep -Eq 'readonly EXIT_USAGE=2' core/_common.sh; ok $? && echo "[T8a] _common.sh 定义 EXIT_USAGE=2" || echo "[FAIL T8a] _common.sh 未定义 readonly EXIT_USAGE=2"
 
 echo "==== unknown_option_test: PASS=$pass FAIL=$fail ===="
 rm -rf "$SB"

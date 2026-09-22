@@ -21,6 +21,11 @@ MAIN="$(awk '/^function main\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$SRC")"
 [[ -n "$RAND" && -n "$SHID" && -n "$MAIN" ]] || { bad "函数抽取失败"; echo "PASS=$PASS FAIL=$FAIL"; exit 1; }
 eval "$RAND"; eval "$SHID"
 
+# 本测试只抽取并 eval 函数体, 不 source _common.sh; 而 main() 的 `*)` 分支现引用共享常量
+# EXIT_USAGE (见 core/_common.sh), 故这里显式提供, 否则 set -u 下 `$EXIT_USAGE` 未绑定会
+# 让 `main --bogus` 误 exit 1 而非用法错误码 2。
+EXIT_USAGE=2
+
 # ---- od / openssl 桩件 (定死输入, 保证确定性) ----
 od()      { printf '4294967295\n'; }   # 最大 uint32
 openssl() { printf '%s' "${@: -1}"; }  # 回显长度参数, 验证长度透传

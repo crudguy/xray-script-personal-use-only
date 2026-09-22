@@ -119,6 +119,12 @@ readonly DOMAIN_REGEX="^([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]
 readonly EMAIL_REGEX='^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$' # 邮箱地址 (单一来源,
 #  与 DOMAIN_REGEX 同理: core/check.sh 与 service/ssl.sh 共用, 消除副本漂移)
 
+# 退出码约定 (单一来源): 用法错误统一用 EXIT_USAGE, 与"正常 0 / 真实故障 1"区分开。
+#   原本 check.sh / generate.sh / handler.sh 三处 main() 的 `*` 未知参数分支各写裸 `exit 2`,
+#   散落且语义不显; 收口为常量便于统一维护, 也避免将来误改某一处退出码 —— 监控/cron 依赖
+#   exit 2 识别"参数拼错", 改错一处会让 `core/check.sh --heath` 误报。
+readonly EXIT_USAGE=2
+
 # --- 全局变量声明 ---
 # 语言参数: main.sh / install.sh 在解析 --lang 时写入, 供 load_i18n 优先采用。
 # 注: 其它脚本不写它, 但保留声明可让 `${LANG_PARAM}` 在 set -u 下安全引用。

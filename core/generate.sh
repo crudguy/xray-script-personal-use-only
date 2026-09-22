@@ -340,12 +340,12 @@ function main() {
     --short-ids) generate_short_ids "$@" ;;       # 生成多个 Short ID
     --path) generate_path ;;                      # 生成路径
     # P1-3: 未知参数不再静默成功 (原本无 `*)` 分支, 传错 -> 什么都不做 -> exit 0)。
-    #   退出码 2 = 用法错误, 便于脚本化调用方区分"参数拼错"与"执行成功"。
+    #   退出码 EXIT_USAGE(=2) = 用法错误, 便于脚本化调用方区分"参数拼错"与"执行成功"。
     #   注: generate.sh 不加载 i18n, 故用硬编码英文提示。
     *)
         printf '%s: %s\n' "Unknown or unsupported option" "${option}" >&2
         printf 'Supported: --random --port --uuid --password --target --server-names --x25519 --short-id --short-ids --path\n' >&2
-        exit 2
+        exit "${EXIT_USAGE}"
         ;;
     esac
 }

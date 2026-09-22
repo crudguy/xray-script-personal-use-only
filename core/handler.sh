@@ -3422,10 +3422,10 @@ function main() {
     --import-config) handler_import_config "$@" ;; # 从归档还原配置与证书
     # P1-3: 未知/未支持的参数 -> 打印用法并退出。原本 case 无 `*)` 分支, 传错参数 ->
     # 什么都不做 -> exit 0, 放进 cron 的 `--health` 写成 `--heath` 会让监控永远绿。
-    # 退出码 2 = 用法错误, 与正常 0、真实故障 1 区分开。
+    # 退出码 EXIT_USAGE(=2) = 用法错误, 与正常 0、真实故障 1 区分开。
     *)
         printf "${RED}[%s]${NC} %s: %s\n" "$(_i18n '.title.error')" "$(_i18n '.handler.unknown_option')" "${option}" >&2
-        exit 2
+        exit "${EXIT_USAGE}"
         ;;
     esac
 

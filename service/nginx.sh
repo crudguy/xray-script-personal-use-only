@@ -795,8 +795,7 @@ function rollback_nginx_config() {
         fi
         [[ -n "${site_name}" && "${site_name}" != 'null' ]] || continue
         if [[ -f "${conf_dir}/sites-available/${site_name}.conf" ]]; then
-            rm -f "${conf_dir}/sites-available/${site_name}.conf"
-            rm -f "${conf_dir}/sites-enabled/${site_name}.conf"
+            _remove_site_conf "${site_name}"
             removed=$((removed + 1))
         fi
     done

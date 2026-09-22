@@ -803,3 +803,23 @@ function _download_verified() {
     printf '%s' "${tmp_file}"
     return 0
 }
+
+# =============================================================================
+# 函数名称: _remove_site_conf
+# 功能描述: 删除指定域名的 nginx 站点配置 (available + enabled 两处), 统一收口原本散落在
+#           handler.sh / nginx.sh 的 7 处 "rm -f sites-available/...; rm -f sites-enabled/..."
+#           重复对, 消除 DRY 隐患 (改一处漏一处的副本漂移)。幂等: 文件不存在时静默跳过。
+# 参数:
+#   $1: 站点域名 (site_name); 为空直接返回 0 (不报错)
+# 目录解析 (兼容两套变量名):
+#   - handler.sh 环境用 NGINX_CONFIG_DIR (${NGINX_PREFIX_DIR}/conf);
+#   - nginx.sh 环境用 NGINX_PATH/conf (其 conf_dir 局部变量);
+#   二者任一缺失时退回 /usr/local/nginx/conf, 确保删除路径与原调用点逐字符一致。
+# =============================================================================
+function _remove_site_conf() {
+    local site_name="${1:-}"
+    [[ -n "${site_name}" ]] || return 0
+    local conf_dir="${NGINX_CONFIG_DIR:-${NGINX_PATH:-/usr/local/nginx}/conf}"
+    rm -f "${conf_dir}/sites-available/${site_name}.conf"
+    rm -f "${conf_dir}/sites-enabled/${site_name}.conf"
+}

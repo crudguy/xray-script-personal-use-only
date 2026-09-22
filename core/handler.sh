@@ -3153,8 +3153,7 @@ function _change_domain_render() {
     [[ -e "${NGINX_CONFIG_DIR}/modules-enabled/stream.conf" ]] && cp -f "${NGINX_CONFIG_DIR}/modules-enabled/stream.conf" "${SCRIPT_CONFIG_DIR}/stream.conf"
     if [[ -n "${old_domain}" && -e "${NGINX_CONFIG_DIR}/sites-available/${old_domain}.conf" ]]; then
         cp -f "${NGINX_CONFIG_DIR}/sites-available/${old_domain}.conf" "${SCRIPT_CONFIG_DIR}/${old_domain}.conf"
-        rm -f "${NGINX_CONFIG_DIR}/sites-available/${old_domain}.conf"
-        rm -f "${NGINX_CONFIG_DIR}/sites-enabled/${old_domain}.conf"
+        _remove_site_conf "${old_domain}"
     fi
     cp -f "${CONFIG_DIR}/nginx/conf/sites-available/${target_domain}.example.com.conf" "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf"
     _replace_in_file "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf" "example.com" "${CONFIG_DATA["${target_domain}"]:-}"
@@ -3177,8 +3176,7 @@ function _change_domain_issue() {
             exec_ssl '--stop-renew' --domain="${old_domain}"
         fi
     else
-        rm -f "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf"
-        rm -f "${NGINX_CONFIG_DIR}/sites-enabled/${CONFIG_DATA["${target_domain}"]:-}.conf"
+        _remove_site_conf "${CONFIG_DATA["${target_domain}"]:-}"
         # 回滚路径必须逐条容错: 能恢复多少恢复多少, 最后统一重启, 绝不因单条失败中止
         if [[ -f "${SCRIPT_CONFIG_DIR}/stream.conf" ]]; then
             mv -f "${SCRIPT_CONFIG_DIR}/stream.conf" "${NGINX_CONFIG_DIR}/modules-enabled/stream.conf" || true

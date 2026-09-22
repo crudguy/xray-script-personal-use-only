@@ -3,8 +3,13 @@
 本文件记录 xray-script-personal-use-only 的所有重要变更。
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
-版本号沿用本项目既有的日期版本方案（`vYYYY-MM-DD`，同日多次发布加 `.N` 后缀）；
-每次发布都会 bump `config.json` 的 `version`，存量机器的自动更新以此为准。
+版本号沿用本项目既有的日期版本方案（`vYYYY-MM-DD`，同日多次发布加 `.N` 后缀）。
+
+关于 `config.json` 的 `version` 字段（勿照旧说法误解）：
+它**仅用于界面展示** —— `install.sh` 的 `_sync_script_version_label` 会在安装/更新时
+自动把它同步为仓库版本号，无需手工维护；而**判断"是否需要更新"以记录的 commit SHA
+比对为准**（`read_local_commit_sha` vs `get_remote_commit_sha`），与版本号完全无关。
+故发布时 bump 版本号只是为了让展示清晰，忘记 bump **不会**影响存量机器的自动更新。
 
 All notable changes to xray-script-personal-use-only are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).

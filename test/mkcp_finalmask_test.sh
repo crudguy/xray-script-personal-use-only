@@ -27,21 +27,25 @@ fi
 
 PASS=0; FAIL=0
 ok() { if [[ $1 -eq 0 ]]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "  [FAIL] $2"; fi; }
+# 传值断言 (不依赖 $?, 规避 SC2319: $? 紧跟在 [[ ]] 条件后被 shellcheck 判为风险)
+assert_eq() { # $1=msg $2=got $3=expected
+    if [[ "$2" == "$3" ]]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "  [FAIL] $1 (got '$2' want '$3')"; fi
+}
+assert_ne() { # $1=msg $2=got $3=unexpected
+    if [[ "$2" != "$3" ]]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "  [FAIL] $1 (got '$2' should not be '$3')"; fi
+}
 
 # ---------------------------------------------------------------------------
-# T1: 模板结构 —— 无旧 seed, 有 finalMask.mkpced-legacy
+# T1: 模板结构 —— 无旧 seed, 有 finalMask.udp[0].type=mkcp-legacy
 # ---------------------------------------------------------------------------
 nseed=$(jq '.inbounds[]? | .streamSettings.kcpSettings | has("seed")' config/xray/mKCP.json | grep -c true)
-[[ "$nseed" == "0" ]]
-ok $? "T1: mKCP.json 模板 kcpSettings 不应含 seed 键"
+assert_eq "T1: mKCP.json 模板 kcpSettings 不应含 seed 键" "$nseed" "0"
 
 type_ok=$(jq -r '.inbounds[]? | select(.tag=="VLESS-mKCP") | .streamSettings.finalMask.udp[0].type' config/xray/mKCP.json)
-[[ "$type_ok" == "mkcp-legacy" ]]
-ok $? "T1b: finalMask.udp[0].type == mkcp-legacy"
+assert_eq "T1b: finalMask.udp[0].type == mkcp-legacy" "$type_ok" "mkcp-legacy"
 
 hdr_ok=$(jq -r '.inbounds[]? | select(.tag=="VLESS-mKCP") | .streamSettings.finalMask.udp[0].settings.header' config/xray/mKCP.json)
-[[ "$hdr_ok" == "" ]]
-ok $? "T1c: finalMask.udp[0].settings.header == \"\" (AES-GCM 模式)"
+assert_eq "T1c: finalMask.udp[0].settings.header == \"\" (AES-GCM 模式)" "$hdr_ok" ""
 
 # ---------------------------------------------------------------------------
 # T2: 模拟 handler.sh 注入逻辑 (复用其真实 jq 语句) —— 注入后 value 正确, 旧字段消失
@@ -52,12 +56,10 @@ gen=$(jq --arg seed "$SEED" '
     | .inbounds[1].streamSettings.finalMask.udp[0].settings.value = $seed' config/xray/mKCP.json)
 
 val=$(echo "$gen" | jq -r '.inbounds[1].streamSettings.finalMask.udp[0].settings.value')
-[[ "$val" == "$SEED" ]]
-ok $? "T2: 注入后 finalMask.udp[0].settings.value == seed"
+assert_eq "T2: 注入后 finalMask.udp[0].settings.value == seed" "$val" "$SEED"
 
 old_seed=$(echo "$gen" | jq '.inbounds[1].streamSettings.kcpSettings | has("seed")')
-[[ "$old_seed" == "false" ]]
-ok $? "T2b: 注入后 kcpSettings 不再含 seed 键 (旧字段已移除)"
+assert_eq "T2b: 注入后 kcpSettings 不再含 seed 键 (旧字段已移除)" "$old_seed" "false"
 
 # ---------------------------------------------------------------------------
 # T3: 反读 —— 复用 share.sh 的真实 jq 逻辑, 从生成配置读回 seed
@@ -67,8 +69,7 @@ read_back=$(echo "$gen" | jq -r --argjson i 1 '
     | select(.type=="mkcp-legacy")
     | .settings.value?
     | if . == null then empty else . end')
-[[ "$read_back" == "$SEED" ]]
-ok $? "T3: 分享链接反读 seed == 注入值 (share.sh 逻辑)"
+assert_eq "T3: 分享链接反读 seed == 注入值 (share.sh 逻辑)" "$read_back" "$SEED"
 
 # ---------------------------------------------------------------------------
 # T4: 静态守卫 —— handler/share 不再引用旧字段, 已切到 finalMask
@@ -103,8 +104,8 @@ read_legacy=$(echo "$legacy" | jq -r --argjson i 1 '
     | select(.type=="mkcp-legacy")
     | .settings.value?
     | if . == null then empty else . end')
-[[ "$read_legacy" == "$SEED" && "$read_legacy" != "OLDSEED" ]]
-ok $? "T5(NEG): 旧 kcpSettings.seed 残留不影响读取 (仍读 finalMask.value)"
+assert_eq "T5(NEG): 旧 kcpSettings.seed 残留后仍从 finalMask 读取" "$read_legacy" "$SEED"
+assert_ne "T5b(NEG): 读取值不等于残留旧 seed" "$read_legacy" "OLDSEED"
 
 # ---------------------------------------------------------------------------
 echo "==== mkcp_finalmask_test: PASS=$PASS FAIL=$FAIL ===="

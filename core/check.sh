@@ -632,11 +632,19 @@ function get_tls_info() {
     #   会长时间挂住。用 timeout 强制限时 (超时返回 124), 使调用方能及时给出
     #   "TLS 探测失败" 的结论, 而不是把整个体检拖成假死。
     #   系统无 timeout 时退回原行为。
+    #
+    # 必须带 -servername (SNI): 此前不带 SNI 握手, 于是**多租户/按 SNI 分流**的站点
+    #   会拿不到对应证书而握手失败, 检测结论是"TLS 连接失败, 可能不支持 TLS 1.3",
+    #   可该域名其实完全可用 —— 用户被误拒, 且改多少次名都一样。
+    #   实测 (2026-09-23, 大陆网络): www.samsung.com / www.docker.com 不带 SNI 时
+    #   取不到 X25519 (判 FAIL), 带上 SNI 后 TLS 1.3 + X25519 均正常。
+    #   这也是与真实链路一致的做法: Reality 的 dest 收到的是**带 SNI** 的
+    #   ClientHello (serverName 来自 serverNames), 探测就该照此发起。
     if cmd_exists 'timeout'; then
         echo QUIT | timeout "${TLS_PROBE_TIMEOUT:-10}" \
-            stdbuf -oL openssl s_client -connect "${1:-}:443" -tls1_3 -alpn h2 2>&1 | tr -d '\0'
+            stdbuf -oL openssl s_client -connect "${1:-}:443" -servername "${1:-}" -tls1_3 -alpn h2 2>&1 | tr -d '\0'
     else
-        echo QUIT | stdbuf -oL openssl s_client -connect "${1:-}:443" -tls1_3 -alpn h2 2>&1 | tr -d '\0'
+        echo QUIT | stdbuf -oL openssl s_client -connect "${1:-}:443" -servername "${1:-}" -tls1_3 -alpn h2 2>&1 | tr -d '\0'
     fi
 }
 

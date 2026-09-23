@@ -102,6 +102,8 @@ printf '%s\n' "$FN_LANG" > "$TMPD/fn_lang.sh"
     printf '%s\n' '           printf %s "{\"language\":\"$3\"}";'
     printf '%s\n' '       else cat "${5:-$(cat)}" 2>/dev/null || true; fi; }'
     printf '%s\n' '_atomic_write() { cat > "$1"; }'
+    # _release_lock 在本测试里是 no-op: 不模拟父进程持锁, 只验证重启命令形态
+    printf '%s\n' '_release_lock() { :; }'
     # bash 桩: 记下重启命令(参数), 不真正拉起新进程; 返回 0 以走到 `&& exit 0`
     printf '%s\n' 'bash() { printf "%s\n" "$*" >> "${BASHLOG}"; return 0; }'
     printf '%s\n' 'exec_menu() { cat "${CHFILE}"; }'

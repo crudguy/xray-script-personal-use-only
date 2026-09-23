@@ -436,6 +436,11 @@ function processes_language() {
     SCRIPT_CONFIG="$(jq --arg language "${LANG_PARAM}" '.language = $language' "${SCRIPT_CONFIG_PATH}")"
     printf '%s\n' "${SCRIPT_CONFIG}" | _atomic_write "${SCRIPT_CONFIG_PATH}"
     # 重启脚本以重载 i18n, 并带 --menu 回到切换前所在的菜单层级
+    # 注意: 本进程已通过 _acquire_lock 持有单实例锁 (fd 9)。若直接 re-launch 子进程,
+    # 子进程 main() 会再次 _acquire_lock, 而父进程仍持锁 -> flock 冲突,
+    # 误报 "已有实例正在运行" (见用户日志: 选择 6 设置语言后报 lock_busy)。
+    # 故 re-launch 前先释放父锁, 由子进程独占接管; 父进程随后 exit, 不再触碰配置。
+    _release_lock
     bash "${CUR_DIR}/${CUR_FILE}.sh" --menu "${return_to}" && exit 0
 }
 
@@ -681,6 +686,23 @@ function _acquire_lock() {
     if ! flock -n 9; then
         _error "$(_i18n '.main.lock_busy')"
     fi
+}
+
+# =============================================================================
+# 函数名称: _release_lock
+# 功能描述: 释放单实例锁 (与 _acquire_lock 配对)。仅在即将 re-launch 子进程
+#           (语言切换重启脚本) 时调用, 把锁干净地交接给子进程, 避免子进程
+#           _acquire_lock 与父进程持锁冲突而误报 "已有实例正在运行"
+#           (见用户日志: 选择 6 设置语言后报 lock_busy, 根因是父进程仍持锁时
+#           又拉起一个会再次加锁的同脚本进程)。
+# 参数: 无
+# 返回值: 无
+# 说明: flock 不可用时 (NO_LOCK / 无 flock 命令 / 锁文件不可写) fd 9 根本未打开,
+#       下面两条均做了容错, 不会因 fd 未打开而报错。
+# =============================================================================
+function _release_lock() {
+    flock -u 9 2>/dev/null || true   # 释放 fd 9 上的锁 (若未持有则静默忽略)
+    exec 9>&- 2>/dev/null || true    # 关闭 fd 9, 彻底断开与锁文件的关联
 }
 
 # --- 脚本执行入口 ---

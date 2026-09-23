@@ -39,17 +39,6 @@
     "custom_sites": []
   },
   "target": {
-    "www.fandom.com": [
-      "fandom.com",
-      "www.fandom.com",
-      "toarumajutsunoindex.fandom.com",
-      "dragonball.fandom.com",
-      "pokemon.fandom.com",
-      "nichijou.fandom.com",
-      "bleach.fandom.com",
-      "naruto.fandom.com",
-      "onepiece.fandom.com"
-    ],
     "tidal.com": [
       "tidal.com"
     ],
@@ -74,11 +63,47 @@
     "www.ivi.tv": [
       "www.ivi.tv"
     ],
-    "www.leercapitulo.co": [
-      "www.leercapitulo.co"
-    ],
     "www.sky.com": [
       "www.sky.com"
+    ],
+    "www.sony.com": [
+      "www.sony.com"
+    ],
+    "www.lg.com": [
+      "www.lg.com"
+    ],
+    "www.asus.com": [
+      "www.asus.com"
+    ],
+    "www.microsoft.com": [
+      "www.microsoft.com"
+    ],
+    "www.apple.com": [
+      "www.apple.com"
+    ],
+    "www.amazon.com": [
+      "www.amazon.com"
+    ],
+    "www.cloudflare.com": [
+      "www.cloudflare.com"
+    ],
+    "store.steampowered.com": [
+      "store.steampowered.com"
+    ],
+    "www.nvidia.com": [
+      "www.nvidia.com"
+    ],
+    "www.intel.com": [
+      "www.intel.com"
+    ],
+    "www.hp.com": [
+      "www.hp.com"
+    ],
+    "www.java.com": [
+      "www.java.com"
+    ],
+    "www.adobe.com": [
+      "www.adobe.com"
     ]
   },
   "rules": [

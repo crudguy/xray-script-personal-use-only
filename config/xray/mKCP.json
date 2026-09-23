@@ -79,17 +79,6 @@
           "congestion": true,
           "readBufferSize": 5,
           "writeBufferSize": 5
-        },
-        "finalMask": {
-          "udp": [
-            {
-              "type": "mkcp-legacy",
-              "settings": {
-                "header": "",
-                "value": ""
-              }
-            }
-          ]
         }
       },
       "sniffing": {

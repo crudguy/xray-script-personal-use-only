@@ -211,7 +211,8 @@
       "private_key_hidden": "已生成并写入脚本配置, 此处不回显 (长期密钥, 避免被终端回滚/录屏/日志留存)。需要明文时可设置 SHOW_PRIVATE_KEY=1 后重跑"
     },
     "xray": {
-      "config_update": "正在更新 Xray 配置"
+      "config_update": "正在更新 Xray 配置",
+      "kcp_mask_fallback": "未能探测本机 Xray 的 mKCP 混淆写法（xray 未安装或不支持 -test），已按旧写法 kcpSettings.seed 写入。若 Xray 启动时报「mkcp header & seed has been removed」，请先更新 Xray 再重新配置。"
     },
     "purge": {
       "scope_notice": "本操作卸载 Xray（含其配置与日志），并清理本项目写入的 cron 定时任务与 Nginx 站点配置；Nginx、acme.sh（含已签发证书）与 Docker 容器不会被卸载。",

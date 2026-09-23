@@ -211,7 +211,8 @@
       "private_key_hidden": "Generated and written to the script config; not echoed here (long-term key, kept out of terminal scrollback/screencast/logs). Set SHOW_PRIVATE_KEY=1 and re-run to display it"
     },
     "xray": {
-      "config_update": "Updating Xray configuration"
+      "config_update": "Updating Xray configuration",
+      "kcp_mask_fallback": "Could not probe this host's Xray for its mKCP obfuscation syntax (xray missing or does not support -test); wrote the legacy kcpSettings.seed form instead. If Xray fails to start with \"mkcp header & seed has been removed\", update Xray and configure again."
     },
     "purge": {
       "scope_notice": "This operation removes Xray (including its configuration and logs), and cleans up the cron jobs and Nginx site configuration written by this project. Nginx, acme.sh (including issued certificates) and Docker containers are left untouched.",

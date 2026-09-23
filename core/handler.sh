@@ -470,6 +470,86 @@ function _verify_xray_config() {
 }
 
 # =============================================================================
+# 子函数名称: _kcp_mask_json
+# 功能描述: 按指定类型 id 生成 mKCP 的 finalmask 对象 (含 seed)。
+#           Xray 26.x 把 mKCP 的 seed/header 迁到了 finalmask, 但类型 id 中途改过名,
+#           两种写法的字段名也不同 (故此处按 id 分别拼装, 见 get_kcp_finalmask 的说明)。
+# 参数:
+#   $1: 类型 id (mkcp-legacy / mkcp-aes128gcm)
+#   $2: mKCP seed
+# 返回值: 0-stdout 打印 finalmask JSON; 1-未知 id
+# =============================================================================
+function _kcp_mask_json() {
+    local id="${1:-}" seed="${2:-}"
+    case "${id}" in
+    # 空 header + 非空 value = AES-128-GCM, value 即密码 (与旧 kcpSettings.seed 等价)
+    mkcp-legacy)
+        jq -nc --arg seed "${seed}" '{udp:[{type:"mkcp-legacy",settings:{header:"",value:$seed}}]}'
+        ;;
+    mkcp-aes128gcm)
+        jq -nc --arg seed "${seed}" '{udp:[{type:"mkcp-aes128gcm",settings:{password:$seed}}]}'
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+}
+
+# =============================================================================
+# 函数名称: get_kcp_finalmask
+# 功能描述: 生成 mKCP 的 finalmask 配置, 类型 id 由本机 xray 二进制实测选定。
+#
+#   背景 (2026-09-23 实测上游源码确认): Xray 26.x 把 mKCP 的 seed/header 迁进 finalmask,
+#   但类型 id 在 26.6 前后改过一次名, 两种写法互不兼容 —— 写错一边, Xray 会以
+#   "unknown config id" 拒绝加载**整份**配置 (实测 26.3.27 报 unknown config id: mkcp-legacy):
+#     A) mkcp-legacy    + settings.{header:"", value:"<seed>"}   26.6 起 / 当前主线
+#     B) mkcp-aes128gcm + settings.password:"<seed>"             26.2.6 ~ 26.5.x
+#   两者的线上协议完全一致 (空 header + 密码即 AES-128-GCM, 密码为 seed, 与旧
+#   kcpSettings.seed 一一对应), 差别只在配置写法。既然写错任一边都是"整份配置加载失败",
+#   就不写死版本号 (记错一次即复发), 改为拿本机已装的 xray 逐个试跑: 用 xray 自己的
+#   `run -test` 校验最小配置, 取第一个被接受的写法 —— 上游日后再改名也能自适应。
+#
+# 参数:
+#   $1: mKCP seed (config.json 的 .xray.kcp)
+# 返回值: 0-stdout 打印可嵌入 streamSettings 的 finalmask JSON
+#         1-无法判定 (xray 缺失 / 不支持 -test / 两种写法都不被接受), 由调用方回退
+# =============================================================================
+function get_kcp_finalmask() {
+    local seed="${1:-}"
+    local id='' json='' tmp_dir='' tmp_file=''
+    # 探测依赖本机 xray 二进制; 未安装时无从判断, 直接交给调用方回退
+    cmd_exists 'xray' || return 1
+    # 临时文件落点: 与 _download_verified 同一套回退顺序
+    tmp_dir="${TMPFILE_DIR:-${SCRIPT_CONFIG_DIR}}"
+    if [[ ! -d "${tmp_dir}" || ! -w "${tmp_dir}" ]]; then
+        tmp_dir="${TMPDIR:-/tmp}"
+    fi
+    tmp_file="$(mktemp "${tmp_dir%/}/.${SCRIPT_NAME}-kcp.XXXXXXXX")" || return 1
+    for id in 'mkcp-legacy' 'mkcp-aes128gcm'; do
+        json="$(_kcp_mask_json "${id}" "${seed}")" || continue
+        # 最小配置: 只留一个 mKCP 入站与一个 freedom 出站, 不引路由/geoip/DNS ——
+        # 探测只关心 finalmask 的类型 id 能否被解析, 配置越简单越不会被无关原因误判。
+        # -test 只解析配置不监听端口, 所以这里写个高位端口即可。
+        jq -nc --argjson fm "${json}" '{
+            log: {loglevel: "none"},
+            inbounds: [{
+                tag: "kcp-mask-probe", listen: "127.0.0.1", port: 65123, protocol: "vless",
+                settings: {clients: [{id: "00000000-0000-0000-0000-000000000001"}], decryption: "none"},
+                streamSettings: {network: "kcp", kcpSettings: {}, finalmask: $fm}
+            }],
+            outbounds: [{protocol: "freedom"}]
+        }' >"${tmp_file}" 2>/dev/null || continue
+        if xray run -test -config "${tmp_file}" >/dev/null 2>&1; then
+            rm -f "${tmp_file}"
+            printf '%s' "${json}"
+            return 0
+        fi
+    done
+    rm -f "${tmp_file}"
+    return 1
+}
+
+# =============================================================================
 # 函数名称: persist_xray_config
 # 功能描述: 将内存中的 Xray 配置落盘 (原子写)。为防写坏生产配置, 增加三道护栏:
 #           1) 写前用 jq -e 校验待写入内容是合法 JSON, 非法直接拒绝写入;
@@ -1479,12 +1559,25 @@ function _xray_apply_inbounds() {
     # 根据配置标签更新特定字段 (第二部分)
     case "${CONFIG_TAG,,}" in
     mkcp)
-        # Xray 26.x 起 mKCP 的 seed 字段已移除, 改用 FinalMask:
-        #   streamSettings.finalMask.udp[0] = {type:"mkcp-legacy", settings:{header:"", value:"<原seed>"}}
-        #   (官方: header 为空 = AES-128-GCM 加密, value 为其密码; 旧 seed 即此密码, 语义完整保留)
-        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg seed "${KCP_SEED}" '
-            .inbounds[1].streamSettings.finalMask |= (. // {"udp":[{"type":"mkcp-legacy","settings":{"header":"","value":""}}]})
-            | .inbounds[1].streamSettings.finalMask.udp[0].settings.value = $seed')"
+        # Xray 26.x 起 mKCP 的 seed 字段已移除, 改用 finalmask; 具体用哪个类型 id
+        # 由 get_kcp_finalmask 拿本机 xray 实测选定 (26.3.27 只认 mkcp-aes128gcm,
+        # 26.6+ 只认 mkcp-legacy, 两者线上协议一致)。
+        local KCP_MASK=''
+        if KCP_MASK="$(get_kcp_finalmask "${KCP_SEED}")"; then
+            # 顺手 del 掉 camelCase 旧键: Go 的 json 解码对键名大小写不敏感, 若模板/旧配置里
+            # 残留一个 finalMask, 与这里的 finalmask 并存时取值取决于出现顺序, 留着就是隐患。
+            XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson fm "${KCP_MASK}" '
+                .inbounds[1].streamSettings |= (del(.finalMask) | .finalmask = $fm)')"
+        else
+            # 探测不出 (xray 未安装 / 不支持 -test): 退回旧写法 kcpSettings.seed。
+            # 特意选"旧写法"而不是硬猜一个 finalmask id —— 旧写法在 26.2+ 会被 xray 明确
+            # 拒绝 (mkcp header & seed 已移除), 由上层校验拦下并回滚, 是一眼可见的失败;
+            # 而猜错的 finalmask id 在 ≤26.5 的 xray 上属于未知字段, 会被静默忽略 ——
+            # 配置照常加载, 但混淆对不上, 属静默故障, 比报错难查得多。
+            print_warn "$(_i18n '.handler.xray.kcp_mask_fallback')"
+            XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg seed "${KCP_SEED}" '
+                .inbounds[1].streamSettings.kcpSettings.seed = $seed')"
+        fi
         ;;
     vision | xhttp | trojan | fallback | sni)
         if [[ "${CONFIG_TAG,,}" != 'sni' ]]; then

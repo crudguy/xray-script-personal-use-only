@@ -227,12 +227,16 @@ function get_common_config() {
     # 从 Xray 配置中获取客户端密码 (Trojan)
     CLIENT_CONFIG[password]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].settings.clients[0].password? | if . == null then empty else . end')"
     # 从 Xray 配置中获取 mKCP 的种子 (seed)
-    # Xray 26.x 起 seed 已迁移到 finalMask.udp[].settings.value (type=mkcp-legacy), 故从此处读取
+    # Xray 26.x 起 seed 迁进 finalmask, 且类型 id 改过名 —— mkcp-legacy 用 settings.value,
+    # mkcp-aes128gcm 用 settings.password, 两种都要认; 更老的配置还可能留 kcpSettings.seed。
+    # 取首个命中项 (finalmask.udp 理论上可有多条), 并容忍残留的 camelCase finalMask 键。
     CLIENT_CONFIG[seed]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '
-        .inbounds[$i].streamSettings.finalMask.udp[]?
-        | select(.type=="mkcp-legacy")
-        | .settings.value?
-        | if . == null then empty else . end')"
+        .inbounds[$i].streamSettings as $ss
+        | ( [ ($ss.finalmask // $ss.finalMask).udp[]?
+              | select(.type == "mkcp-legacy" or .type == "mkcp-aes128gcm")
+              | (.settings.value // .settings.password) ][0]
+            // $ss.kcpSettings.seed
+            // "" )')"
     # 从 Xray 配置中获取网络传输类型 (如 tcp, kcp, xhttp)
     CLIENT_CONFIG[type]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.network? | if . == null then empty else . end')"
     # 从 Xray 配置中获取 Flow 控制参数 (如 xtls-rprx-vision)

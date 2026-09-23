@@ -19,7 +19,8 @@
     "backup_input_path": "备份归档路径(e.g. /root/.xray-script-personal-use-only/backup/xxx.tar.gz): ",
     "backup_ipath_required": "未指定备份归档路径，已取消导入",
     "usage": "用法: xray-script-personal-use-only.sh [选项]\n  无参数            进入交互式管理菜单\n  --vision | --xhttp | --fallback   一键快速安装对应协议\n  --health | --net-status | --bbr | --net-tune | --nofile-limit   只读体检/调优 (可放进 cron)\n  --export-config | --import-config   配置备份与迁移 (可脚本化)\n  --subscription   生成订阅配置\n  --help, -h   显示本帮助",
-    "install_done_tip": "安装完成！分享信息见上方。已自动进入管理菜单 —— 按 0 退出脚本，或选择其它数字继续配置。"
+    "install_done_tip": "安装完成！分享信息见上方。已自动进入管理菜单 —— 按 0 退出脚本，或选择其它数字继续配置。",
+    "pause_hint": "按回车返回菜单，输入 q 退出脚本"
   },
   "menu": {
     "banner_compact": "Xray Script —— 一键部署与管理",

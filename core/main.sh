@@ -339,6 +339,50 @@ function _require_warp_enabled() {
 }
 
 # =============================================================================
+# 函数名称: _pause_after_action
+# 功能描述: "输出型"命令 (分享 / 流量 / 体检 / 订阅) 执行后暂停, 让用户读完输出再回菜单。
+# 参数: 无
+# 返回值: 恒 0 (回车 = 回菜单; q/Q = 直接退出脚本)
+# 说明: 为什么需要它 —— 菜单每轮重绘 banner(10 行) + 状态(7 行) + 菜单(21 行) + 提示(1 行)
+#       ≈ 39 行, 而菜单 7 的分享链接 + 二维码、菜单 10 的体检报告本身也是三四十行。
+#       两者体量相当, "打印后立刻重绘" 会把刚输出的内容整屏顶走 (24 行终端直接看不见),
+#       用户必须上翻回看。加一次暂停即把"读输出"与"回菜单"解耦。
+#
+#       交互门控 (关键): 非交互场景 (管道 / 重定向 / cron / 脚本化) 下直接返回, 绝不阻塞。
+#       - XRAY_MENU_PAUSE=auto   (默认) 仅当 stdin 是 TTY 才暂停;
+#       - XRAY_MENU_PAUSE=always 强制暂停 (供测试在管道下驱动);
+#       - XRAY_MENU_PAUSE=never  永不暂停。
+#       TTY 门控同时保证既有测试不受影响: menu_submenu_loop_test / menu_guard_soft_fail_test
+#       用管道按序喂输入, 若无条件 read 会多吃一项导致断言错位 —— 门控下自动跳过。
+#
+#       只挂"输出型"命令, 动作型 (启停 / 重启 / 改配置) 不挂: 后者的输出只有一两行,
+#       且用户常连续操作多次, 每步都强加一次回车反而变成负担。
+# =============================================================================
+
+function _pause_after_action() {
+    local mode="${XRAY_MENU_PAUSE:-auto}"
+    if [[ "${mode}" == 'never' ]]; then
+        return 0
+    fi
+    # auto: 只在确有交互终端时暂停。管道/重定向下 stdin 非 TTY -> 立即返回。
+    if [[ "${mode}" != 'always' && ! -t 0 ]]; then
+        return 0
+    fi
+
+    echo >&2
+    printf "${YELLOW}[%s] ${NC}%s: " "$(_i18n '.title.tip')" "$(_i18n '.main.pause_hint')" >&2
+    local answer=''
+    # read 在 EOF (Ctrl+D / 输入耗尽) 时返回非 0 —— 必须接住, 否则被 set -e / ERR trap
+    # 判成"脚本意外失败"; 取空串即等价于回车 (回菜单)。
+    read -r answer || answer=''
+    if [[ "${answer}" == 'q' || "${answer}" == 'Q' ]]; then
+        echo >&2
+        exit 0
+    fi
+    return 0
+}
+
+# =============================================================================
 # 函数名称: processes_routing
 # 功能描述: 处理路由规则配置相关的流程。
 #           1. 显示路由规则菜单。
@@ -609,11 +653,11 @@ function processes_index() {
         4) exec_handler '--start' ;;      # 选择 4：启动服务
         5) exec_handler '--stop' ;;       # 选择 5：停止服务
         6) exec_handler '--restart' ;;    # 选择 6：重启服务
-        7) exec_handler '--share' ;;      # 选择 7：显示分享链接
-        8) exec_handler '--traffic' ;;    # 选择 8：显示流量统计
+        7) exec_handler '--share'; _pause_after_action ;;   # 选择 7：显示分享链接 (输出型: 暂停)
+        8) exec_handler '--traffic'; _pause_after_action ;; # 选择 8：显示流量统计 (输出型: 暂停)
         9) processes_config ;;            # 选择 9：进入配置管理流程
-        10) exec_handler '--health' ;;       # 选择 10：一键全量体检 (只读)
-        11) exec_handler '--subscription' ;; # 选择 11：生成订阅
+        10) exec_handler '--health'; _pause_after_action ;;       # 选择 10：一键全量体检 (只读, 输出型: 暂停)
+        11) exec_handler '--subscription'; _pause_after_action ;; # 选择 11：生成订阅 (输出型: 暂停)
         *) exit 0 ;;                      # 其他情况：退出脚本
         esac
     done

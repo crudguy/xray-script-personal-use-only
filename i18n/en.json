@@ -19,7 +19,8 @@
     "backup_input_path": "Backup archive path (e.g. /root/.xray-script-personal-use-only/backup/xxx.tar.gz): ",
     "backup_ipath_required": "No backup archive path given; import cancelled",
     "usage": "Usage: xray-script-personal-use-only.sh [options]\n  (no args)          interactive management menu\n  --vision | --xhttp | --fallback   one-click quick install of the protocol\n  --health | --net-status | --bbr | --net-tune | --nofile-limit   read-only check/tune (cron-safe)\n  --export-config | --import-config   config backup & migration (scriptable)\n  --subscription   generate subscription config\n  --help, -h   show this help",
-    "install_done_tip": "Installation complete! Sharing info is shown above. The management menu is now open — press 0 to exit, or pick another number to keep configuring."
+    "install_done_tip": "Installation complete! Sharing info is shown above. The management menu is now open — press 0 to exit, or pick another number to keep configuring.",
+    "pause_hint": "Press Enter to return to the menu, or q to quit"
   },
   "menu": {
     "banner_compact": "Xray Script - deploy and manage",

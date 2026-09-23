@@ -67,6 +67,49 @@ function read_input() {
     printf "${color}[%s]${NC} %s " "${title}" "${msg}" >&2
 }
 
+# =============================================================================
+# 函数名称: print_target_presets
+# 功能描述: 打印 .target 预设清单, 让用户在"留空 = 随机选"时知道候选都有哪些。
+#           清单直接读 config.json 的 .target 键 —— 与 generate.sh 的
+#           generate_target 随机取值同源, 不会出现"提示里列的和实际随机池不一致"。
+# 参数: 无 (读全局 SCRIPT_CONFIG_PATH)
+# 返回值: 恒 0
+# 说明: 为什么只列域名、不给编号 —— 这个输入框收的是**域名**, 敲 "3" 会被
+#       check_domain_security 判成格式非法; 一旦编号化, 等于诱导用户去敲数字。
+#       所以只把候选摊开, 回车交给随机。全部输出到 stderr, 不污染 stdout 的返回值。
+# =============================================================================
+function print_target_presets() {
+    # jq 失败 (config.json 缺失 / 字段缺失) 时取到空串 -> 静默跳过, 不打断输入流程
+    local list=''
+    list="$(jq -r '.target | keys | join(" ")' "${SCRIPT_CONFIG_PATH}" 2>/dev/null || true)"
+    if [[ -z "${list}" ]]; then
+        return 0
+    fi
+
+    local -a names=()
+    read -r -a names <<<"${list}"
+
+    printf "${GREEN}[%s]${NC} %s\n" "$(_i18n '.title.config')" "$(_i18n '.read.target_presets')" >&2
+
+    # 每行 4 个 (不引入 paste/fold 等外部命令, 保持 PATH 白名单下的最小依赖)
+    local i=0 name
+    for name in "${names[@]}"; do
+        if ((i % 4 == 0)); then
+            printf '    %s' "${name}" >&2
+        else
+            printf '  %s' "${name}" >&2
+        fi
+        i=$((i + 1))
+        if ((i % 4 == 0)); then
+            printf '\n' >&2
+        fi
+    done
+    if ((i % 4 != 0)); then
+        printf '\n' >&2
+    fi
+    return 0
+}
+
 # --- 参数映射表 ---
 # 定义一个关联数组，将命令行选项映射到配置文件中的 JSON 路径。
 # 键是命令行选项，值是用逗号分隔的类型和字段名。
@@ -108,7 +151,8 @@ declare -A param_map=(
 #           2. 检查传入的第一个参数是否在预定义的参数映射表中。
 #           3. 如果存在，则解析其对应的类型和字段。
 #           4. 从 i18n 数据中获取该字段的提示文本。
-#           5. 对于特定参数 (--short)，额外打印一条提示信息。
+#           5. 对于特定参数 (--short / --target)，额外打印提示信息
+#              (--target 还会列出 .target 预设清单, 见 print_target_presets)。
 #           6. 调用 read_input 显示提示。
 #           7. 从标准输入读取用户输入并输出。
 # 参数:
@@ -142,6 +186,16 @@ function main() {
     # 对于 --short 参数，额外打印一条关于 Short ID 格式的提示
     if [[ "${option}" == "--short" ]]; then
         echo -e "${YELLOW}[$(_i18n '.title.tip')]${NC} $(_i18n '.read.short_id_tip')" >&2
+    fi
+
+    # 对于 --target 参数，额外打印"它是什么"+"预设清单"。
+    # 背景: 原提示只有一句"请输入目标域名 target (默认随机选择)", 用户极易误解成
+    #   "随便填个域名" —— 实际它是 Reality 的伪装目标 (core/handler.sh 写进
+    #   realitySettings.target), 不需要解析到本机, 但必须是能正常访问、支持
+    #   TLS 1.3 与 X25519 的站点。把候选预设摊开也让"回车随机"变得可预期。
+    if [[ "${option}" == "--target" ]]; then
+        echo -e "${YELLOW}[$(_i18n '.title.tip')]${NC} $(_i18n '.read.target_hint')" >&2
+        print_target_presets
     fi
 
     # 调用 read_input 函数显示提示信息

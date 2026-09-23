@@ -346,6 +346,22 @@ function exec_read() {
             # 验证路径
             exec_check '--path' "${result}" || valid=false
             ;;
+        block-ip | warp-ip)
+            # 写前校验 ip 分流值: 明显非法 (如把域名/乱码填进 ip 分流) 当场提示重输,
+            # 由本函数的重试上限兜底, 从而**不进** "写盘 -> xray 校验失败 -> 回滚 + 退出码 1" 的流程。
+            # 注: 空输入 (直接回车 / 纯逗号空格) 与"取消"同义, 此处**不判失败** ——
+            #     交由 add_rule 的 value_empty 守卫统一告警并 no-op; 若在此判失败,
+            #     用户想取消时反而会撞上 3 次重试后退出。
+            if [[ -n "${result//[[:space:],]/}" ]]; then
+                exec_check '--rule-ip' "${result}" || valid=false
+            fi
+            ;;
+        block-domain | warp-domain)
+            # 写前校验 domain 分流值 (同 ip 分支: 空输入放行交给 value_empty 守卫)
+            if [[ -n "${result//[[:space:],]/}" ]]; then
+                exec_check '--rule-domain' "${result}" || valid=false
+            fi
+            ;;
         esac
         # 输入验证通过，设置 flag 为 false 退出循环
         if ${valid}; then

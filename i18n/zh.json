@@ -578,6 +578,10 @@
       "range_error": "索引超出范围，当前列表总数为 ${total}：",
       "valid": "列表索引合法："
     },
+    "rule": {
+      "invalid_ip": "ip 分流值不合法：${value}（应为 IP/CIDR 或 geoip:xxx；直接回车可取消）",
+      "invalid_domain": "domain 分流值不合法：${value}（应为域名或 geosite:xxx 等形式；直接回车可取消）"
+    },
     "net_status": {
       "title": "内核网络 / BBR 体检（只读）",
       "kernel_label": "内核版本        : ",

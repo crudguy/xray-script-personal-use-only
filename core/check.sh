@@ -143,6 +143,141 @@ function check_domain_format() {
 }
 
 # =============================================================================
+# 函数名称: _rule_split_values
+# 功能描述: 把"逗号分隔"的分流输入拆成一行一个值, 去首尾空白并丢弃空项。
+#           与 core/handler.sh 的 add_rule 使用**同一套**归一化 (tr/sed/awk),
+#           使"本处校验通过的集合"与"真正写入配置的集合"严格一致 —— 否则会出现
+#           "校验放行 A、写入的却是 B"的裂缝。
+# 参数:
+#   $1: 原始输入 (可含逗号与空白)
+# 返回值: 逐行打印归一化后的非空值 (无有效值时无输出)
+# =============================================================================
+function _rule_split_values() {
+    printf '%s' "${1:-}" | tr ',' '\n' |
+        sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' |
+        awk 'NF'
+}
+
+# =============================================================================
+# 函数名称: _rule_is_valid_ip
+# 功能描述: 判断单个 ip 分流项是否为 xray 可接受的形态。
+#           刻意"宁可放行也不误拒": 只拦明显非法者, 放行 geoip:xxx / ext:file:tag /
+#           IPv4(含 CIDR) / IPv6(含 CIDR)。内容是否真实存在 (如 geoip 码是否有效)
+#           不在本函数职责内 —— 那由后续 xray 校验兜底, 这里只挡"一眼假"的输入。
+# 参数:
+#   $1: 单个值
+# 返回值: 0-合法 1-非法
+# =============================================================================
+function _rule_is_valid_ip() {
+    local v="${1:-}"
+    [[ -n "${v}" ]] || return 1
+    # geoip / ext 前缀: 前缀后有非空值即放行 (具体码表由 geoip.dat / 外部列表决定)
+    [[ "${v}" == geoip:?* || "${v}" == ext:?* ]] && return 0
+    # IPv4 [可选 /前缀]: 逐段 <=255, 前缀 <=32
+    if [[ "${v}" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})(/([0-9]{1,3}))?$ ]]; then
+        local a="${BASH_REMATCH[1]}" b="${BASH_REMATCH[2]}" c="${BASH_REMATCH[3]}" d="${BASH_REMATCH[4]}" p="${BASH_REMATCH[6]:-}"
+        ((a <= 255 && b <= 255 && c <= 255 && d <= 255)) || return 1
+        [[ -z "${p}" ]] || ((p <= 32)) || return 1
+        return 0
+    fi
+    # IPv6 [可选 /前缀]: 合法 IPv6 至少含**两个**冒号 (::1 / 2001:db8::1 / 8 组全写皆是),
+    # 借此把 "abc:def" 这类单冒号伪值挡在门外 (仅十六进制与冒号, 前缀 <=128)。
+    if [[ "${v}" == *:*:* && "${v}" =~ ^[0-9A-Fa-f:]+(/[0-9]{1,3})?$ ]]; then
+        local p6="${v##*/}"
+        [[ "${v}" != */* ]] || ((p6 <= 128)) || return 1
+        return 0
+    fi
+    return 1
+}
+
+# =============================================================================
+# 函数名称: _rule_is_valid_domain
+# 功能描述: 判断单个 domain 分流项是否为 xray 可接受的形态。
+#           放行: geosite:/ext:/domain:/full:/keyword:/regexp: 前缀, 以及裸域名;
+#           拦明显非法: 含空白、空标签、以点开头/结尾、非法字符、只有前缀没有值。
+#           注: regexp: 是正则表达式, 允许任意字符 (含空格), 直接放行。
+# 参数:
+#   $1: 单个值
+# 返回值: 0-合法 1-非法
+# =============================================================================
+function _rule_is_valid_domain() {
+    local v="${1:-}"
+    [[ -n "${v}" ]] || return 1
+    [[ "${v}" == regexp:?* ]] && return 0 # 正则, 不限制字符集
+    [[ "${v}" != *[[:space:]]* ]] || return 1
+    case "${v}" in
+    geosite:* | ext:* | domain:* | full:* | keyword:*)
+        [[ -n "${v#*:}" ]] && return 0 || return 1 # 前缀后必须有值
+        ;;
+    *:) return 1 ;; # 只有前缀没有值
+    esac
+    # 裸域名: 字母/数字/下划线/连字符/星号 组成的标签, 以点分隔
+    # (空标签与首尾点被正则自然排除: 每个标签至少 1 个字符)
+    [[ "${v}" =~ ^[A-Za-z0-9_*-]+(\.[A-Za-z0-9_*-]+)*$ ]] && return 0
+    return 1
+}
+
+# =============================================================================
+# 函数名称: _rule_first_invalid
+# 功能描述: 在逗号分隔的分流输入里找出**第一个**非法值并打印 (全部合法则不打印)。
+#           校验与报错分离: 本函数只负责"找出是谁", 文案由调用方决定。
+# 参数:
+#   $1: 类型 ("ip" 或 "domain")
+#   $2: 原始输入
+# 返回值: 恒 0 (结果经 stdout 输出; 无非法值时输出为空)
+# =============================================================================
+function _rule_first_invalid() {
+    local kind="${1:-}" raw="${2:-}" list='' v=''
+    list="$(_rule_split_values "${raw}")"
+    [[ -n "${list}" ]] || return 0
+    while IFS= read -r v; do
+        case "${kind}" in
+        ip) _rule_is_valid_ip "${v}" || {
+            printf '%s' "${v}"
+            return 0
+        } ;;
+        domain) _rule_is_valid_domain "${v}" || {
+            printf '%s' "${v}"
+            return 0
+        } ;;
+        esac
+    done <<<"${list}"
+    return 0
+}
+
+# =============================================================================
+# 函数名称: check_rule_ip / check_rule_domain
+# 功能描述: 校验 "ip / domain 分流" 输入 (可含逗号分隔的多个值)。
+#           供 core/handler.sh 的 exec_read 在**写盘前**调用, 使非法值"当场提示重输",
+#           而不是先写进配置、再由 xray 语法校验失败回滚 (回滚虽安全, 但用户看到的是
+#           一串报错 + 退出码 1, 体验差且掩盖了"其实就是值写错了")。
+#           校验通过时**静默返回 0** (不打印 _pass): 这是交互输入的写前闸门,
+#           不是体检报告, 成功路径保持安静更清爽。
+#           空输入视为"取消", 直接放行 (告警与 no-op 由 add_rule 的 value_empty 守卫统一负责)。
+# 参数: $1=原始输入
+# 返回值: 0-全部合法 (或空输入) 1-存在非法值 (并打印原因到 >&2)
+# =============================================================================
+function check_rule_ip() {
+    local bad=''
+    bad="$(_rule_first_invalid 'ip' "${1:-}")"
+    if [[ -n "${bad}" ]]; then
+        _fail "$(_i18n_sub ".${CUR_FILE}.rule.invalid_ip" '${value}' "${bad}")"
+        return 1
+    fi
+    return 0
+}
+
+function check_rule_domain() {
+    local bad=''
+    bad="$(_rule_first_invalid 'domain' "${1:-}")"
+    if [[ -n "${bad}" ]]; then
+        _fail "$(_i18n_sub ".${CUR_FILE}.rule.invalid_domain" '${value}' "${bad}")"
+        return 1
+    fi
+    return 0
+}
+
+# =============================================================================
 # 函数名称: resolve_domain
 # 功能描述: 使用 dig 命令尝试解析域名，检查是否有有效的 IP 地址记录。
 # 参数:
@@ -2051,6 +2186,14 @@ function main() {
     --proxy-target) check_proxy_target "$@" ;;
     --custom-domain) check_custom_site_domain "$@" >&2 ;;
     --list-index) check_list_index "$@" >&2 ;;
+    # 写前校验 ip / domain 分流值 (含逗号分隔多值)。
+    # 注: 末尾的 `|| exit $?` 是**刻意**的 —— 校验不通过时本脚本要"非 0 退出"把结果传给
+    #     调用方 (exec_read), 这是正常业务语义; 但 `return 1` 会让 set -e 的 ERR trap 把它
+    #     当成"意外失败", 多打印一条假的 "[错误] 脚本在第 N 行意外失败 ... return 1"。
+    #     放进 `||` 右侧即进入"条件上下文", errexit 与 ERR trap 都不触发, 退出码照常透传
+    #     (与 menu.sh 入口的 `main "$@" || OPTION=$?` 同一构造)。
+    --rule-ip) check_rule_ip "$@" >&2 || exit $? ;;         # 写前校验 ip 分流值
+    --rule-domain) check_rule_domain "$@" >&2 || exit $? ;; # 写前校验 domain 分流值
     --net-status) check_net_status "$@" >&2 ;; # 只读体检内核网络与 BBR 状态
     --health) check_health_report "$@" >&2 ;; # 一键全量体检 (只读)
     # P1-3 补漏: 本函数的 case 原本没有 `*)` 分支 —— 未知/拼错的参数什么都不做就退出,

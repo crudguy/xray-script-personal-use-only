@@ -578,6 +578,10 @@
       "range_error": "Index is out of range, current list size is ${total}: ",
       "valid": "List index is valid: "
     },
+    "rule": {
+      "invalid_ip": "Invalid ip route value: ${value} (expected an IP/CIDR or geoip:xxx; press Enter to cancel)",
+      "invalid_domain": "Invalid domain route value: ${value} (expected a domain or forms like geosite:xxx; press Enter to cancel)"
+    },
     "net_status": {
       "title": "Kernel network / BBR health check (read-only)",
       "kernel_label": "Kernel      : ",

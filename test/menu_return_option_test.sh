@@ -16,7 +16,7 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$REPO"
+cd "$REPO" || exit 1
 
 PASS=0; FAIL=0
 ok() { if [[ $1 -eq 0 ]]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "  [FAIL] $2"; fi; }

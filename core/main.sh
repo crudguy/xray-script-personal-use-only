@@ -308,10 +308,37 @@ function processes_full_installation() {
 }
 
 # =============================================================================
+# 函数名称: _require_warp_enabled
+# 功能描述: WARP 分流的前置检查 —— 读本机配置的 .xray.warp, 判断 WARP Proxy 是否开启。
+# 参数: 无 (读全局 SCRIPT_CONFIG_PATH)
+# 返回值: 0 = WARP 已开启, 可继续; 1 = 未开启 (已打印警告), 调用方应 return 0 回菜单
+# 说明: 分流菜单 5/6 标注了"需要开启 WARP"。未开启属"预期内不可用", 必须提示后回菜单,
+#       不得 _error 中断整个脚本 —— 旧实现在 handler_routing 里 _error, 用户会看到
+#       "[错误] WARP PROXY 没有开启..." 紧接 install.sh trampoline 的
+#       "[错误] 脚本在第 N 行意外失败 (退出码 1)" (同 processes_sni_config 的处置)。
+#       注: 在菜单侧预检而非放行给 handler, 还顺带避免白跑 processes_routing 末尾那次
+#       `exec_handler '--restart'` (它在 case 之后无条件执行)。handler 侧的 _error
+#       保留作 CLI 直调 (bash handler.sh --routing warp ip) 的兜底。
+# =============================================================================
+
+function _require_warp_enabled() {
+    local warp_status=''
+    # 2>/dev/null || true: 配置缺失/字段缺失时按"未开启"处理, 不让 jq 失败冒泡。
+    warp_status="$(jq -r '.xray.warp' "${SCRIPT_CONFIG_PATH}" 2>/dev/null || true)"
+    # 注: 用 is_enabled 而非数字比较 —— jq 对缺失字段输出字面 "null" (见 _common.sh)。
+    is_enabled "${warp_status}" && return 0
+    # 复用 handler 段的文案 (同一条"WARP 未开启, 无法添加分流"), 避免两处漂移。
+    print_warn "$(_i18n '.handler.warp.status')"
+    return 1
+}
+
+# =============================================================================
 # 函数名称: processes_routing
 # 功能描述: 处理路由规则配置相关的流程。
 #           1. 显示路由规则菜单。
 #           2. 根据用户选择执行不同的路由配置操作 (WARP, Block IP/Domain, WARP IP/Domain)。
+#           3. 选择 5/6 (WARP 分流) 前先经 _require_warp_enabled 检查 WARP 是否开启;
+#              未开启属"预期内不可用" -> 提示后返回本菜单, 不进 handler 也不重启 Xray。
 # 参数: 无
 # 返回值: 无 (通过调用其他函数和脚本执行操作)
 # =============================================================================
@@ -327,8 +354,16 @@ function processes_routing() {
     2) exec_handler '--reset-warp' ;;               # 选择 2：重置 WARP
     3) exec_handler '--routing' 'block' 'ip' ;;     # 选择 3：配置阻止 IP 规则
     4) exec_handler '--routing' 'block' 'domain' ;; # 选择 4：配置阻止 Domain 规则
-    5) exec_handler '--routing' 'warp' 'ip' ;;      # 选择 5：配置 WARP IP 规则
-    6) exec_handler '--routing' 'warp' 'domain' ;;  # 选择 6：配置 WARP Domain 规则
+    5 | 6)
+        # 选择 5/6：WARP 分流 (需先开启 WARP)。未开启时提示并返回本菜单,
+        # 不进 handler、也不触发末尾的 Xray 重启 (见 _require_warp_enabled)。
+        _require_warp_enabled || return 0
+        if [[ "${choose}" == '5' ]]; then
+            exec_handler '--routing' 'warp' 'ip'     # 选择 5：配置 WARP IP 规则
+        else
+            exec_handler '--routing' 'warp' 'domain' # 选择 6：配置 WARP Domain 规则
+        fi
+        ;;
     *) return 0 ;;                                    # 其他情况：退出脚本
     esac
     exec_handler '--restart' # 重启 Xray 服务

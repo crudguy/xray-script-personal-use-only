@@ -130,7 +130,7 @@ else
             printf '%s\n' '_i18n() { printf "%s" "$1"; }'
             printf '%s\n' 'print_warn() { printf "WARN %s\n" "$*" >&2; }'
             printf '%s\n' '_error() { printf "ERROR %s\n" "$*" >&2; exit 1; }'
-            printf '%s\n' 'exec_menu() { printf "MENUCALL %s\n" "$*" >&2; cat "${CHFILE:-/dev/null}" 2>/dev/null || true; }'
+            printf '%s\n' 'exec_menu() { printf "MENUCALL %s\n" "$*" >&2; local f="${CHFILE:-/dev/null}"; local first rest; if [[ -s "$f" ]]; then first="$(head -n 1 "$f" 2>/dev/null)"; rest="$(tail -n +2 "$f" 2>/dev/null)"; printf %s\n "$rest" > "$f"; fi; printf %s "${first:-}"; }'
             printf '%s\n' 'exec_handler() { printf "HANDLER %s\n" "$*" >&2; }'
             printf '%s\n' 'processes_web_config() { :; }'
             printf '%s\n' 'processes_ca_vendor() { :; }'
@@ -146,6 +146,7 @@ else
 
     run_sni() { # $1=tag 值
         printf '{"xray":{"tag":"%s"}}\n' "$1" > "$TMPD/cfg.json"
+        printf '0\n' > "$TMPD/ch"   # 消费式队列: 每次调用重置输入, 避免上一次读取残留
         CHFILE="$TMPD/ch" SCRIPT_CONFIG_PATH="$TMPD/cfg.json" \
             "$BASH_BIN" "$TMPD/runner_sni.sh" 2>&1
     }
@@ -169,10 +170,10 @@ else
 
     echo "[T3] 行为: 备份导入未填路径应提示 + 返回, 不调用 handler"
     run_bak() { # $1=喂给 read 的输入行 (用 %b 解析 \n, %s 会原样输出反斜杠+n)
+        printf '2\n' > "$TMPD/ch2"   # 消费式队列: 每次调用重置选择为"2) 导入", 空路径由 stdin 决定
         printf '%b' "$1" | CHFILE="$TMPD/ch2" SCRIPT_CONFIG_PATH="$TMPD/cfg.json" \
             "$BASH_BIN" "$TMPD/runner_bak.sh" 2>&1
     }
-    printf '2\n' > "$TMPD/ch2"
     out_bak_empty="$(run_bak '\n')"
     assert_contains     "T3: 空路径 -> 正常返回 (RC=0)"       "$out_bak_empty" 'RC=0'
     assert_not_contains "T3: 空路径 -> 未硬退出 (无 ERROR)"    "$out_bak_empty" 'ERROR'
@@ -194,7 +195,7 @@ else
         printf '%s\n' '_i18n() { printf "%s" "$1"; }'
         printf '%s\n' 'print_warn() { printf "WARN %s\n" "$*" >&2; }'
         printf '%s\n' '_error() { printf "ERROR %s\n" "$*" >&2; exit 1; }'
-        printf '%s\n' 'exec_menu() { printf "MENUCALL %s\n" "$*" >&2; cat "${CHFILE:-/dev/null}" 2>/dev/null || true; }'
+        printf '%s\n' 'exec_menu() { printf "MENUCALL %s\n" "$*" >&2; local f="${CHFILE:-/dev/null}"; local first rest; if [[ -s "$f" ]]; then first="$(head -n 1 "$f" 2>/dev/null)"; rest="$(tail -n +2 "$f" 2>/dev/null)"; printf %s\n "$rest" > "$f"; fi; printf %s "${first:-}"; }'
         printf '%s\n' 'exec_handler() { printf "HANDLER %s\n" "$*" >&2; }'
         cat "$TMPD/fn_is_enabled.sh"
         cat "$TMPD/fn_warp.sh"
@@ -276,7 +277,7 @@ PY
                 printf '%s\n' '_i18n() { printf "%s" "$1"; }'
                 printf '%s\n' 'print_warn() { printf "WARN %s\n" "$*" >&2; }'
                 printf '%s\n' '_error() { printf "ERROR %s\n" "$*" >&2; exit 1; }'
-                printf '%s\n' 'exec_menu() { printf "MENUCALL %s\n" "$*" >&2; cat "${CHFILE:-/dev/null}" 2>/dev/null || true; }'
+                printf '%s\n' 'exec_menu() { printf "MENUCALL %s\n" "$*" >&2; local f="${CHFILE:-/dev/null}"; local first rest; if [[ -s "$f" ]]; then first="$(head -n 1 "$f" 2>/dev/null)"; rest="$(tail -n +2 "$f" 2>/dev/null)"; printf %s\n "$rest" > "$f"; fi; printf %s "${first:-}"; }'
                 cat "$TMPD/fn_sni_broken.sh"
                 printf '%s\n' 'processes_sni_config'
                 printf '%s\n' 'printf "RC=%s\n" "$?"'
@@ -296,8 +297,8 @@ PY
     python3 - "$TMPD/fn_route.sh" "$TMPD/fn_route_broken.sh" <<'PY'
 import sys
 src = open(sys.argv[1], encoding='utf-8').read()
-old = "        _require_warp_enabled || return 0\n"
-new = "        : # NEG: 菜单侧预检已移除\n"
+old = "            _require_warp_enabled || continue\n"
+new = "            : # NEG: 菜单侧预检已移除\n"
 assert old in src, 'NEG-WARP: 未在真实 processes_routing 中找到守卫调用'
 open(sys.argv[2], 'w', encoding='utf-8').write(src.replace(old, new))
 PY
@@ -315,7 +316,7 @@ PY
                 printf '%s\n' '_i18n() { printf "%s" "$1"; }'
                 printf '%s\n' 'print_warn() { printf "WARN %s\n" "$*" >&2; }'
                 printf '%s\n' '_error() { printf "ERROR %s\n" "$*" >&2; exit 1; }'
-                printf '%s\n' 'exec_menu() { printf "MENUCALL %s\n" "$*" >&2; cat "${CHFILE:-/dev/null}" 2>/dev/null || true; }'
+                printf '%s\n' 'exec_menu() { printf "MENUCALL %s\n" "$*" >&2; local f="${CHFILE:-/dev/null}"; local first rest; if [[ -s "$f" ]]; then first="$(head -n 1 "$f" 2>/dev/null)"; rest="$(tail -n +2 "$f" 2>/dev/null)"; printf %s\n "$rest" > "$f"; fi; printf %s "${first:-}"; }'
                 printf '%s\n' 'exec_handler() { printf "HANDLER %s\n" "$*" >&2; }'
                 cat "$TMPD/fn_is_enabled.sh"
                 cat "$TMPD/fn_warp.sh"

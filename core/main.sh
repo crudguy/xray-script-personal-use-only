@@ -276,6 +276,8 @@ function processes_xray() {
 # 功能描述: 处理一键安装相关的流程。
 #           1. 显示一键安装菜单。
 #           2. 根据用户选择决定是执行快速安装 Vision 还是进入详细 Xray 安装流程。
+#           3. 快速安装成功后暂停一次 (_pause_after_action), 让用户读完分享链接/二维码与
+#              订阅信息再回菜单 —— 见 _pause_after_action 的说明。
 # 参数: 无
 # 返回值: 无 (通过调用其他函数和脚本执行操作)
 # =============================================================================
@@ -294,6 +296,11 @@ function processes_full_installation() {
         # 选择 1：一键安装 Vision
         exec_handler '--quick' 'Vision'
         echo -e "${GREEN}$( _i18n '.main.install_done_tip')${NC}"
+        # 安装收尾是"输出型": handler_quick_install 末尾要打分享链接 + 二维码
+        # (handler.sh:3391 handler_share) 与订阅三件套 (3396), 三四十行, 与菜单 7/10 同量级。
+        # 不暂停的话, 紧接的菜单重绘 (banner 10 + 状态 7 + 菜单 21 + 提示 1 ≈ 39 行) 会把
+        # 用户刚装好、最需要复制的那条链接直接顶出屏幕。
+        _pause_after_action
         ;;
     2)
         # 选择 2：进入详细的 Xray 安装流程 (不立即执行安装)
@@ -309,6 +316,11 @@ function processes_full_installation() {
         # 与菜单上 "1. 一键安装 (默认)" 标注一致, 避免此前"敲回车反而取消/卡在二次确认"的陷阱。
         exec_handler '--quick' 'Vision'
         echo -e "${GREEN}$( _i18n '.main.install_done_tip')${NC}"
+        # 安装收尾是"输出型": handler_quick_install 末尾要打分享链接 + 二维码
+        # (handler.sh:3391 handler_share) 与订阅三件套 (3396), 三四十行, 与菜单 7/10 同量级。
+        # 不暂停的话, 紧接的菜单重绘 (banner 10 + 状态 7 + 菜单 21 + 提示 1 ≈ 39 行) 会把
+        # 用户刚装好、最需要复制的那条链接直接顶出屏幕。
+        _pause_after_action
         ;;
     esac
 }

@@ -15,7 +15,9 @@
 #   4. 行为: 回车回菜单 / q 与 Q 退出 / EOF 不触发 ERR trap / never 与非 TTY 的
 #      auto 立即返回且不打印提示;
 #   5. i18n: .main.pause_hint 在 zh / en 均存在且非空;
-#   6. (NEG) 把 7) 分支的暂停去掉后, 静态守卫必须报错 —— 证明守卫不是摆设。
+#   6. 安装收尾 (一键安装) 同属输出型: processes_full_installation 的两处快速安装
+#      分支必须都挂暂停 (否则刚装好的分享链接会被菜单重绘顶出屏幕);
+#   7. (NEG) 把 7) 分支的暂停去掉后, 静态守卫必须报错 —— 证明守卫不是摆设。
 #
 # 运行: bash test/menu_pause_test.sh
 # =============================================================================
@@ -161,6 +163,47 @@ assert_not_contains "T4p: auto + 非 TTY 自动跳过暂停 (不阻塞脚本化�
 for f in zh en; do
     v="$(jq -r '.main.pause_hint // ""' "i18n/${f}.json" 2>/dev/null || true)"
     assert_ne "T5: i18n/${f}.json 的 .main.pause_hint 非空" "${v}" ""
+done
+
+# ---------------------------------------------------------------------------
+# T6 安装收尾也是一次"输出型": 一键安装的两个分支 (1) 与 *) 必须都挂暂停
+#   背景: handler_quick_install 末尾打印分享链接 + 二维码 (handler.sh:3391) 与
+#   订阅三件套 (3396), 三四十行; 不暂停则紧接的菜单重绘 (≈39 行) 把刚装好的
+#   链接直接顶出屏幕 —— 正是用户"装完看不到分享链接"的那次反馈。
+# ---------------------------------------------------------------------------
+awk '/^function processes_full_installation\(\) \{/,/^\}/' "$MAIN" > "$SB/full.fn"
+assert_ne "T6: 抽到 processes_full_installation 函数体" "$(cat "$SB/full.fn")" ""
+
+# 判定规则: 每处 exec_handler '--quick' 起, 到本分支结束 (;;) 之间必须出现暂停调用。
+quick_pause_report() { # $1=待检函数体文件
+    awk '
+        /exec_handler .--quick/ { in_blk=1; has=0; next }
+        in_blk && /_pause_after_action/ { has=1 }
+        in_blk && /;;/ { print (has ? "PAUSED" : "MISSING"); in_blk=0; seen=1 }
+        END { if (!seen) print "NOQUICK" }
+    ' "$1"
+}
+
+rep="$(quick_pause_report "$SB/full.fn")"
+assert_eq "T6a: 两处快速安装分支都挂了暂停 (期望两行 PAUSED)" "$rep" "$(printf 'PAUSED\nPAUSED')"
+
+# T6b: 快速安装分支确实打印了完成提示 (提示与暂停配套, 缺一即回归)
+assert_eq "T6b: 完成提示出现在两处快速安装分支" "$(grep -c 'install_done_tip' "$SB/full.fn" || true)" "2"
+
+# T6 (NEG): 删掉 1) 分支的暂停后, 同一套判据必须报 MISSING (守卫非摆设)
+awk '
+    /exec_handler .--quick/ { in_blk=1 }
+    in_blk && /^[[:space:]]*_pause_after_action/ && !done { done=1; next }
+    { print }
+' "$MAIN" > "$SB/main_nopause.sh"
+awk '/^function processes_full_installation\(\) \{/,/^\}/' "$SB/main_nopause.sh" > "$SB/full_nopause.fn"
+assert_eq "T6(NEG): 删掉 1) 分支的暂停后守卫报 MISSING" \
+    "$(quick_pause_report "$SB/full_nopause.fn")" "$(printf 'MISSING\nPAUSED')"
+
+# T6c: 安装完成文案 zh / en 双侧非空 (与暂停提示配套展示)
+for f in zh en; do
+    v="$(jq -r '.main.install_done_tip // ""' "i18n/${f}.json" 2>/dev/null || true)"
+    assert_ne "T6c(${f}): i18n/${f}.json 的 .main.install_done_tip 非空" "${v}" ""
 done
 
 # ---------------------------------------------------------------------------

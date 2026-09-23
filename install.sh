@@ -95,6 +95,9 @@ declare -A I18N_DATA=(
     ['cron_disabled']='未检测到已启用且运行中的 cron 服务: 自动更新 GeoData、自动更新 Nginx、自动续签证书都不会执行, 请执行 systemctl enable --now cron 修复'
     ['installer_update_failed']='安装器自身更新失败, 已保留旧版本可继续使用; 新代码已在项目目录就位, 下次运行将生效'
     ['config_init_failed']='脚本默认配置下载或校验失败, 无法初始化。请检查网络后重试; 国内网络可设置 GH_PROXY 加速前缀后重跑'
+    ['presets_added']='已从上游模板补入新的 Reality target 预设:'
+    ['presets_removed']='已移除上游标记为失效的 Reality target 预设 (原配置已备份为 config.json.bak):'
+    ['presets_sync_failed']='Reality target 预设同步失败, 配置保持原样, 可稍后重试'
 )                        # 默认的国际化数据 (中文)
 declare PROJECT_ROOT=''  # 项目安装根目录 (动态设置)
 declare CORE_DIR=''      # 核心脚本目录 (动态设置)
@@ -338,6 +341,9 @@ function load_i18n() {
             ['cron_disabled']='No enabled and running cron service detected: automatic GeoData updates, automatic Nginx updates and certificate renewal will not run. Please fix it with: systemctl enable --now cron'
             ['installer_update_failed']='Failed to update the installer itself; the previous version is kept and still usable. The new code is already in place under the project directory and will take effect on the next run'
             ['config_init_failed']='Failed to download or verify the default script configuration, cannot initialize. Please check your network and retry; you can also set a GH_PROXY prefix and rerun'
+            ['presets_added']='Merged new Reality target presets from the upstream template:'
+            ['presets_removed']='Removed Reality target presets marked obsolete upstream (previous config backed up as config.json.bak):'
+            ['presets_sync_failed']='Failed to sync Reality target presets; the config is left unchanged, please retry later'
         )
     fi
 }
@@ -681,6 +687,88 @@ function _sync_script_version_label() {
 }
 
 # =============================================================================
+# 函数名称: _sync_target_presets
+# 功能描述: 把上游模板 config.json 的 Reality target 预设同步进运行时配置 (启动期自愈)。
+#
+# 动机: .target 是"留空即随机"的候选池 (core/generate.sh 的 generate_target 直接从
+#   它的键里随机取), 上游会随网络环境变化增删其中的域名; 但运行时配置只在**首次安装**
+#   时下载一次 (见 main() 里的 `! -f "${SCRIPT_CONFIG_PATH}"` 判断), 此后永远不再从
+#   模板取 —— 于是上游修掉了一个不可用域名, 早已装好的机器也拿不到, 只能手工改
+#   ~/.<name>/config.json。本轮就因此不得不在升级说明里附一条手工 jq 命令, 对
+#   "个人自用、常年不重装"的场景并不友好, 故补上启动期自愈。
+#
+# 同步语义 (刻意保守 —— 两条规则都只认上游的显式声明):
+#   补: 模板 .target 里有、运行时没有的键 -> 连值一起补进来 (上游新增预设)。
+#   删: 模板 .target_removed 里列出的、且运行时仍存在的键 -> 删除 (上游判定其失效)。
+#   * 不覆盖: 运行时已存在的键一律保留原值 —— 用户可能改过它的 serverNames。
+#   * 不臆测: 运行时独有的键 (用户自加) 一律保留; 未出现在目标名单里的键也绝不删。
+#     删除只认上游那份显式名单, 因此"误删用户自定义域名"在结构上就不可能发生。
+#   * 幂等: 两侧差集都为空时直接返回, 不写盘 —— 既避免无谓改动 mtime, 也避免把
+#     用户手工编辑过的 (非规范) JSON 反复重排。
+#
+# 安全与边界:
+#   * 本函数只是锦上添花: **任何**前置条件不满足都 return 0, 绝不阻断启动流程。
+#   * 先取结果 -> 判空 -> 再写。绝不用 `jq ... | _atomic_write "${SCRIPT_CONFIG_PATH}"`
+#     的同文件管道写法: jq 一旦失败就输出空内容, 而原子写会忠实落盘, 直接清空用户
+#     配置 (同上一函数注释里记的那次事故)。
+#   * 发生删除前先备份为 config.json.bak (仅一份, 覆盖式): 删除不可逆, 给用户留回滚余地。
+#   * 提示只走 stderr —— --share / --export-config 等直达参数的 stdout 会被脚本消费。
+#
+# 参数: 无 (使用全局变量 PROJECT_ROOT 与 SCRIPT_CONFIG_PATH)
+# 返回值: 0 (恒成功)
+# =============================================================================
+function _sync_target_presets() {
+    local repo_config="${PROJECT_ROOT}/config.json"
+    local diff_out='' to_add='' to_del='' new_config=''
+
+    # 前置条件: 两侧配置都在; jq 可用; **模板侧** .target 是非空对象。
+    # 模板没有该字段 = 老版本模板, 不处理; 运行时侧缺失/非对象时也不去凭空造结构
+    # (那是配置初始化该管的事, 这里只做"已有结构上的增量同步")
+    [[ -f "${repo_config}" && -f "${SCRIPT_CONFIG_PATH}" ]] || return 0
+    cmd_exists 'jq' || return 0
+    jq -e '.target | type == "object" and length > 0' "${repo_config}" >/dev/null 2>&1 || return 0
+    jq -e '.target | type == "object"' "${SCRIPT_CONFIG_PATH}" >/dev/null 2>&1 || return 0
+
+    # 一次 jq 同时算出两侧差集 (制表符分隔), 保证"是否需要写盘"的判据与随后写入的
+    # 内容出自同一次求值, 不会出现"判据说有差异、写下去却没变"的不一致。
+    diff_out="$(jq -r --slurpfile r "${repo_config}" '
+        ($r[0].target | keys) as $repo_keys
+        | (.target | keys) as $local_keys
+        | ($r[0].target_removed // []) as $removed
+        | "\(($repo_keys - $local_keys) | join(","))\t\([$removed[] as $k | select(($local_keys | index($k)) != null) | $k] | join(","))"
+    ' "${SCRIPT_CONFIG_PATH}" 2>/dev/null || true)"
+    [[ -n "${diff_out}" ]] || return 0
+    IFS=$'\t' read -r to_add to_del <<<"${diff_out}" || true
+    # 无差异 = 早已同步, 不写盘
+    [[ -n "${to_add}${to_del}" ]] || return 0
+
+    # 合并: 先补缺失键, 再按上游失效名单删除。任一步 jq 失败都会输出空 -> 下面直接放弃
+    new_config="$(jq --slurpfile r "${repo_config}" '
+        ($r[0].target_removed // []) as $removed
+        | reduce ($r[0].target | to_entries[]) as $e (.;
+              if (.target | has($e.key)) then . else .target[$e.key] = $e.value end)
+        | reduce ($removed[]) as $k (.;
+              if (.target | has($k)) then del(.target[$k]) else . end)
+    ' "${SCRIPT_CONFIG_PATH}" 2>/dev/null || true)"
+    # 取空即放弃本次同步, 绝不把 0 字节写回配置
+    [[ -n "${new_config}" ]] || return 0
+
+    # 有删除时先留一份备份: 删除不可逆, 用户想恢复旧预设时有据可依
+    if [[ -n "${to_del}" ]]; then
+        cp -f "${SCRIPT_CONFIG_PATH}" "${SCRIPT_CONFIG_PATH}.bak" 2>/dev/null || true
+    fi
+
+    if ! printf '%s\n' "${new_config}" | _atomic_write "${SCRIPT_CONFIG_PATH}"; then
+        echo -e "${YELLOW}[${I18N_DATA['tip']}]${NC} ${I18N_DATA['presets_sync_failed']}" >&2
+        return 0
+    fi
+    # 明细打到 stderr, 并列出实际变动的域名 (比只报个数更有用: 用户能核对)
+    [[ -z "${to_add}" ]] || echo -e "${GREEN}[${I18N_DATA['tip']}]${NC} ${I18N_DATA['presets_added']} ${to_add}" >&2
+    [[ -z "${to_del}" ]] || echo -e "${YELLOW}[${I18N_DATA['tip']}]${NC} ${I18N_DATA['presets_removed']} ${to_del}" >&2
+    return 0
+}
+
+# =============================================================================
 # 函数名称: _update_xray_script
 # 功能描述: 下载指定提交并替换本地项目目录, 记录 commit, 然后重启脚本。
 # 参数:
@@ -954,6 +1042,12 @@ function main() {
         save_local_commit_sha "${init_sha}"
         _sync_script_version_label
     fi
+
+    # 把上游模板新增的 Reality target 预设补进运行时配置, 并移除上游标记失效的旧预设。
+    # 位置: 必须在上面的"项目目录就位"之后 —— 此刻 ${PROJECT_ROOT}/config.json 才是
+    #   最新模板, 与运行时配置的差异才真实对应"上游这次改了什么"。首次安装时两者本就
+    #   一致, 差集为空, 这里天然空转。
+    _sync_target_presets
 
     # 检查配置文件中的语言设置
     local lang

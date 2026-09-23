@@ -27,9 +27,9 @@ if [[ -z "$FUNC_SRC" ]]; then
 fi
 
 # --- 桩件目录: 放一个假 gcc 供 PATH 前置 ---
-# 注: 用项目内约定目录 test/.tmp/ (裸 mktemp 在 Git-Bash 下可能返回 MSYS 无法解析的路径)。
-mkdir -p test/.tmp
-MOCK_BIN="$REPO/test/.tmp/gen_cflags_mockbin.$$"
+# 注: 用项目内约定目录 .workbuddy/tmp/ (裸 mktemp 在 Git-Bash 下可能返回 MSYS 无法解析的路径)。
+mkdir -p .workbuddy/tmp
+MOCK_BIN="$REPO/.workbuddy/tmp/gen_cflags_mockbin.$$"
 mkdir -p "$MOCK_BIN"
 cat >"$MOCK_BIN/gcc" <<'EOF'
 #!/usr/bin/env bash
@@ -44,9 +44,9 @@ EOF
 chmod +x "$MOCK_BIN/gcc"
 
 # --- 隔离工作目录: sanitizer 分支会在 CWD 建/删 temp.c ---
-WORKDIR="$REPO/test/.tmp/gen_cflags_work.$$"
+WORKDIR="$REPO/.workbuddy/tmp/gen_cflags_work.$$"
 mkdir -p "$WORKDIR"
-HELP_DIR="$REPO/test/.tmp/gen_cflags_help.$$"
+HELP_DIR="$REPO/.workbuddy/tmp/gen_cflags_help.$$"
 mkdir -p "$HELP_DIR"
 
 # 生成一份 help 文本; 参数为要写入的 flag 行

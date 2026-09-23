@@ -27,6 +27,23 @@ suffix for additional releases on the same day).
 
 ---
 
+## [v2026-09-23]
+
+回归项目"临时产物统一进 `.workbuddy`"约定：测试临时目录由 `test/.tmp/` 迁回
+`.workbuddy/tmp/`。
+
+### 变更 Changed
+
+- **测试临时目录归位 `.workbuddy/tmp/`**：撤销 2026-09-21 的迁出。原 `test/.tmp/`
+  在 git 仓库内形成脏目录，与"代码目录保持干净"的约定相悖；且 `.workbuddy` 在本项目
+  已是**项目本地**目录（含 `.workbuddy/memory`），不再是外部 AI 工作区依赖。
+  跨平台安全保留：仍用固定 `$$` 后缀路径（如 `.workbuddy/tmp/status_jq_$$`），**不**改用
+  `mktemp`，避免 Windows/Git-Bash 下 `mktemp` 返回 `C:\...` 反斜杠路径破坏 `PATH` 与
+  `awk -v`/`chmod` 解析。受影响 20 个测试脚本 + `.gitignore` 同步更新；jq 垫片默认路径
+  由 `test/.tmp/jqshim` 改为 `.workbuddy/tmp/jqshim`。
+
+---
+
 ## [v2026-09-22]
 
 本版为 `v2026-09-21.1` 之后的累计批次：安全加固 + 多轮缺陷修复 + 巨型函数拆分与常量收敛 +

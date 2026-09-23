@@ -27,8 +27,8 @@ set -Eeuo pipefail
 if ! command -v jq >/dev/null 2>&1; then
     printf 'SKIP: 缺少依赖 jq\n'
     printf '  本机 (MSYS) 需把 jq 垫片带进 PATH, 正确调用方式:\n'
-    printf '    PATH="$PWD/test/.tmp/jqshim:$PATH" \\\n'
-    printf '    XRAY_TEST_SHIM="$PWD/test/.tmp/jqshim" bash %s\n' "$0"
+    printf '    PATH="$PWD/.workbuddy/tmp/jqshim:$PATH" \\\n'
+    printf '    XRAY_TEST_SHIM="$PWD/.workbuddy/tmp/jqshim" bash %s\n' "$0"
     exit 3
 fi
 

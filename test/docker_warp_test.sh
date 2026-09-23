@@ -12,7 +12,7 @@ assert_eq() { local d="$1" g="$2" e="$3"; if [[ "$g" == "$e" ]]; then ok "$d"; e
 
 SRC='service/docker.sh'
 if [[ ! -r "$SRC" && -r "${0%/*}/../$SRC" ]]; then cd "${0%/*}/.." || exit 1; fi
-TMPD="test/.tmp/docker_warp_$$"; rm -rf "$TMPD"; mkdir -p "$TMPD"
+TMPD=".workbuddy/tmp/docker_warp_$$"; rm -rf "$TMPD"; mkdir -p "$TMPD"
 trap 'rm -rf "$TMPD" 2>/dev/null || true' EXIT
 LOG="$TMPD/docker_log"
 [[ -r "$SRC" ]] || { bad "找不到 $SRC"; echo "PASS=$PASS FAIL=$FAIL"; exit 1; }

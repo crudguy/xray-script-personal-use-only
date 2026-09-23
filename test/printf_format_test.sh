@@ -25,7 +25,7 @@ set -Eeuo pipefail
 REPO="$(cd -P -- "$(dirname -- "$0")/.." && pwd -P)"
 cd "$REPO"
 
-SB="$REPO/test/.tmp/printf_format.$$"
+SB="$REPO/.workbuddy/tmp/printf_format.$$"
 rm -rf "$SB" 2>/dev/null || true
 mkdir -p "$SB"
 trap 'rm -rf "$SB" 2>/dev/null || true' EXIT

@@ -21,7 +21,7 @@ HANDLER=core/handler.sh
 BACKUP=tool/backup.sh
 NGINX=service/nginx.sh
 BASH_BIN="$(command -v bash)"
-TMPD="test/.tmp/error_hint_$$"
+TMPD=".workbuddy/tmp/error_hint_$$"
 mkdir -p "$TMPD"
 trap 'rm -rf "$TMPD"' EXIT
 

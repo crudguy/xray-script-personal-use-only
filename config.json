@@ -106,6 +106,10 @@
       "www.adobe.com"
     ]
   },
+  "target_removed": [
+    "www.fandom.com",
+    "www.leercapitulo.co"
+  ],
   "rules": [
     {
       "ruleTag": "api",

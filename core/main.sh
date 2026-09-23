@@ -169,8 +169,10 @@ function processes_ca_vendor() {
     current_ca_server="$(jq -r '.nginx.ca_server' "${SCRIPT_CONFIG_PATH}" || true)"
     local switch_confirm='n'
     case ${choose} in
-    2) ca_server='letsencrypt' ;;
-    *) ca_server='zerossl' ;;
+    1) ca_server='zerossl' ;;     # 选择 1 (默认) 对应 ZeroSSL
+    2) ca_server='letsencrypt' ;; # 选择 2 对应 Let's Encrypt
+    255) return 0 ;;              # 显式 "0. 返回上级": 取消 CA 切换
+    *) ca_server='zerossl' ;;     # 空回车(默认)/未列出编号 -> ZeroSSL
     esac
     [[ -z "${current_ca_server}" || "${current_ca_server}" == 'null' ]] && current_ca_server='zerossl'
 
@@ -205,11 +207,13 @@ function processes_xray_config() {
     # 根据用户选择设置具体的 XTLS 配置类型
     case ${choose} in
     1) XTLS_CONFIG='mKCP' ;;     # 选择 1 对应 mKCP
+    2) XTLS_CONFIG='Vision' ;;    # 选择 2 (默认) 对应 Vision
     3) XTLS_CONFIG='XHTTP' ;;    # 选择 3 对应 XHTTP
     4) XTLS_CONFIG='Trojan' ;;   # 选择 4 对应 Trojan
     5) XTLS_CONFIG='Fallback' ;; # 选择 5 对应 Fallback
     6) XTLS_CONFIG='SNI' ;;      # 选择 6 对应 SNI
-    *) XTLS_CONFIG='Vision' ;;   # 其他情况 (包括 2 和默认) 对应 Vision
+    255) return 0 ;;             # 显式 "0. 返回管理配置": get_choose 把字面 0 映射为 255, 返回上级菜单
+    *) XTLS_CONFIG='Vision' ;;   # 空回车(默认)/未列出编号 -> Vision
     esac
     # 如果选择了 SNI 配置
     if [[ "${XTLS_CONFIG}" == 'SNI' ]]; then
@@ -252,8 +256,10 @@ function processes_xray() {
     # 根据用户选择设置具体的 Xray 版本
     case ${choose} in
     1) version='latest' ;;  # 选择 1 对应 latest
+    2) version='release' ;; # 选择 2 (默认) 对应 release
     3) version='custom' ;;  # 选择 3 对应 custom
-    *) version='release' ;; # 其他情况 (包括 2 和默认) 对应 release
+    255) return 0 ;;        # 显式 "0. 返回主菜单": 返回主菜单
+    *) version='release' ;; # 空回车(默认)/未列出编号 -> release
     esac
     # 如果 is_exec 为 'y'，则立即执行安装
     if [[ "${is_exec}" == 'y' ]]; then

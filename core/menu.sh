@@ -143,6 +143,7 @@ function menu_xray() {
     echo -e "1. $(_i18n ".${CUR_FILE}.xray_version.info1")"
     echo -e "2. $(_i18n ".${CUR_FILE}.xray_version.info2")"
     echo -e "3. $(_i18n ".${CUR_FILE}.xray_version.info3")"
+    echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.xray_version.option0")"
     _menu_rule
 }
 
@@ -171,6 +172,7 @@ function menu_xray_config() {
     echo -e "4. $(_i18n ".${CUR_FILE}.protocol_config.info4")"
     echo -e "5. $(_i18n ".${CUR_FILE}.protocol_config.info5")"
     echo -e "6. $(_i18n ".${CUR_FILE}.protocol_config.info6")"
+    echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.protocol_config.option0")"
     _menu_rule
 }
 
@@ -199,6 +201,7 @@ function menu_ca_vendor() {
     _menu_rule
     echo -e "1. $(_i18n ".${CUR_FILE}.ca_vendor.info1")"
     echo -e "2. $(_i18n ".${CUR_FILE}.ca_vendor.info2")"
+    echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.ca_vendor.option0")"
     _menu_rule
 }
 
@@ -227,6 +230,7 @@ function menu_config() {
     echo -e "5. $(_i18n ".${CUR_FILE}.config_management.info5")"
     echo -e "7. $(_i18n ".${CUR_FILE}.config_management.info6")"
     echo -e "8. $(_i18n ".${CUR_FILE}.config_management.info7")"
+    echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.config_management.option0")"
     _menu_rule
 }
 
@@ -280,6 +284,7 @@ function menu_route() {
     echo -e "4. $(_i18n ".${CUR_FILE}.route_management.info6")"
     echo -e "5. $(_i18n ".${CUR_FILE}.route_management.info7")"
     echo -e "6. $(_i18n ".${CUR_FILE}.route_management.info8")"
+    echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.route_management.option0")"
     _menu_rule
 }
 
@@ -307,6 +312,7 @@ function menu_sni_config() {
     echo -e "7. $(_i18n ".${CUR_FILE}.sni_config.info3")"
     echo -e "8. $(_i18n ".${CUR_FILE}.sni_config.info4")"
     echo -e "9. $(_i18n ".${CUR_FILE}.sni_config.info5")"
+    echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.sni_config.option0")"
     _menu_rule
 }
 
@@ -328,6 +334,7 @@ function menu_custom_sites() {
     echo -e "2. $(_i18n ".${CUR_FILE}.custom_sites.info2")"
     echo -e "3. $(_i18n ".${CUR_FILE}.custom_sites.info3")"
     echo -e "4. $(_i18n ".${CUR_FILE}.custom_sites.info4")"
+    echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.custom_sites.option0")"
     _menu_rule
 }
 

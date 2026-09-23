@@ -45,6 +45,9 @@ fi
 
 # --- 桩件: persist_xray_config 改为空操作, 由 run_add 直接回读更新后的 XRAY_CONFIG ---
 persist_xray_config() { :; }
+# 桩件: add_rule 空值守卫会调用 _warn / _i18n, 测试里给最小实现
+_warn() { :; }
+_i18n() { printf '%s' "$1"; }
 
 # 加载抽出的函数体 (add_rule 可见 persist_xray_config 桩)
 eval "$SRC"
@@ -141,6 +144,40 @@ RES="$(run_add "$FIX" "x" "domain" "d.com" "block" "-1")"
 LEN="$(printf '%s' "$RES" | jq -r '.routing.rules | length')"
 LAST="$(printf '%s' "$RES" | jq -r '.routing.rules[-1].ruleTag')"
 if [[ "$LEN" == "3" && "$LAST" == "x" ]]; then ok "T8b: 数字位为负(-1) -> -ge 0 守卫为假末尾追加"; else bad "T8b: 负数应回退末尾追加, len=$LEN last=$LAST"; fi
+
+# ---- T9 空输入 -> 不创建规则 (修复: 之前会生成 ip:[""] 致 xray 校验失败并回滚) ----
+RES="$(run_add "$FIX" "block-ip" "ip" "" "block")"
+LEN="$(printf '%s' "$RES" | jq -r '.routing.rules | length')"
+if [[ "$LEN" == "2" ]]; then ok "T9: 空输入不创建规则 (rules 长度保持 2)"; else bad "T9: 空输入应无副作用, len=$LEN"; fi
+HAS_EMPTY="$(printf '%s' "$RES" | jq -r '[.routing.rules[] | ((.ip // [])[]), ((.domain // [])[])] | map(select(. == "")) | length')"
+if [[ "$HAS_EMPTY" == "0" ]]; then ok "T9: 未生成含空串的 ip/domain 元素"; else bad "T9: 出现了空串元素 has=$HAS_EMPTY"; fi
+
+# ---- T9b 纯逗号/空格输入 -> 视为空, 同样无副作用 ----
+RES="$(run_add "$FIX" "block-ip" "ip" ", ,  ," "block")"
+LEN="$(printf '%s' "$RES" | jq -r '.routing.rules | length')"
+if [[ "$LEN" == "2" ]]; then ok "T9b: 纯逗号/空格输入视为空 (无新规则)"; else bad "T9b: 应无副作用, len=$LEN"; fi
+
+# ---- T9c 已存在规则 + 空输入 -> 不污染既有 ip 数组 ----
+RES="$(run_add "$FIX6B" "private-ip" "ip" "" "direct")"
+IP="$(printf '%s' "$RES" | jq -c '.routing.rules[0].ip')"
+if [[ "$IP" == '["geoip:private"]' ]]; then ok "T9c: 已存在规则+空输入不污染既有 ip"; else bad "T9c: ip 应为 [\"geoip:private\"], 实测 $IP"; fi
+
+# ---- NEG 负向校验: 移除空值守卫后, 空输入会生成空 ip 数组 (证明 T9 真能捕获回归) ----
+BROKEN="$(printf '%s\n' "$SRC" | awk 'index($0,"if [[ \"${value}\" == \"[]\" ]]; then"){skip=1} skip&&/^    fi$/{skip=0;next} !skip{print}')"
+if [[ -z "$BROKEN" ]]; then
+    bad "NEG: 未能构造破损版 add_rule (守卫行未匹配)"
+else
+    BROKEN_RES="$(
+        _warn() { :; }
+        _i18n() { printf '%s' "$1"; }
+        eval "$BROKEN"
+        XRAY_CONFIG="$FIX"
+        add_rule "block-ip" "ip" "" "block" 2>/dev/null
+        printf '%s' "$XRAY_CONFIG"
+    )"
+    BROKEN_IP="$(printf '%s' "$BROKEN_RES" | jq -c '.routing.rules[-1].ip // empty')"
+    if [[ "$BROKEN_IP" == "[]" || "$BROKEN_IP" == '[""]' ]]; then ok "NEG: 移除守卫后空输入生成空 ip 规则 (T9 可捕获此回归)"; else bad "NEG: 负向未复现旧 bug, 实测 ip=$BROKEN_IP"; fi
+fi
 
 # ---- T7 静态契约: 禁止裸 `+= $new_rule`, 必须包成 [$new_rule] ----
 # 先剔除整行注释: 源码注释里会刻意写下旧 bug 形态 `.routing.rules += $new_rule` 作说明,

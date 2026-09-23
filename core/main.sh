@@ -344,29 +344,32 @@ function _require_warp_enabled() {
 # =============================================================================
 
 function processes_routing() {
-    # 显示路由规则菜单
+    # 显示路由规则菜单 (循环: 完成一项 / 守卫拦截后回到本菜单, 便于连续配置多条规则;
+    # 选 0 / EOF / 非法输入 -> break 退回上级, 避免重新下钻)。
 
     local choose=0
-    choose="$(exec_menu '--route')"
-    # 根据用户选择执行不同的路由配置操作
-    case ${choose} in
-    1) exec_handler '--warp' ;;                     # 选择 1：配置 WARP
-    2) exec_handler '--reset-warp' ;;               # 选择 2：重置 WARP
-    3) exec_handler '--routing' 'block' 'ip' ;;     # 选择 3：配置阻止 IP 规则
-    4) exec_handler '--routing' 'block' 'domain' ;; # 选择 4：配置阻止 Domain 规则
-    5 | 6)
-        # 选择 5/6：WARP 分流 (需先开启 WARP)。未开启时提示并返回本菜单,
-        # 不进 handler、也不触发末尾的 Xray 重启 (见 _require_warp_enabled)。
-        _require_warp_enabled || return 0
-        if [[ "${choose}" == '5' ]]; then
-            exec_handler '--routing' 'warp' 'ip'     # 选择 5：配置 WARP IP 规则
-        else
-            exec_handler '--routing' 'warp' 'domain' # 选择 6：配置 WARP Domain 规则
-        fi
-        ;;
-    *) return 0 ;;                                    # 其他情况：退出脚本
-    esac
-    exec_handler '--restart' # 重启 Xray 服务
+    while true; do
+        choose="$(exec_menu '--route')"
+        # 根据用户选择执行不同的路由配置操作
+        case ${choose} in
+        1) exec_handler '--warp' ;;                     # 选择 1：配置 WARP
+        2) exec_handler '--reset-warp' ;;               # 选择 2：重置 WARP
+        3) exec_handler '--routing' 'block' 'ip' ;;     # 选择 3：配置阻止 IP 规则
+        4) exec_handler '--routing' 'block' 'domain' ;; # 选择 4：配置阻止 Domain 规则
+        5 | 6)
+            # 选择 5/6：WARP 分流 (需先开启 WARP)。未开启时提示并回到本菜单 (continue),
+            # 不进 handler、也不触发末尾的 Xray 重启 (见 _require_warp_enabled)。
+            _require_warp_enabled || continue
+            if [[ "${choose}" == '5' ]]; then
+                exec_handler '--routing' 'warp' 'ip'     # 选择 5：配置 WARP IP 规则
+            else
+                exec_handler '--routing' 'warp' 'domain' # 选择 6：配置 WARP Domain 规则
+            fi
+            ;;
+        *) break ;;                                       # 0/EOF/非法 -> 退回上级菜单
+        esac
+        exec_handler '--restart' # 重启 Xray 服务
+    done
 }
 
 # =============================================================================
@@ -377,16 +380,19 @@ function processes_routing() {
 # 返回值: 无
 # =============================================================================
 function processes_custom_sites() {
+    # 显示自定义站点子菜单 (循环: 完成一项后回到本菜单; 0/EOF -> 退回上级)。
 
     local choose=0
-    choose="$(exec_menu '--custom-sites')"
-    case ${choose} in
-    1) exec_handler '--custom-sites' 'list' ;;
-    2) exec_handler '--custom-sites' 'add' ;;
-    3) exec_handler '--custom-sites' 'update' ;;
-    4) exec_handler '--custom-sites' 'delete' ;;
-    *) return 0 ;;
-    esac
+    while true; do
+        choose="$(exec_menu '--custom-sites')"
+        case ${choose} in
+        1) exec_handler '--custom-sites' 'list' ;;
+        2) exec_handler '--custom-sites' 'add' ;;
+        3) exec_handler '--custom-sites' 'update' ;;
+        4) exec_handler '--custom-sites' 'delete' ;;
+        *) break ;;
+        esac
+    done
 }
 
 # =============================================================================
@@ -480,22 +486,24 @@ function processes_language() {
 }
 
 function processes_config() {
-    # 显示主配置管理菜单
+    # 显示主配置管理菜单 (循环: 完成一项后回到本菜单; 0/EOF/非法 -> 退回主菜单)。
 
     local choose=0
-    choose="$(exec_menu '--management')"
-    # 根据用户选择进入不同的子流程
-    case ${choose} in
-    1) processes_xray_config ;;         # 选择 1：进入 Xray 配置流程
-    2) processes_routing ;;             # 选择 2：进入路由规则配置流程
-    3) processes_sni_config ;;          # 选择 3：进入 SNI 配置流程
-    4) exec_handler '--change-port' ;;  # 选择 4：修改 Xray 端口
-    5) exec_handler '--geodata-cron' ;; # 选择 5：配置 GeoData Cron 任务
-    6) processes_language ;;            # 选择 6：设置语言 (同进程内重载 i18n)
-    7) processes_bbr ;;                 # 选择 7：BBR 与内核网络加速（体检/调优）
-    8) processes_backup ;;              # 选择 8：配置备份与迁移（导出/导入）
-    *) return 0 ;;                        # 其他情况：退出脚本
-    esac
+    while true; do
+        choose="$(exec_menu '--management')"
+        # 根据用户选择进入不同的子流程
+        case ${choose} in
+        1) processes_xray_config ;;         # 选择 1：进入 Xray 配置流程
+        2) processes_routing ;;             # 选择 2：进入路由规则配置流程
+        3) processes_sni_config ;;          # 选择 3：进入 SNI 配置流程
+        4) exec_handler '--change-port' ;;  # 选择 4：修改 Xray 端口
+        5) exec_handler '--geodata-cron' ;; # 选择 5：配置 GeoData Cron 任务
+        6) processes_language ;;            # 选择 6：设置语言 (同进程内重载 i18n)
+        7) processes_bbr ;;                 # 选择 7：BBR 与内核网络加速（体检/调优）
+        8) processes_backup ;;              # 选择 8：配置备份与迁移（导出/导入）
+        *) break ;;                          # 0/EOF/非法 -> 退回主菜单
+        esac
+    done
 }
 
 # =============================================================================
@@ -510,17 +518,19 @@ function processes_config() {
 # =============================================================================
 
 function processes_bbr() {
-    # 显示 BBR 子菜单
+    # 显示 BBR 子菜单 (循环: 完成一项后回到本菜单; 0/EOF -> 退回管理配置菜单)。
 
     local choose=0
-    choose="$(exec_menu '--bbr')"
-    case ${choose} in
-    1) exec_handler '--bbr' ;;          # 选择 1：开启/修复 BBR (幂等)
-    2) exec_handler '--net-status' ;;   # 选择 2：只读体检 BBR 与内核网络
-    3) exec_handler '--net-tune' ;;     # 选择 3：内核网络高并发调优
-    4) exec_handler '--nofile-limit' ;; # 选择 4：进程文件句柄上限
-    *) return 0 ;;                        # 其他情况：返回管理配置菜单
-    esac
+    while true; do
+        choose="$(exec_menu '--bbr')"
+        case ${choose} in
+        1) exec_handler '--bbr' ;;          # 选择 1：开启/修复 BBR (幂等)
+        2) exec_handler '--net-status' ;;   # 选择 2：只读体检 BBR 与内核网络
+        3) exec_handler '--net-tune' ;;     # 选择 3：内核网络高并发调优
+        4) exec_handler '--nofile-limit' ;; # 选择 4：进程文件句柄上限
+        *) break ;;                          # 0/EOF/非法 -> 退回管理配置菜单
+        esac
+    done
 }
 
 # =============================================================================
@@ -535,29 +545,32 @@ function processes_bbr() {
 # =============================================================================
 
 function processes_backup() {
-    # 显示备份与迁移子菜单
+    # 显示备份与迁移子菜单 (循环: 完成一项后回到本菜单; 0/EOF/非法 -> 退回管理配置菜单)。
 
     local choose=0
-    choose="$(exec_menu '--backup')"
     local archive=''
-    case ${choose} in
-    1) exec_handler '--export-config' ;; # 选择 1：导出配置与证书
-    2)                                   # 选择 2：从归档导入
-        printf "${GREEN}[%s]${NC}" "$(_i18n '.title.config')" >&2
-        printf ' %s: ' "$(_i18n '.main.backup_input_path')" >&2
-        # 读到 EOF (无 TTY) 时留空串 —— 视为"未指定路径"。
-        read -r archive || archive=''
-        # 未填路径属"用户临时取消/漏填"(文案本身就是"已取消导入"), 提示后返回菜单即可;
-        # 不用 _error 退出整个脚本 —— 与上方 processes_sni_config 同一处置:
-        # "预期内不可用" -> 提示 + return, 只有真正的操作失败才交给 exec_handler 的 _error。
-        if [[ -z "${archive}" ]]; then
-            print_warn "$(_i18n '.main.backup_ipath_required')"
-            return 0
-        fi
-        exec_handler '--import-config' "${archive}"
-        ;;
-    *) return 0 ;;                         # 其他情况：返回管理配置菜单
-    esac
+    while true; do
+        choose="$(exec_menu '--backup')"
+        case ${choose} in
+        1) exec_handler '--export-config' ;; # 选择 1：导出配置与证书
+        2)                                   # 选择 2：从归档导入
+            printf "${GREEN}[%s]${NC}" "$(_i18n '.title.config')" >&2
+            printf ' %s: ' "$(_i18n '.main.backup_input_path')" >&2
+            # 读到 EOF (无 TTY) 时留空串 —— 视为"未指定路径"。
+            read -r archive || archive=''
+            # 未填路径属"用户临时取消/漏填"(文案本身就是"已取消导入"), 提示后回到本菜单即可;
+            # 与上方 processes_sni_config 同一处置: "预期内不可用" -> 提示, 只有真正的操作失败
+            # 才交给 exec_handler 的 _error。此处用 continue 留在备份菜单, 便于改填路径重试,
+            # 而非一路退回主菜单。
+            if [[ -z "${archive}" ]]; then
+                print_warn "$(_i18n '.main.backup_ipath_required')"
+                continue
+            fi
+            exec_handler '--import-config' "${archive}"
+            ;;
+        *) break ;;                         # 0/EOF/非法 -> 退回管理配置菜单
+        esac
+    done
 }
 
 # =============================================================================

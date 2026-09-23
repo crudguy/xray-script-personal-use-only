@@ -390,41 +390,34 @@ function processes_sni_config() {
     esac
 }
 
-# =============================================================================
-# 函数名称: _return_to_menu
-# 功能描述: 重启脚本后回到指定的菜单层级 (仅供语言切换使用, 见 processes_language)。
-#           语言切换必须重启脚本才能重载 i18n; 若直接重启会落到主菜单, 用户
-#           丢失所在层级。重启时经 `--menu <名称>` 把来源层级带过来, 由本函数
-#           映射回对应的 processes_* 入口。
-# 参数: $1=菜单名 (目前仅 'config' 有语言切换入口; 缺省或未知一律回主菜单)
-# 返回值: 无 (交给对应的 processes_* 入口)
-# =============================================================================
 
-function _return_to_menu() {
-    # 先回到指定层级 (若有), 再进入主菜单循环 —— 与"从主菜单正常进入子菜单"的导航
-    # 完全一致 (子菜单返回 -> 主菜单)。若到此为止, 子菜单一退出整个脚本就结束了。
-    case "${1:-}" in
-    config) processes_config ;; # 配置管理 (语言切换目前唯一的入口)
-    esac
-    processes_index
-}
+# =============================================================================
+# 函数名称: processes_config
+# 功能描述: 处理主配置管理相关的流程。
+#           1. 显示主配置管理菜单。
+#           2. 根据用户选择进入不同的子流程 (Xray 配置, 路由规则, SNI 配置, GeoData Cron)。
+# 参数: 无
+# 返回值: 无 (通过调用其他函数和脚本执行操作)
+# =============================================================================
 
 # =============================================================================
 # 函数名称: processes_language
 # 功能描述: 处理语言设置相关的流程。
 #           1. 显示语言设置菜单。
 #           2. 根据用户选择设置不同的语言（zh: 中文，en: 英语）。
-#           3. 重启脚本以重载 i18n, 并经 --menu 回到切换前所在的菜单层级。
-# 参数: $1=来源菜单名 (重启后经 _return_to_menu 回到该层级; 缺省回主菜单)
-# 返回值: 无 (通过调用其他函数和脚本执行操作)
+#           3. 同进程内清空并重新加载 i18n, 立即生效, 随后返回到调用方菜单。
+# 参数: 无 (不再接收来源菜单名; 见下方说明)
+# 返回值: 无 (无 re-launch, 直接返回调用方)
+# 说明: 早期实现改完语言后 re-launch 子进程 (`bash main.sh`) 以重载 i18n, 带来
+#       两个致命问题 —— (1) 父进程持单实例锁 (fd 9) 时子进程再次 _acquire_lock
+#       冲突, 误报 "已有实例正在运行"; (2) 子进程继承父进程 TTY stdin, 交互态下
+#       读不到正确输入而卡死 (光标不动)。改为同进程内 `I18N_MAP=(); load_i18n`
+#       即可一次性消除这两类问题, 且语言切换即时可见。返回后由 processes_index
+#       主循环重新渲染菜单 (已是新语言)。
 # =============================================================================
 
 function processes_language() {
     # 显示语言设置菜单
-    # P2-4: 记下来源层级 $1 —— 语言切换必须重启脚本才能重载 i18n, 不加这一步
-    #       用户会被丢回主菜单、丢失所在层级 (见 _return_to_menu)。
-    local return_to="${1:-index}"
-
     local choose=0
     choose="$(exec_menu '--language')"
     # 根据用户选择设置不同的语言
@@ -435,23 +428,12 @@ function processes_language() {
     # 更新配置文件中的语言设置
     SCRIPT_CONFIG="$(jq --arg language "${LANG_PARAM}" '.language = $language' "${SCRIPT_CONFIG_PATH}")"
     printf '%s\n' "${SCRIPT_CONFIG}" | _atomic_write "${SCRIPT_CONFIG_PATH}"
-    # 重启脚本以重载 i18n, 并带 --menu 回到切换前所在的菜单层级
-    # 注意: 本进程已通过 _acquire_lock 持有单实例锁 (fd 9)。若直接 re-launch 子进程,
-    # 子进程 main() 会再次 _acquire_lock, 而父进程仍持锁 -> flock 冲突,
-    # 误报 "已有实例正在运行" (见用户日志: 选择 6 设置语言后报 lock_busy)。
-    # 故 re-launch 前先释放父锁, 由子进程独占接管; 父进程随后 exit, 不再触碰配置。
-    _release_lock
-    bash "${CUR_DIR}/${CUR_FILE}.sh" --menu "${return_to}" && exit 0
+    # 同进程内重载 i18n, 无需 re-launch 子进程:
+    #   (1) 避免父进程持锁时 re-launch 子进程再次 _acquire_lock 导致的 lock_busy 误报;
+    #   (2) 避免子进程继承父进程 TTY stdin 造成的交互卡死 (光标不动)。
+    I18N_MAP=()
+    load_i18n
 }
-
-# =============================================================================
-# 函数名称: processes_config
-# 功能描述: 处理主配置管理相关的流程。
-#           1. 显示主配置管理菜单。
-#           2. 根据用户选择进入不同的子流程 (Xray 配置, 路由规则, SNI 配置, GeoData Cron)。
-# 参数: 无
-# 返回值: 无 (通过调用其他函数和脚本执行操作)
-# =============================================================================
 
 function processes_config() {
     # 显示主配置管理菜单
@@ -465,7 +447,7 @@ function processes_config() {
     3) processes_sni_config ;;          # 选择 3：进入 SNI 配置流程
     4) exec_handler '--change-port' ;;  # 选择 4：修改 Xray 端口
     5) exec_handler '--geodata-cron' ;; # 选择 5：配置 GeoData Cron 任务
-    6) processes_language 'config' ;;   # 选择 6：设置语言 (重启后回到本菜单)
+    6) processes_language ;;            # 选择 6：设置语言 (同进程内重载 i18n)
     7) processes_bbr ;;                 # 选择 7：BBR 与内核网络加速（体检/调优）
     8) processes_backup ;;              # 选择 8：配置备份与迁移（导出/导入）
     *) return 0 ;;                        # 其他情况：退出脚本
@@ -654,9 +636,6 @@ function main() {
     --restart) exec_handler '--restart' ;;
     # --share 支持附加参数 (--save / --no-qr), 用 shift + "$@" 透传, 与 --export-config 同款
     --share) shift; exec_handler '--share' "$@" ;;
-    # 内部用途: 语言切换重启后回到原菜单层级 (由 processes_language 传入, 非公开 CLI;
-    # 故不列入 main.usage)。必须排在末尾 `*)` 之前, 否则会被当成未知参数落回主菜单。
-    --menu) _return_to_menu "${2:-}" ;;
     # 对于其他参数，进入主索引流程，并将第二个参数传递给它
     *) processes_index "${2:-}" ;;
     esac

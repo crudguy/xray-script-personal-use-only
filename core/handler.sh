@@ -1479,7 +1479,12 @@ function _xray_apply_inbounds() {
     # 根据配置标签更新特定字段 (第二部分)
     case "${CONFIG_TAG,,}" in
     mkcp)
-        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg seed "${KCP_SEED}" '.inbounds[1].streamSettings.kcpSettings.seed = $seed')"
+        # Xray 26.x 起 mKCP 的 seed 字段已移除, 改用 FinalMask:
+        #   streamSettings.finalMask.udp[0] = {type:"mkcp-legacy", settings:{header:"", value:"<原seed>"}}
+        #   (官方: header 为空 = AES-128-GCM 加密, value 为其密码; 旧 seed 即此密码, 语义完整保留)
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg seed "${KCP_SEED}" '
+            .inbounds[1].streamSettings.finalMask |= (. // {"udp":[{"type":"mkcp-legacy","settings":{"header":"","value":""}}]})
+            | .inbounds[1].streamSettings.finalMask.udp[0].settings.value = $seed')"
         ;;
     vision | xhttp | trojan | fallback | sni)
         if [[ "${CONFIG_TAG,,}" != 'sni' ]]; then

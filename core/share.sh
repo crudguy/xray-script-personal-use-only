@@ -227,7 +227,12 @@ function get_common_config() {
     # 从 Xray 配置中获取客户端密码 (Trojan)
     CLIENT_CONFIG[password]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].settings.clients[0].password? | if . == null then empty else . end')"
     # 从 Xray 配置中获取 mKCP 的种子 (seed)
-    CLIENT_CONFIG[seed]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.kcpSettings.seed? | if . == null then empty else . end')"
+    # Xray 26.x 起 seed 已迁移到 finalMask.udp[].settings.value (type=mkcp-legacy), 故从此处读取
+    CLIENT_CONFIG[seed]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '
+        .inbounds[$i].streamSettings.finalMask.udp[]?
+        | select(.type=="mkcp-legacy")
+        | .settings.value?
+        | if . == null then empty else . end')"
     # 从 Xray 配置中获取网络传输类型 (如 tcp, kcp, xhttp)
     CLIENT_CONFIG[type]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.network? | if . == null then empty else . end')"
     # 从 Xray 配置中获取 Flow 控制参数 (如 xtls-rprx-vision)

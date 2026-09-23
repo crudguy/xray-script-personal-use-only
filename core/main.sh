@@ -481,6 +481,7 @@ function processes_language() {
     # 同进程内重载 i18n, 无需 re-launch 子进程:
     #   (1) 避免父进程持锁时 re-launch 子进程再次 _acquire_lock 导致的 lock_busy 误报;
     #   (2) 避免子进程继承父进程 TTY stdin 造成的交互卡死 (光标不动)。
+    # shellcheck disable=SC2034  # I18N_MAP 实际在 _common.sh 的 _i18n 中跨文件读取; shellcheck 单文件分析无法追踪, 此处清空仅为触发 load_i18n 重新填充
     I18N_MAP=()
     load_i18n
 }

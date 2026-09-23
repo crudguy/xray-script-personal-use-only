@@ -993,10 +993,10 @@ function add_rule() {
                 # 根据 position 参数决定插入位置
                 if [[ "${position}" == "before" ]]; then
                     # 插入到 target_tag 规则之前
-                    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson target_index "${target_index}" --argjson new_rule "${new_rule}" '.routing.rules |= .[:$target_index] + $new_rule + .[$target_index:]')"
+                    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson target_index "${target_index}" --argjson new_rule "${new_rule}" '.routing.rules |= .[:$target_index] + [$new_rule] + .[$target_index:]')"
                 elif [[ "${position}" == "after" ]]; then
                     # 插入到 target_tag 规则之后
-                    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson target_index $((target_index + 1)) --argjson new_rule "${new_rule}" '.routing.rules |= .[:$target_index] + $new_rule + .[$target_index:]')"
+                    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson target_index $((target_index + 1)) --argjson new_rule "${new_rule}" '.routing.rules |= .[:$target_index] + [$new_rule] + .[$target_index:]')"
                 else
                     # 默认追加到末尾
                     XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson new_rule "${new_rule}" '.routing.rules += $new_rule')"
@@ -1010,7 +1010,7 @@ function add_rule() {
             # 如果指定了数字位置
             if [[ -n "${position}" && "${position}" -ge 0 ]]; then
                 # 插入到指定索引位置
-                XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson position "${position}" --argjson new_rule "${new_rule}" '.routing.rules |= .[:$position] + $new_rule + .[$position:]')"
+                XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson position "${position}" --argjson new_rule "${new_rule}" '.routing.rules |= .[:$position] + [$new_rule] + .[$position:]')"
             else
                 # 默认追加到末尾
                 XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson new_rule "${new_rule}" '.routing.rules += $new_rule')"

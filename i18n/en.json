@@ -195,6 +195,9 @@
   },
   "handler": {
     "unknown_option": "Unknown or unsupported option",
+    "rule": {
+      "value_empty": "No value entered; no routing rule added (pressing Enter directly or extra commas counts as empty)."
+    },
     "script": {
       "config_update": "Updating script configuration",
       "private_key_hidden": "Generated and written to the script config; not echoed here (long-term key, kept out of terminal scrollback/screencast/logs). Set SHOW_PRIVATE_KEY=1 and re-run to display it"

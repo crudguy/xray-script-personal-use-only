@@ -195,6 +195,9 @@
   },
   "handler": {
     "unknown_option": "未知或不支持的参数",
+    "rule": {
+      "value_empty": "未输入任何值，未添加路由规则（直接回车或多余逗号视为空）。"
+    },
     "script": {
       "config_update": "正在更新脚本配置",
       "private_key_hidden": "已生成并写入脚本配置, 此处不回显 (长期密钥, 避免被终端回滚/录屏/日志留存)。需要明文时可设置 SHOW_PRIVATE_KEY=1 后重跑"

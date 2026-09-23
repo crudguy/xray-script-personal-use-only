@@ -954,8 +954,16 @@ function add_rule() {
     local rule_tag=${1:-}     # 获取规则标签
     local domain_or_ip=${2:-} # 获取规则类型 (domain/ip)
     # 将逗号分隔的值转换为 JSON 数组
+    # 修复: 用户输入可能为空 (直接回车) 或夹带多余逗号/空格 (如 "1.2.3.4,, 5.6.7.8")。
+    # 原 `tr ',' '\n' | jq -R | jq -s` 会把空串变成 [""] (含一个空字符串的数组),
+    # 进而生成 ip:[""] 这类非法路由规则 —— xray 校验报 "invalid IP: " 触发回滚 + 退出码 1。
+    # 现先去首尾空格、丢弃空元素; 若结果仍为空数组, 视为"未输入", 不创建规则直接返回。
     local value
-    value=$(echo "${3:-}" | tr ',' '\n' | jq -R | jq -s)
+    value=$(printf '%s' "${3:-}" | tr ',' '\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | awk 'NF' | jq -R | jq -s)
+    if [[ "${value}" == "[]" ]]; then
+        _warn "$(_i18n '.handler.rule.value_empty')"
+        return 0
+    fi
     local outboundTag=${4:-} # 获取出站标签
     local position=${5:-}    # 获取插入位置参数
     local target_tag=${6:-}  # 获取目标规则标签参数

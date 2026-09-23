@@ -10,7 +10,8 @@
 #
 # 本测试锁死:
 #   1. 行为层 —— 6 个分支 (末尾追加 / before / after / 数字索引 / 已存在规则追加去重 /
-#      target 不存在回退末尾) 均能产出合法 JSON 且 ruleTag 顺序/值符合预期;
+#      target 不存在回退末尾), 含已存在规则的 domain/ip 两类、多值逗号串去重+unique 排序、
+#      数字位越界(99)/负数(-1) 回退末尾等边界, 均能产出合法 JSON 且 ruleTag 顺序/值符合预期;
 #   2. 静态契约 —— 三处追加分支必须写成 `+= [$new_rule]`, 三处位置插入必须写成
 #      `+ [$new_rule] +`; 严禁出现裸 `+= $new_rule` (旧 bug 写法)。
 #   回退到旧写法时, 行为用例的 jq 会报错 -> 结果非法 JSON -> 断言失败, 把 bug 挡在 CI。
@@ -111,6 +112,35 @@ LEN="$(printf '%s' "$RES" | jq -r '.routing.rules | length')"
 if [[ "$LEN" == "1" ]]; then ok "T6: 已存在规则不新增条目 (长度=1)"; else bad "T6: 长度应为 1, 实测 $LEN"; fi
 DOM="$(printf '%s' "$RES" | jq -c '.routing.rules[0].domain')"
 if [[ "$DOM" == '["geosite:category-ads-all","geosite:new"]' ]]; then ok "T6: 已存在 domain 规则追加+去重正确"; else bad "T6: domain 应为 [\"geosite:category-ads-all\",\"geosite:new\"], 实测 $DOM"; fi
+
+# ---- T6b 已存在 ip 规则 -> 追加值并去重 (ip 类型分支, 此前未覆盖) ----
+FIX6B='{"routing":{"rules":[{"ruleTag":"private-ip","type":"field","ip":["geoip:private"],"outboundTag":"direct"}]}}'
+RES="$(run_add "$FIX6B" "private-ip" "ip" "geoip:private,geoip:cn" "direct")"
+LEN="$(printf '%s' "$RES" | jq -r '.routing.rules | length')"
+if [[ "$LEN" == "1" ]]; then ok "T6b: 已存在 ip 规则不新增条目 (长度=1)"; else bad "T6b: 长度应为 1, 实测 $LEN"; fi
+IP="$(printf '%s' "$RES" | jq -c '.routing.rules[0].ip')"
+# 既有 ["geoip:private"] + 输入 ["geoip:private","geoip:cn"] => += 后 unique 排序 => ["geoip:cn","geoip:private"]
+if [[ "$IP" == '["geoip:cn","geoip:private"]' ]]; then ok "T6b: 已存在 ip 规则追加+去重正确"; else bad "T6b: ip 应为 [\"geoip:cn\",\"geoip:private\"], 实测 $IP"; fi
+
+# ---- T6c 多值逗号串在「已存在规则」分支: 重叠去重 + 自身重复去重 + unique 排序 ----
+FIX6C='{"routing":{"rules":[{"ruleTag":"ad-domain","type":"field","domain":["geosite:category-ads-all"],"outboundTag":"block"}]}}'
+RES="$(run_add "$FIX6C" "ad-domain" "domain" "geosite:new-b,geosite:category-ads-all,geosite:new-a,geosite:new-b" "block")"
+DOM="$(printf '%s' "$RES" | jq -c '.routing.rules[0].domain')"
+# 既有 ["geosite:category-ads-all"] + 输入(含与既有重叠 1 个 + 自身重复 1 个 + 全新 2 个)
+#   => += 后 unique 排序 => ["geosite:category-ads-all","geosite:new-a","geosite:new-b"]
+if [[ "$DOM" == '["geosite:category-ads-all","geosite:new-a","geosite:new-b"]' ]]; then ok "T6c: 已存在规则多值去重+排序正确"; else bad "T6c: domain 应为 [\"geosite:category-ads-all\",\"geosite:new-a\",\"geosite:new-b\"], 实测 $DOM"; fi
+
+# ---- T8 数字位越界: position 超过数组长度 -> 落到末尾追加 ----
+RES="$(run_add "$FIX" "x" "domain" "d.com" "block" "99")"
+LEN="$(printf '%s' "$RES" | jq -r '.routing.rules | length')"
+LAST="$(printf '%s' "$RES" | jq -r '.routing.rules[-1].ruleTag')"
+if [[ "$LEN" == "3" && "$LAST" == "x" ]]; then ok "T8: 数字位越界(99) -> 末尾追加 (x 在末位)"; else bad "T8: 越界应回退末尾追加, len=$LEN last=$LAST"; fi
+
+# ---- T8b 数字位为负: -ge 0 守卫为假 -> 落到末尾追加 ----
+RES="$(run_add "$FIX" "x" "domain" "d.com" "block" "-1")"
+LEN="$(printf '%s' "$RES" | jq -r '.routing.rules | length')"
+LAST="$(printf '%s' "$RES" | jq -r '.routing.rules[-1].ruleTag')"
+if [[ "$LEN" == "3" && "$LAST" == "x" ]]; then ok "T8b: 数字位为负(-1) -> -ge 0 守卫为假末尾追加"; else bad "T8b: 负数应回退末尾追加, len=$LEN last=$LAST"; fi
 
 # ---- T7 静态契约: 禁止裸 `+= $new_rule`, 必须包成 [$new_rule] ----
 # 先剔除整行注释: 源码注释里会刻意写下旧 bug 形态 `.routing.rules += $new_rule` 作说明,

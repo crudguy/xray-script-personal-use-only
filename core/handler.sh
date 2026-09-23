@@ -999,11 +999,17 @@ function add_rule() {
                     XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson target_index $((target_index + 1)) --argjson new_rule "${new_rule}" '.routing.rules |= .[:$target_index] + [$new_rule] + .[$target_index:]')"
                 else
                     # 默认追加到末尾
-                    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson new_rule "${new_rule}" '.routing.rules += $new_rule')"
+                    # $new_rule 是 add_rule 用 jq -nc 构造的单个对象; 追加时必须包成单元素数组 [$new_rule],
+# 否则 .routing.rules += $new_rule 等价于 array + object -> jq 报错
+# "array and object cannot be added" (与位置插入分支同理, 旧 bug: 6fcda2a 漏改此处)。
+XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson new_rule "${new_rule}" '.routing.rules += [$new_rule]')"
                 fi
             else
                 # target_tag 规则不存在，追加到末尾
-                XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson new_rule "${new_rule}" '.routing.rules += $new_rule')"
+                # $new_rule 是 add_rule 用 jq -nc 构造的单个对象; 追加时必须包成单元素数组 [$new_rule],
+# 否则 .routing.rules += $new_rule 等价于 array + object -> jq 报错
+# "array and object cannot be added" (与位置插入分支同理, 旧 bug: 6fcda2a 漏改此处)。
+XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson new_rule "${new_rule}" '.routing.rules += [$new_rule]')"
             fi
         else
             # 未指定 target_tag
@@ -1013,7 +1019,10 @@ function add_rule() {
                 XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson position "${position}" --argjson new_rule "${new_rule}" '.routing.rules |= .[:$position] + [$new_rule] + .[$position:]')"
             else
                 # 默认追加到末尾
-                XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson new_rule "${new_rule}" '.routing.rules += $new_rule')"
+                # $new_rule 是 add_rule 用 jq -nc 构造的单个对象; 追加时必须包成单元素数组 [$new_rule],
+# 否则 .routing.rules += $new_rule 等价于 array + object -> jq 报错
+# "array and object cannot be added" (与位置插入分支同理, 旧 bug: 6fcda2a 漏改此处)。
+XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson new_rule "${new_rule}" '.routing.rules += [$new_rule]')"
             fi
         fi
     fi

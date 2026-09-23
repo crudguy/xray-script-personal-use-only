@@ -27,7 +27,7 @@ bad() {
 }
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$REPO"
+cd "$REPO" || exit 1
 
 # 行为级/集成断言的工作区: 隔离 HOME (check.sh 经 load_i18n 读 config.json 的 language)
 TMPH=".workbuddy/tmp/rule_value_check_home_$$"
@@ -201,7 +201,7 @@ if command -v jq >/dev/null 2>&1; then
     *) ok ;;
     esac
 
-    out_empty="$(HOME="${TMPH}" bash core/check.sh --rule-ip '' 2>&1)"
+    HOME="${TMPH}" bash core/check.sh --rule-ip '' >/dev/null 2>&1
     rc_empty=$?
     [[ "${rc_empty}" -eq 0 ]] && ok || bad "T6: 空输入应放行 (rc=0), 实测 rc=${rc_empty}"
 else

@@ -33,7 +33,7 @@ Xray 版本可选最新版、稳定版或自选版。
 - **端口**：REALITY 系默认 443，mKCP 随机生成；非 SNI 配置可修改监听端口并自动重启
 - **UUID**：随机生成；可自定义；非标准 UUID 会映射为标准 UUID
 - **kcp seed / trojan 密码**：随机生成或自定义
-- **Reality target**：从 serverNames 列表随机取，也支持自填并校验其 TLSv1.3 与 H2 可用性
+- **Reality target（伪装目标）**：留空则从 `config.json` 的 `.target` 预设池随机取（预设池内的域名都经过 DNS / 443 / TLS 1.3 / X25519 四项实测）；也可自填，会按同样四项当场校验。它是「客户端 SNI 要伪装成谁」，**不需要解析到本机**。改预设前可用 `bash test/target_probe.sh` 复验清单，`bash test/target_probe.sh <域名>` 抽查单个域名
 - **shortId**：随机生成（默认两个），支持逗号分隔多个值，输入 0–8 时自动生成对应长度
 - **path**：随机生成或自定义
 

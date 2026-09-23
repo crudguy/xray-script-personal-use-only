@@ -357,20 +357,29 @@ function processes_custom_sites() {
 # =============================================================================
 # 函数名称: processes_sni_config
 # 功能描述: 处理 SNI 配置相关的流程。
-#           1. 检查当前 Xray 配置是否为 SNI 模式，如果不是则报错退出。
+#           1. 检查当前 Xray 配置是否为 SNI 模式，如果不是则提示并返回菜单 (不退出)。
 #           2. 显示 SNI 配置菜单。
 #           3. 根据用户选择执行不同的 SNI 相关操作 (更改域名/CDN, 更新 Nginx, 配置 Cron, Web 配置, 重置 V3)。
 # 参数: 无
 # 返回值: 无 (通过调用其他函数和脚本执行操作)
-# 退出码: 如果当前配置不是 SNI，则调用 _error 退出脚本 (exit 1)
+# 退出码: 无 —— 非 SNI 模式属"预期内不可用"(用户可能只是想看看), 仅 print_warn
+#         提示后 return 0 回到菜单, 不中断脚本。真正的操作失败仍由 exec_handler
+#         的 _error 兜底退出。
 # =============================================================================
 
 function processes_sni_config() {
     # 从配置文件中读取当前 Xray 的 tag
     local tag
     tag="$(jq -r '.xray.tag' "${SCRIPT_CONFIG_PATH}")"
-    # 检查 tag 是否为 'sni' (不区分大小写)，如果不是则调用 _error 函数报错退出
-    [[ "${tag,,}" == 'sni' ]] || _error "$(_i18n ".${CUR_FILE}.not_support")"
+    # 检查 tag 是否为 'sni' (不区分大小写)。
+    # 非 SNI 模式下本菜单项不适用 —— 属"预期内不可用", 提示一句后返回菜单即可;
+    # 不能用 _error: 它会 exit 1, 一路冒泡成 install.sh trampoline 的
+    # "[错误] 脚本在第 N 行意外失败 (退出码 1)", 用户只看到崩溃且被迫重进脚本,
+    # 连"换个菜单项"都做不到。与同级 processes_* 的 `*) return 0` 惯例保持一致。
+    if [[ "${tag,,}" != 'sni' ]]; then
+        print_warn "$(_i18n ".${CUR_FILE}.not_support")"
+        return 0
+    fi
     # 显示 SNI 配置菜单
 
     local choose=0
@@ -501,9 +510,15 @@ function processes_backup() {
     2)                                   # 选择 2：从归档导入
         printf "${GREEN}[%s]${NC}" "$(_i18n '.title.config')" >&2
         printf ' %s: ' "$(_i18n '.main.backup_input_path')" >&2
-        # 读到 EOF (无 TTY) 时留空串, 交由 handler 判定为"未指定路径"并报错退出
+        # 读到 EOF (无 TTY) 时留空串 —— 视为"未指定路径"。
         read -r archive || archive=''
-        [[ -n "${archive}" ]] || _error "$(_i18n '.main.backup_ipath_required')"
+        # 未填路径属"用户临时取消/漏填"(文案本身就是"已取消导入"), 提示后返回菜单即可;
+        # 不用 _error 退出整个脚本 —— 与上方 processes_sni_config 同一处置:
+        # "预期内不可用" -> 提示 + return, 只有真正的操作失败才交给 exec_handler 的 _error。
+        if [[ -z "${archive}" ]]; then
+            print_warn "$(_i18n '.main.backup_ipath_required')"
+            return 0
+        fi
         exec_handler '--import-config' "${archive}"
         ;;
     *) return 0 ;;                         # 其他情况：返回管理配置菜单

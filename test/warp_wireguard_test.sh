@@ -140,9 +140,10 @@ curl() {
 extract() { # $1=函数名 $2=文件
     awk -v fn="$1" '$0 ~ "^function " fn "\\(\\) \\{" {f=1} f{print} f && /^}$/ {exit}' "$2"
 }
-for fn in _warp_xray_bin _warp_key_probe _warp_gen_keypair _warp_reserved_from_client_id \
+for fn in _xray_bin_path _warp_key_probe _warp_gen_keypair _warp_reserved_from_client_id \
           _warp_register _warp_ensure_credentials _warp_forget_credentials _warp_outbound_json \
-          _xray_apply_warp handler_warp; do
+          _xray_apply_warp handler_warp \
+          _xray_config_probe _xray_observatory_mode _warp_outbound_tag _xray_apply_warp_balancer; do
     body="$(extract "$fn" "$HANDLER")"
     if [[ -z "$body" ]]; then
         echo "  [FAIL] 抽取产品函数失败: $fn"
@@ -157,6 +158,15 @@ eval "$(extract _atomic_write "$COMMON")"
 # 未必有 /dev/fd, 进程替换会静默失效 (表现为常量全空 -> 断言"假绿")
 grep -E '^readonly WARP_' "$HANDLER" > "$SB/consts.sh"
 while IFS= read -r line; do eval "$line"; done < "$SB/consts.sh"
+# 健康探测/均衡的降级形态 (出站 tag 保持 warp) 在本测试里一律生效 —— 让 T11/T13 这些
+# "出站 tag 是 warp" 的断言继续锚在降级语义上。"开探测"的 full 形态由
+# test/xray_router_extras_test.sh 覆盖。两个变量在产品里由 handler.sh 顶层赋值,
+# 这里只抽了函数体, 所以必须显式声明 (set -u 下不声明会 nounset)。
+_XRAY_OBS_MODE='plain'
+_WARP_OB_TAG=''
+# WARP_STATUS 由被测产品函数经 bash 动态作用域读取 (shellcheck 静态看不到), 先 export
+# 声明, 否则下面 T11 的裸赋值会被报 SC2034 (未使用变量)。
+export WARP_STATUS=''
 # 注: 不再对 WARP_CREDENTIALS_PATH 重复赋值 —— 产品里它是 readonly, 且取值就是
 #     ${SCRIPT_CONFIG_DIR}/warp.json, 而 SCRIPT_CONFIG_DIR 已指向本测试沙箱
 

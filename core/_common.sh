@@ -402,6 +402,19 @@ function _gh_url() {
         printf '%s' "${url}"
         return 0
     fi
+    # 安全加固: GH_PROXY 可经环境变量注入, 而本函数返回值会被拼进 service/nginx.sh 的
+    # _error_detect → eval 命令串 (git clone $(_gh_url ...)), 故加白名单: 只接受
+    # "scheme://host[:port][/path]" 形态, 拒绝空格与 shell 元字符 (' " $ ` ; & | ( ) < > 等)。
+    # 非法时按"未配置代理"处理 (原样返回 URL) —— 既阻断注入, 又不中断调用方;
+    # 告警走 stderr (stdout 是返回值, 不能污染), 且只提示一次避免刷屏。
+    if [[ ! "${GH_PROXY}" =~ ^https?://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~:@/-]*)?$ ]]; then
+        if [[ -z "${_GH_PROXY_WARNED:-}" ]]; then
+            _GH_PROXY_WARNED=1
+            printf 'GH_PROXY 值非法, 已忽略并按直连处理: %s\n' "${GH_PROXY}" >&2
+        fi
+        printf '%s' "${url}"
+        return 0
+    fi
     # 仅改写 GitHub 系域名; nginx.org / openssl.org / get.acme.sh 等保持原样
     case "${url}" in
     https://github.com/* | https://raw.githubusercontent.com/* | https://api.github.com/* | https://codeload.github.com/* | https://objects.githubusercontent.com/*)

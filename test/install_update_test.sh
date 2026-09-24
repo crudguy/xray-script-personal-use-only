@@ -57,6 +57,21 @@ if printf '%s\n' "$UP" | grep -q 'mv -f "${backup_dir}" "${PROJECT_ROOT}"'; then
 else
   bad "_update_xray_script 缺少失败回滚还原"
 fi
+# ---- 优雅退出契约: 交接子脚本必须接住其非 0 退出码。
+#   否则子脚本 (main.sh / 递归重启的新实例) 里的"安全退出"会被本脚本的 ERR trap 再叠一条
+#   "[错误] 脚本在第 N 行意外失败 (退出码 1)", 让一次优雅退出看起来像脚本崩溃。
+#   实测: 手动安装 mKCP、Xray 配置校验失败回滚时一次叠出两条 (1078 + 838)。用 grep -F 固定串,
+#   免去 "${...}" 被当正则元字符。
+if grep -qF 'bash "${CORE_DIR}/main.sh" "${QUICK_INSTALL}" || exit $?' "$SRC"; then
+  ok "main() 交接 main.sh 已接住退出码 (不叠 ERR trap 噪音)"
+else
+  bad "main() 交接 main.sh 未接住退出码 -> 会叠一条假的「意外失败」"
+fi
+if grep -qF 'bash "${CUR_DIR}/${CUR_FILE}" || exit $?' "$SRC"; then
+  ok "_update_xray_script 重启已接住退出码 (不叠 ERR trap 噪音)"
+else
+  bad "_update_xray_script 重启未接住退出码 -> 会叠一条假的「意外失败」"
+fi
 
 # ============================================================ _gh_url (纯, 依赖 GH_PROXY)
 echo "== _gh_url 代理改写 =="

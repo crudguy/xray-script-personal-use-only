@@ -674,12 +674,13 @@ function is_enabled() {
 }
 
 # =============================================================================
-# 函数名称: print_info / print_warn / print_error
-# 功能描述: 统一的日志输出三件套, 输出到 stderr 以免污染 `$(...)` 捕获的 stdout。
+# 函数名称: print_info / print_warn / print_pass / print_error
+# 功能描述: 统一的日志输出四件套, 输出到 stderr 以免污染 `$(...)` 捕获的 stdout。
 # 参数:
-#   $*: 消息内容
-# 返回值: print_info/print_warn 恒 0; print_error 打印后 exit 1 (不返回)
+#   $*: 消息内容 (print_error 另有可选第 2 参 hint)
+# 返回值: print_info / print_warn / print_pass 恒 0; print_error 打印后 exit 1 (不返回)
 # 注: print_error 会终止调用方脚本, 与下沉前各副本语义完全一致。
+#     格式串只含 %s, 译文/变量一律作参数传入 (见 test/printf_format_test.sh)。
 # =============================================================================
 function print_info() {
     printf "${GREEN}[%s] ${NC}%s\n" "$(_i18n '.title.info')" "$*" >&2
@@ -687,6 +688,10 @@ function print_info() {
 
 function print_warn() {
     printf "${YELLOW}[%s] ${NC}%s\n" "$(_i18n '.title.warn')" "$*" >&2
+}
+
+function print_pass() {
+    printf "${GREEN}[%s] ${NC}%s\n" "$(_i18n '.title.pass')" "$*" >&2
 }
 
 function print_error() {
@@ -698,6 +703,29 @@ function print_error() {
     fi
     exit 1
 }
+
+# =============================================================================
+# 函数名称: _error / _warn / _info / _pass
+# 功能描述: print_* 的短名别名 —— 历史调用点继续可用, 实现收敛到单一真源。
+#
+# 为什么必须放在这里 (而不是各脚本各留一份副本):
+#   ① 这些短名曾由 main.sh / handler.sh / backup.sh **各自内联一份**, 逐字相同却分散,
+#      改一处忘一处即漂移 (handler.sh 的注释就曾宣称"与 check.sh 完全一致"而实际不同)。
+#   ② 更要命的是 **子进程拿不到父进程的函数**: share.sh 由 `bash "${CUR_DIR}/share.sh"`
+#      拉起, 其 cache_json_data 在"Xray 未安装"分支调 _error, 而全仓无定义 —— 用户实际
+#      看到的是 `_error: 未找到命令` + ERR trap 的"脚本在第 N 行意外失败 (退出码 127)",
+#      恰恰就是该分支注释里说要避免的"看不懂的报错"。下沉后 share.sh 经 source 本文件即得。
+#
+# 刻意**不**并入此处的同名函数 (语义确有不同, 见各自定义处注释):
+#   core/check.sh  _info -> 黄色: 体检语境用它把"信息"与"通过"(绿)在视觉上分开
+#   core/check.sh  _fail -> 仅打印不退出: 体检要跑完全部检查项再汇总
+#   tool/backup.sh _fail -> exit 1: 备份失败即终止, 无汇总诉求
+#   install.sh     _error -> 自包含单文件 (走 I18N_DATA), 不 source 本文件
+# =============================================================================
+function _error() { print_error "$@"; }
+function _warn() { print_warn "$@"; }
+function _info() { print_info "$@"; }
+function _pass() { print_pass "$@"; }
 
 # =============================================================================
 # 函数名称: _os

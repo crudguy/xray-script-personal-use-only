@@ -88,23 +88,9 @@ declare XRAY_INSTALL_URL="${XRAY_INSTALL_URL-https://raw.githubusercontent.com/X
 declare XRAY_INSTALL_SHA256="${XRAY_INSTALL_SHA256-7f70c95f6b418da8b4f4883343d602964915e28748993870fd554383afdbe555}"
 
 
-# =============================================================================
-# 函数名称: _error
-# 功能描述: 打印错误信息到标准错误输出并退出脚本。
-# 参数:
-#   $@: 要输出的错误信息文本
-# 返回值: 无 (直接打印到标准错误输出 >&2 并退出)
-# 退出码: 1
-# =============================================================================
-function _error() {
-    # $1=错误消息; $2=可选的可执行建议 (非空时以 [建议] 追加一行到 stderr)
-    local msg="${1:-}" hint="${2:-}"
-    printf "${RED}[%s] ${NC}%s\n" "$(_i18n '.title.error')" "${msg}" >&2
-    if [[ -n "${hint}" ]]; then
-        printf "${YELLOW}[%s] ${NC}%s\n" "$(_i18n '.title.hint')" "${hint}" >&2
-    fi
-    exit 1
-}
+# 注: _error / _warn / _info / _pass 现由 _common.sh 统一提供 (print_* 的短名别名)。
+#     此处曾内联一份 _error, 与 main.sh 的那份逐字相同、与 _common.sh 的 print_error
+#     也逐字相同 —— 删除只留单一真源。
 
 # --- 审计留痕 ---
 # 关键操作 (安装/卸载/启停/证书) 追加到审计日志并同步 syslog, 供无人值守场景事后回溯。
@@ -3048,10 +3034,12 @@ function handler_bbr() {
 # "xray-script-personal-use-only-" 前缀的文件 (不进 /etc/sysctl.conf, 不动别人的同名配置)。
 # =============================================================================
 
-# --- 输出助手: 与 check.sh / backup.sh 里的同名函数格式完全一致 ---
-function _warn() { echo -e "${YELLOW}[$(_i18n '.title.warn')]${NC} $*" >&2; }
-function _info() { echo -e "${GREEN}[$(_i18n '.title.info')]${NC} $*" >&2; }
-function _pass() { echo -e "${GREEN}[$(_i18n '.title.pass')]${NC} $*" >&2; }
+# --- 输出助手 ---
+# _warn / _info / _pass 已下沉到 _common.sh (print_warn / print_info / print_pass 的短名别名)。
+# 原先此处的注释写"与 check.sh / backup.sh 里的同名函数格式完全一致" —— 与事实不符:
+# backup.sh 确为逐字相同, 但 check.sh 的 _info 刻意为**黄色**且只取首参 (体检语境用颜色把
+# "信息"与"通过"在视觉上分开), 本文件的 _info 是绿色。该差异是刻意保留、非疏漏,
+# 现由 test/output_helper_sink_test.sh 显式守护。
 
 # =============================================================================
 # 函数名称: _net_norm

@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # P2-4 子项⑤ 回归守卫: 错误提示附可执行建议 (纯 bash, 不依赖 jq / 真实环境)。
 # 锁定:
-#   (1) 5 个错误打印函数均支持可选第 2 参数 hint, 且 hint 走 stderr;
-#       check.sh 的 _fail 是"体检项标记"必须不退出; 其余 4 个必须 exit 1。
+#   (1) 3 个错误打印**实现**均支持可选第 2 参数 hint, 且 hint 走 stderr;
+#       check.sh 的 _fail 是"体检项标记"必须不退出; 其余 2 个必须 exit 1。
+#       注: 短名 _error 已下沉到 _common.sh, 且实现为 print_error 的**别名**
+#           (main.sh / handler.sh 不再各自内联副本)。别名体只有 `print_error "$@"`,
+#           不含 hint=... / exit 1 等字样, 套用本测试"抽函数体做静态断言"的范式会误报,
+#           故不再列入下面的循环 —— 其等价性与 share.sh 子进程场景改由
+#           test/output_helper_sink_test.sh 守护。
 #   (2) i18n zh/en 双语均有 title.hint 与 8 组 *_hint 键 (键名唯一, 可 grep)。
 #   (3) 行为: 有 hint → 先错误行再 [建议] 行; 无/空 hint → 只错误行; 不污染 stdout。
 #   (4) 关键调用点均已接入第 2 实参 (check 5 / handler 4 / nginx 2)。
@@ -16,7 +21,6 @@ assert_not(){ case "$2" in *"$3"*) bad "$1 (不应含 [$3], 实际 [$2])";; *) o
 
 COMMON=core/_common.sh
 CHECK=core/check.sh
-MAIN=core/main.sh
 HANDLER=core/handler.sh
 BACKUP=tool/backup.sh
 NGINX=service/nginx.sh
@@ -33,8 +37,8 @@ extract_fn(){ # $1=file $2=funcname
     ' "$1"
 }
 
-echo "== T1: 静态契约 — 5 个错误函数支持可选 hint =="
-for spec in "$COMMON:print_error" "$CHECK:_fail" "$MAIN:_error" "$HANDLER:_error" "$BACKUP:_fail"; do
+echo "== T1: 静态契约 — 4 个错误函数支持可选 hint =="
+for spec in "$COMMON:print_error" "$CHECK:_fail" "$BACKUP:_fail"; do
     f="${spec%%:*}"; fn="${spec##*:}"
     body="$(extract_fn "$f" "$fn")"
     if [[ -n "$body" ]]; then ok "$f:$fn 可抽取"; else bad "$f:$fn 抽取失败"; fi
@@ -47,7 +51,7 @@ case "$(extract_fn "$CHECK" _fail)" in
     *"exit 1"*) bad "check.sh _fail 不应 exit (会中断体检汇总)";;
     *) ok "check.sh _fail 不退出 (纯打印)";;
 esac
-for spec in "$COMMON:print_error" "$MAIN:_error" "$HANDLER:_error" "$BACKUP:_fail"; do
+for spec in "$COMMON:print_error" "$BACKUP:_fail"; do
     f="${spec%%:*}"; fn="${spec##*:}"
     assert_has "$f:$fn 为终止型" "$(extract_fn "$f" "$fn")" "exit 1"
 done
@@ -77,7 +81,7 @@ run_fn(){ # $1=file $2=fn $3=msg [ $4=hint ]
     ERR="$(cat "$TMPD/e")"
 }
 
-for spec in "$COMMON:print_error" "$CHECK:_fail" "$MAIN:_error" "$HANDLER:_error" "$BACKUP:_fail"; do
+for spec in "$COMMON:print_error" "$CHECK:_fail" "$BACKUP:_fail"; do
     f="${spec%%:*}"; fn="${spec##*:}"
     # --- 有 hint ---
     run_fn "$f" "$fn" '出事了' '这样做可修复'
@@ -101,8 +105,6 @@ done
 
 echo "== T5: 退出码 — 终止型 rc=1; check._fail rc=0 =="
 run_fn "$COMMON"  print_error 'x' 'y'; assert_eq "print_error rc=1"      "1" "$RC"
-run_fn "$HANDLER" _error      'x' 'y'; assert_eq "handler._error rc=1"   "1" "$RC"
-run_fn "$MAIN"    _error      'x' 'y'; assert_eq "main._error rc=1"      "1" "$RC"
 run_fn "$BACKUP"  _fail       'x' 'y'; assert_eq "backup._fail rc=1"     "1" "$RC"
 run_fn "$CHECK"   _fail       'x' 'y'; assert_eq "check._fail rc=0(不退出)" "0" "$RC"
 

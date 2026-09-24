@@ -41,26 +41,9 @@ readonly LOCK_FILE="${SCRIPT_CONFIG_DIR}/.${SCRIPT_NAME}.lock"
 # --- 全局变量声明 ---
 declare SCRIPT_CONFIG='' # 存储脚本配置内容
 
-# =============================================================================
-# 函数名称: _error
-# 功能描述: 打印错误信息到标准错误输出并退出脚本。
-# 参数:
-#   $@: 要输出的错误信息文本
-# 返回值: 无 (直接打印到标准错误输出 >&2 并退出)
-# 退出码: 1
-# =============================================================================
-
-function _error() {
-    # $1=错误消息; $2=可选的可执行建议 (非空时以 [建议] 追加一行)
-    # 注: 统一输出到 stderr (与 _common.sh 的 print_error / handler.sh 的 _error 一致),
-    #     避免错误信息污染 $(...) 捕获的 stdout。
-    local msg="${1:-}" hint="${2:-}"
-    printf "${RED}[%s] ${NC}%s\n" "$(_i18n '.title.error')" "${msg}" >&2
-    if [[ -n "${hint}" ]]; then
-        printf "${YELLOW}[%s] ${NC}%s\n" "$(_i18n '.title.hint')" "${hint}" >&2
-    fi
-    exit 1
-}
+# 注: _error / _warn / _info / _pass 现由 _common.sh 统一提供 (print_* 的短名别名)。
+#     此处曾内联一份 _error, 与 handler.sh 的那份逐字相同、与 _common.sh 的 print_error
+#     也逐字相同 —— 三份同源副本改一处忘一处即漂移, 故删除只留单一真源。
 
 # =============================================================================
 # 函数名称: exec_menu

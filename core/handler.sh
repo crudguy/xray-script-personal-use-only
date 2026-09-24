@@ -3836,11 +3836,24 @@ function handler_nginx_install() {
 # 函数名称: handler_nginx_update
 # 功能描述: 更新 Nginx。
 # 参数: 无
-# 返回值: 无 (通过调用 nginx.sh 脚本执行更新)
+# 返回值: 恒 0 —— nginx.sh 的 1 表示"无需更新"(正常分支), 其余非 0 属可恢复失败
+#         (旧二进制在编译成功后才被替换), 两者都只提示不中断, 让菜单自然回到上一级。
 # =============================================================================
 function handler_nginx_update() {
     # 调用 nginx.sh 脚本更新 Nginx (带 Brotli 支持)
-    bash "${NGINX_PATH}" --update --brotli
+    # 注: service/nginx.sh 的 source_update 在「无需更新」时 return 1 (:720), 而 nginx.sh 入口
+    #     刻意把该退出码原样传出供调用方判定 —— 也就是说 rc=1 是**正常分支**且**最常见**
+    #     (本地已是最新版本时)。裸调用会让 set -e 的 ERR trap 把它判成脚本崩溃, 叠一条假的
+    #     "[错误] 脚本在第 N 行意外失败 (退出码 1)" 并中断本次操作 —— 与 handler_nginx_purge
+    #     同一处坑, 只是更隐蔽 (purge 的 rc=1 是少数派, update 的 rc=1 是多数派)。
+    #     用 `|| rc=$?` 接住即进入条件上下文, errexit 与 ERR trap 都不触发, 退出码仍可读。
+    local rc=0
+    bash "${NGINX_PATH}" --update --brotli || rc=$?
+    case "${rc}" in
+    0) : ;; # 已执行更新; nginx.sh 自身已输出过程信息, 此处不重复
+    1) print_info "$(_i18n ".${CUR_FILE}.nginx.no_update")" ;;
+    *) print_warn "$(_i18n ".${CUR_FILE}.nginx.update_failed")" ;;
+    esac
 }
 
 # =============================================================================

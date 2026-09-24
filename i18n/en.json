@@ -273,9 +273,11 @@
       "not_installed": "Nginx is not installed. Please install it via SNI mode in the main menu, or from the Nginx menu.",
       "foreign_binary": "The existing Nginx on this system was not built by this project (missing Brotli and other modules); configuration deployment was skipped. To use this project's Nginx, uninstall the system Nginx and install again.",
       "purge_refused": "Uninstall refused: the current Nginx is not a build of this project, so nothing was changed.",
+      "no_update": "Nginx is already at the latest version; nothing to update.",
+      "update_failed": "The Nginx update did not complete (see the output above); the existing Nginx is left as is and keeps serving.",
       "http3_stripped": "The local Nginx was built without HTTP/3 support; quic listeners and Alt-Svc were removed from the site config so Nginx does not fail to start on the unknown parameter.",
       "verify_failed": "Nginx did not become active; please check the Nginx logs or port 80/443 conflicts.",
-    "rollback_backup_missing": "No rollback backup found (stream.conf or the old domain config); that restore step was skipped. If the site is unavailable, check Nginx's sites-available config."
+      "rollback_backup_missing": "No rollback backup found (stream.conf or the old domain config); that restore step was skipped. If the site is unavailable, check Nginx's sites-available config."
     },
     "custom_sites": {
       "empty": "No custom sites configured",

@@ -2191,33 +2191,39 @@ function main() {
 
     # 使用 case 语句根据选项调用对应的函数
     # 所有函数的输出都重定向到标准错误输出 >&2，这样标准输出可以用于返回结果
+    #
+    # 每个臂末尾的 `|| exit $?` 是**刻意**的, 而且**必须每个臂都有**:
+    #   本脚本的每个选项都是只读检查器, 退出码即检查结论 (0=通过 / 非 0=未通过), 属正常
+    #   业务语义。可 `return 1` 会被 set -e 的 ERR trap 当成"意外失败" —— 于是用户在一次
+    #   正常的检查里, 报告末尾会多出一条 "[错误] 脚本在第 N 行意外失败 (退出码 1)"。
+    #   此前只给 --rule-ip / --rule-domain 打了这个补丁 (它们要经 exec_read 透传退出码),
+    #   其余 18 个臂全在冒假报错: 2026-09-24 逐个实测, 15 个臂里 9 个复现, 其中
+    #   --net-status 把"BBR 持久化不完整"(正常结论) 渲染成了脚本崩溃。
+    #   放进 `||` 右侧即进入"条件上下文", errexit 与 ERR trap 都不触发, 退出码照常透传
+    #   (与 menu.sh 入口的 `main "$@" || OPTION=$?` 同一构造)。
+    #   留在条件上下文**之外**的 `source _common.sh` / load_i18n 等真·意外失败照旧保留
+    #   行号 + 命令的诊断, 不受本补丁影响。新增臂若漏写, test/check_dispatch_exit_test.sh 会红。
     case "${option}" in
-    --ip) check_ip "$@" >&2 ;;                    # 检查 IP 地址
-    --port) check_port "$@" >&2 ;;                # 检查端口
-    --uuid) check_uuid "$@" >&2 ;;                # 检查 UUID
-    --password) check_password "$@" >&2 ;;        # 检查密码
-    --path) check_path "$@" >&2 ;;                # 检查路径
-    --short) check_short_id "$@" >&2 ;;           # 检查 Short ID
-    --domain) check_domain_security "$@" >&2 ;;   # 检查域名安全性
-    --domain-format) check_domain_format "$@" >&2 ;; # 仅校验域名格式(不解析 DNS)
-    --dns) check_dns_resolution "$@" >&2 ;;       # 检查 DNS 解析
-    --tag) check_xray_config_exists "$@" >&2 ;;   # 检查 Xray 配置文件
-    --xray) check_xray_version_exists "$@" >&2 ;; # 检查 Xray 版本
-    --email) validate_email "$@" >&2 ;;           # 验证邮箱
-    --sni-ports) check_sni_ports "$@" >&2 ;;      # 检查 SNI 必需端口与防火墙状态
-    --proxy-target) check_proxy_target "$@" ;;
-    --custom-domain) check_custom_site_domain "$@" >&2 ;;
-    --list-index) check_list_index "$@" >&2 ;;
-    # 写前校验 ip / domain 分流值 (含逗号分隔多值)。
-    # 注: 末尾的 `|| exit $?` 是**刻意**的 —— 校验不通过时本脚本要"非 0 退出"把结果传给
-    #     调用方 (exec_read), 这是正常业务语义; 但 `return 1` 会让 set -e 的 ERR trap 把它
-    #     当成"意外失败", 多打印一条假的 "[错误] 脚本在第 N 行意外失败 ... return 1"。
-    #     放进 `||` 右侧即进入"条件上下文", errexit 与 ERR trap 都不触发, 退出码照常透传
-    #     (与 menu.sh 入口的 `main "$@" || OPTION=$?` 同一构造)。
-    --rule-ip) check_rule_ip "$@" >&2 || exit $? ;;         # 写前校验 ip 分流值
-    --rule-domain) check_rule_domain "$@" >&2 || exit $? ;; # 写前校验 domain 分流值
-    --net-status) check_net_status "$@" >&2 ;; # 只读体检内核网络与 BBR 状态
-    --health) check_health_report "$@" >&2 ;; # 一键全量体检 (只读)
+    --ip) check_ip "$@" >&2 || exit $? ;;                            # 检查 IP 地址
+    --port) check_port "$@" >&2 || exit $? ;;                        # 检查端口
+    --uuid) check_uuid "$@" >&2 || exit $? ;;                        # 检查 UUID
+    --password) check_password "$@" >&2 || exit $? ;;                # 检查密码
+    --path) check_path "$@" >&2 || exit $? ;;                        # 检查路径
+    --short) check_short_id "$@" >&2 || exit $? ;;                   # 检查 Short ID
+    --domain) check_domain_security "$@" >&2 || exit $? ;;           # 检查域名安全性
+    --domain-format) check_domain_format "$@" >&2 || exit $? ;;      # 仅校验域名格式(不解析 DNS)
+    --dns) check_dns_resolution "$@" >&2 || exit $? ;;               # 检查 DNS 解析
+    --tag) check_xray_config_exists "$@" >&2 || exit $? ;;           # 检查 Xray 配置文件
+    --xray) check_xray_version_exists "$@" >&2 || exit $? ;;         # 检查 Xray 版本
+    --email) validate_email "$@" >&2 || exit $? ;;                   # 验证邮箱
+    --sni-ports) check_sni_ports "$@" >&2 || exit $? ;;              # 检查 SNI 必需端口与防火墙状态
+    --proxy-target) check_proxy_target "$@" || exit $? ;;            # 取回伪装目标(结果走 stdout)
+    --custom-domain) check_custom_site_domain "$@" >&2 || exit $? ;; # 检查自定义站点域名
+    --list-index) check_list_index "$@" >&2 || exit $? ;;            # 校验列表序号
+    --rule-ip) check_rule_ip "$@" >&2 || exit $? ;;                  # 写前校验 ip 分流值
+    --rule-domain) check_rule_domain "$@" >&2 || exit $? ;;          # 写前校验 domain 分流值
+    --net-status) check_net_status "$@" >&2 || exit $? ;;            # 只读体检内核网络与 BBR 状态
+    --health) check_health_report "$@" >&2 || exit $? ;;             # 一键全量体检 (只读)
     # P1-3 补漏: 本函数的 case 原本没有 `*)` 分支 —— 未知/拼错的参数什么都不做就退出,
     # 退出码 0。而 core/main.sh 与 README 都推荐脚本化调用走 `core/check.sh --health`
     # (0=无失败项 / 1=有失败项), cron 里把 `--health` 误写成 `--heath` 就会拿到 exit 0,

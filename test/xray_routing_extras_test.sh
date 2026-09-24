@@ -44,6 +44,9 @@ assert_eq() { # $1=msg $2=got $3=expected
 assert_ne() { # $1=msg $2=got $3=unexpected
     if [[ "$2" != "$3" ]]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "  [FAIL] $1 (got '$2' should not be '$3')"; fi
 }
+assert_contains() { # $1=msg $2=haystack $3=needle
+    if [[ "$2" == *"$3"* ]]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "  [FAIL] $1 (missing '$3')"; fi
+}
 
 HANDLER="${EXTRAS_HANDLER:-core/handler.sh}"
 COMMON="core/_common.sh"
@@ -78,11 +81,18 @@ for a in "$@"; do
     prev="$a"
 done
 [[ -n "$cfg" && -f "$cfg" ]] || exit 0
+# 模仿真机 xray 26.x: 配置文件名必须带 .json 后缀, 否则 "Failed to get format" (exit 23)。
+# 桩件与真机一致才能挡住"探测临时文件漏后缀 -> 所有候选被判不支持 -> 降级链走到底"的回归。
+case "$cfg" in
+    *.json) ;;
+    *)      printf 'Failed to get format of %s\n' "$cfg" >&2; exit 23 ;;
+esac
 [[ -n "${XRAY_PROBE_COPY:-}" ]] && cp -f "$cfg" "$XRAY_PROBE_COPY"
 case "${STUB_MODE:-accept}" in
     no_observatory)   grep -q 'observatory' "$cfg" && exit 23 ;;
     dns_full_reject)  grep -qE 'queryStrategy|enableParallelQuery' "$cfg" && exit 23 ;;
     no_dns)           grep -q '"dns"' "$cfg" && exit 23 ;;
+    reject_loud)      printf 'unknown config id: observatory\n' >&2; exit 23 ;;
 esac
 exit 0
 STUB_XRAY
@@ -92,7 +102,8 @@ chmod +x "$SB/bin/xray"
 extract() { # $1=函数名 $2=文件
     awk -v fn="$1" '$0 ~ "^function " fn "\\(\\) \\{" {f=1} f{print} f && /^}$/ {exit}' "$2"
 }
-for fn in _xray_bin_path _xray_config_probe _xray_observatory_mode _warp_outbound_tag \
+for fn in _xray_bin_path _xray_config_probe _xray_probe_error_hint _xray_observatory_mode \
+          _warp_outbound_tag \
           _warp_outbound_json _xray_apply_warp _xray_apply_warp_balancer \
           _xray_dns_mode _xray_apply_dns _xray_apply_domain_strategy handler_warp; do
     body="$(extract "$fn" "$HANDLER")"
@@ -115,6 +126,7 @@ while IFS= read -r line; do eval "$line"; done < "$SB/consts.sh"
 _XRAY_OBS_MODE=''
 _WARP_OB_TAG=''
 _XRAY_DNS_MODE=''
+_XRAY_PROBE_ERR=''
 
 # ---- 其余桩件 ----
 WARN_LOG="$SB/warn.log"
@@ -139,6 +151,7 @@ reset_modes() { # 清掉进程内缓存, 模拟"新一次运行"
     _XRAY_OBS_MODE=''
     _WARP_OB_TAG=''
     _XRAY_DNS_MODE=''
+    _XRAY_PROBE_ERR=''
     : > "$XRAY_CALL_LOG"
     : > "$WARN_LOG"
 }
@@ -159,6 +172,20 @@ _xray_config_probe '{"kv":1}' >/dev/null 2>&1
 assert_eq "A4 骨架含四个占位出站 (balancer 的 selector 与 fallbackTag 才解析得动)" \
     "$(jq -r '[.outbounds[].tag] | sort | join(",")' "$XRAY_PROBE_COPY")" "block,direct,warp,warp-out"
 assert_eq "A4b 待测片段被合并进骨架" "$(jq -r '.kv' "$XRAY_PROBE_COPY")" "1"
+# A5: 静态守卫 —— 喂给 xray 的探测临时文件必须带 .json 后缀。
+# 真机 xray 26.x 按扩展名判断配置格式, 漏后缀会以 "Failed to get format of <path>"
+# (exit 23) 拒载整份配置; 于是"拿本机二进制实测选写法"退化成"恒判本机不支持"、
+# 降级链一路走到底。2026-09-24 在 26.3.27 上实测踩到, 同一个坑还拖垮了 mKCP 的自适应探测。
+assert_eq "A5 三处探测临时文件模板都带 .json 后缀" \
+    "$(grep -c 'mktemp ".*\.XXXXXXXX\.json"' "$HANDLER")" "3"
+# A6: 被拒时留下 xray 的原话, 降级提示会把它转到 stderr (下次不必再靠猜根因)
+reset_modes
+STUB_MODE=reject_loud
+_xray_config_probe '{"observatory":{}}' >/dev/null 2>&1 || true
+assert_contains "A6 被拒时记录 xray 原始报错" "${_XRAY_PROBE_ERR}" 'unknown config id'
+STUB_MODE=accept
+_xray_config_probe '{"kv":1}' >/dev/null 2>&1
+assert_eq "A6b 被接受时清空上一次的报错" "${_XRAY_PROBE_ERR}" ""
 
 echo "== B  _xray_observatory_mode: full / 降级 =="
 reset_modes
@@ -178,6 +205,14 @@ assert_eq "B2 不支持 -> plain (降级)" "${_XRAY_OBS_MODE}" "plain"
 assert_eq "B2b 降级告警一次" "$(wc -l < "$WARN_LOG")" "1"
 _xray_observatory_mode
 assert_eq "B2c 告警不重复" "$(wc -l < "$WARN_LOG")" "1"
+
+# B2d: 降级时不仅说"不支持", 还要把 xray 的原话一起转到 stderr。
+# 真机 xray 是靠扩展名判断配置格式的, 若抹掉原话就只能看到笼统的"不支持" ——
+# 这次正是靠它才认出"探测临时文件漏了 .json 后缀"这个真因 (2026-09-24)。
+reset_modes
+STUB_MODE=reject_loud
+err_out="$(_xray_observatory_mode 2>&1 >/dev/null)" || true
+assert_contains "B2d 降级时打印 xray 原始报错" "$err_out" 'unknown config id'
 
 echo "== C  _warp_outbound_tag =="
 reset_modes

@@ -86,6 +86,11 @@ if [[ "${1:-}" == 'run' ]]; then
         prev="$a"
     done
     [[ -n "$cfg" && -f "$cfg" ]] || exit 0
+    # 模仿真机 xray 26.x: 配置文件名必须带 .json 后缀, 否则 "Failed to get format" (exit 23)
+    case "$cfg" in
+        *.json) ;;
+        *)      printf 'Failed to get format of %s\n' "$cfg" >&2; exit 23 ;;
+    esac
     if [[ "${STUB_REJECT_ALL:-0}" == '1' ]]; then
         echo 'invalid wireguard key' >&2
         exit 23

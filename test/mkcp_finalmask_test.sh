@@ -131,6 +131,13 @@ cat > "$SB/bin/xray" <<'STUB'
 # 桩 xray: 只认 STUB_MODE 指定的那一种写法; 记录被调用的配置路径以便断言探测次数。
 cfg="${!#}"
 printf '%s\n' "$cfg" >> "${STUB_LOG:-/dev/null}"
+# 模仿真机 xray 26.x: 按扩展名判断配置格式, 无 .json 后缀一律 "Failed to get format"
+# 拒载 (exit 23)。桩件必须与真机行为一致 —— 否则"临时文件漏后缀 -> 探测恒失败 ->
+# 静默退到版本号猜测"这类 bug 会被整套断言放过去 (2026-09-24 在 26.3.27 上实测到该行为)。
+case "$cfg" in
+*.json) ;;
+*)      printf 'Failed to get format of %s\n' "$cfg" >&2; exit 23 ;;
+esac
 case "${STUB_MODE:-neither}" in
 legacy)  grep -q '"mkcp-legacy"' "$cfg" ;;
 aes)     grep -q '"mkcp-aes128gcm"' "$cfg" ;;

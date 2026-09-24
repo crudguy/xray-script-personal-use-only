@@ -80,6 +80,58 @@ GH_PROXY=''; assert_eq "无代理 原样" "$(_gh_url "https://github.com/x")" "h
 GH_PROXY='https://ghfast.top'; assert_eq "GitHub 域加前缀" "$(_gh_url "https://github.com/x")" "https://ghfast.top/https://github.com/x"
 assert_eq "非 GitHub 域不加前缀" "$(_gh_url "https://nginx.org/x")" "https://nginx.org/x"
 
+# ---- 安全加固 (2026-09-24): GH_PROXY 白名单 ----------------------------------
+# 背景: _gh_url 的返回值会被拼进 service/nginx.sh 的 `_error_detect "git clone $(_gh_url ...) ..."`,
+# 而 _error_detect 内部是 eval —— GH_PROXY 可经环境变量注入, 未校验即等于把命令串交给用户。
+# 同文件的 NGX_BROTLI_REF / nginx_version / openssl_version 都已有白名单, 这里补齐最后一个入口。
+# 契约: 合法 → 照常加前缀; 非法 → **原样返回 URL**(等价于未配置代理), 且不中断调用方。
+# 注: 每条都用 `VAR=val _gh_url ...` 前缀赋值, 既避免污染父 shell, 也绕开 _GH_PROXY_WARNED
+#     的"只告警一次"缓存 —— 每次调用都在独立的临时环境里, 告警行为可独立观测。
+assert_eq "带路径前缀 合法放行" \
+    "$(_GH_PROXY_WARNED='' GH_PROXY='https://ghfast.top/gh' _gh_url "https://github.com/x")" \
+    "https://ghfast.top/gh/https://github.com/x"
+assert_eq "带端口 合法放行" \
+    "$(_GH_PROXY_WARNED='' GH_PROXY='http://127.0.0.1:7890' _gh_url "https://github.com/x")" \
+    "http://127.0.0.1:7890/https://github.com/x"
+
+assert_eq "含 ; 的注入串被拒 (原样返回)" \
+    "$(_GH_PROXY_WARNED='' GH_PROXY='https://ghfast.top; touch /tmp/pwned' _gh_url "https://github.com/x")" \
+    "https://github.com/x"
+assert_eq "含 \$( ) 的注入串被拒" \
+    "$(_GH_PROXY_WARNED='' GH_PROXY='https://ghfast.top/$(id)' _gh_url "https://github.com/x")" \
+    "https://github.com/x"
+assert_eq "含 | 的注入串被拒" \
+    "$(_GH_PROXY_WARNED='' GH_PROXY='https://ghfast.top|cat /etc/passwd' _gh_url "https://github.com/x")" \
+    "https://github.com/x"
+assert_eq "含反引号的注入串被拒" \
+    "$(_GH_PROXY_WARNED='' GH_PROXY='https://ghfast.top/`id`' _gh_url "https://github.com/x")" \
+    "https://github.com/x"
+assert_eq "含 && 的注入串被拒" \
+    "$(_GH_PROXY_WARNED='' GH_PROXY='https://ghfast.top&&wget evil' _gh_url "https://github.com/x")" \
+    "https://github.com/x"
+assert_eq "含空格被拒" \
+    "$(_GH_PROXY_WARNED='' GH_PROXY='https://gh fast.top' _gh_url "https://github.com/x")" \
+    "https://github.com/x"
+assert_eq "缺 scheme 被拒" \
+    "$(_GH_PROXY_WARNED='' GH_PROXY='ghfast.top' _gh_url "https://github.com/x")" \
+    "https://github.com/x"
+assert_eq "非 http(s) scheme 被拒" \
+    "$(_GH_PROXY_WARNED='' GH_PROXY='file:///etc' _gh_url "https://github.com/x")" \
+    "https://github.com/x"
+
+# 非法值必须在 stderr 告警 (stdout 是返回值, 不能被污染), 且重复调用只告警一次(不刷屏)
+warn_out="$( { _GH_PROXY_WARNED='' GH_PROXY='https://gh.top;x' _gh_url "https://github.com/x" >/dev/null; } 2>&1 )"
+if [[ "$warn_out" == *非法* ]]; then ok "非法 GH_PROXY 在 stderr 告警"; else bad "非法 GH_PROXY 未告警 (stderr=[$warn_out])"; fi
+warn_n="$( { _GH_PROXY_WARNED='' GH_PROXY='https://gh.top;x' _gh_url "https://a.com" >/dev/null; \
+            _gh_url "https://b.com" >/dev/null; } 2>&1 | grep -c '非法' )"
+assert_eq "重复调用只告警一次" "$warn_n" "1"
+
+# 端到端: 模拟 nginx.sh 那条 eval 命令的拼法, 确认恶意 GH_PROXY 进不了命令串
+nginx_cmd="git clone $( _GH_PROXY_WARNED='' GH_PROXY='https://gh.top; rm -rf /tmp/x' _gh_url 'https://github.com/google/ngx_brotli' ) && cd ngx_brotli"
+assert_eq "eval 命令串未被注入污染" "$nginx_cmd" \
+    "git clone https://github.com/google/ngx_brotli && cd ngx_brotli"
+if [[ "$nginx_cmd" != *'rm -rf'* ]]; then ok "命令串不含注入片段"; else bad "命令串含注入片段: $nginx_cmd"; fi
+
 # ============================================================ _atomic_write (真实)
 echo "== _atomic_write 原子写 =="
 eval "$AT"

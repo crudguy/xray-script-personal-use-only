@@ -177,7 +177,15 @@ else
     build_share_probe "${SB}/common_neg.sh" "${SB}/share_neg.sh"
     rc_n=0
     "$BASH_BIN" "${SB}/share_neg.sh" > "${SB}/no" 2> "${SB}/ne" || rc_n=$?
-    assert_contains "NEG: 坏掉后确实 command not found (故 T3 判据有效)" "$(cat "${SB}/ne")" '未找到命令'
+    # 注: 判据是"别名坏了就该真的炸", 不是"炸出哪个语种的文案" —— bash 的报错文案随
+    #     locale 变化 (中文环境给 "未找到命令", CI 的 C.UTF-8 给 "command not found"),
+    #     只锚中文会让本用例在 CI 上恒红 (本地中文环境看不到)。故两种形态都接受。
+    neg_err="$(cat "${SB}/ne")"
+    if [[ "${neg_err}" == *'未找到命令'* || "${neg_err}" == *'command not found'* ]]; then
+        ok
+    else
+        bad "NEG: 坏掉后确实 command not found (故 T3 判据有效) (实际 [${neg_err}])"
+    fi
     assert_not_contains "NEG: 坏掉后不再有友好错误行 (故 T3 的 ERR 断言会红)" "$(cat "${SB}/ne")" 'ERR'
     # 注: 这里**不断言** 127 —— 子脚本不带 set -e, `command not found` 之后会继续往下跑,
     #     最终函数返回 0, 错误被静默吞掉。比"报 127"更隐蔽, 也正是本用例要防的形态。

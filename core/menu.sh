@@ -143,6 +143,11 @@ function menu_xray() {
     echo -e "1. $(_i18n ".${CUR_FILE}.xray_version.info1")"
     echo -e "2. $(_i18n ".${CUR_FILE}.xray_version.info2")"
     echo -e "3. $(_i18n ".${CUR_FILE}.xray_version.info3")"
+    # 把"会不会顺手动我的配置"这个高频疑问的答案前置到决策点 (note1)。
+    #   结论依据: 官方 install-release.sh 只在 /usr/local/etc/xray **目录不存在**时才
+    #   创建目录并写入 {} —— 已有配置不会被覆盖 (源码见 install-release.sh 的
+    #   install_config/配置生成分支)。这里只陈述事实, 不改任何行为。
+    echo -e "${YELLOW}[$(_i18n '.title.hint')]${NC} $(_i18n ".${CUR_FILE}.xray_version.note1")"
     echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.xray_version.option0")"
     _menu_rule
 }

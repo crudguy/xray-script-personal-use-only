@@ -77,7 +77,8 @@
       "option0": "返回主菜单",
       "info1": "最新版包含了 pre-release 版本",
       "info2": "稳定版为最新发布的非 pre-release 版本",
-      "info3": "自选版可能存在配置不兼容问题，请自行解决"
+      "info3": "自选版可能存在配置不兼容问题，请自行解决",
+      "note1": "仅替换 xray 二进制（并重写 systemd 单元、刷新 geodata），入站/出站/分流/WARP 等运行配置原样保留。"
     },
     "protocol_config": {
       "title": "可选配置",

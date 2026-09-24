@@ -347,6 +347,11 @@ WARP Proxy : Running
 0. Exit
 ```
 
+> **Note** — menu 2 (`Install/Update only`) replaces the xray binary only. It also rewrites the
+> systemd unit and refreshes geodata, but your runtime config (`/usr/local/etc/xray/config.json`,
+> i.e. inbounds / outbounds / routing / WARP) is never touched. The official installer only
+> creates that file when the directory is missing.
+
 ## Tested Systems
 
 | Platform | Version    |

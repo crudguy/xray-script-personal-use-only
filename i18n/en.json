@@ -77,7 +77,8 @@
       "option0": "Back to main menu",
       "info1": "Includes pre-release versions",
       "info2": "Latest official release",
-      "info3": "Custom versions may have config compatibility issues"
+      "info3": "Custom versions may have config compatibility issues",
+      "note1": "Replaces the xray binary only (also rewrites the systemd unit and refreshes geodata); inbounds/outbounds/routing/WARP are kept as is."
     },
     "protocol_config": {
       "title": "Protocol Config",

@@ -403,6 +403,9 @@ if neg_case 'sni 回滚补齐' 's|^        _ensure_xray_runtime_dirs$|        : 
     } > "${SB}/neg_sni.sh"
     NEG_RC=0
     STUB_CHECK_1=1 STUB_CHECK_2=1 STUB_HELD=0 "$BASH_BIN" "${SB}/neg_sni.sh" >/dev/null 2>&1 || NEG_RC=$?
+    # 剧本删掉了"非自家占用先补齐"的分支, 应当走到 _error 并以非 0 退出。若它静默跑完,
+    # 下面那条"ENSURE_DIRS 不再出现"的断言会因"根本没跑到那段"而假绿 —— 故这里必须验一次。
+    if [[ "${NEG_RC}" -ne 0 ]]; then ok; else bad "NEG-4 剧本应因 _error 以非 0 退出"; fi
     n_log="$(cat "$CALL_LOG" 2>/dev/null || true)"
     assert_not_contains "NEG-4 删掉补齐后 ENSURE_DIRS 不再出现 (故 T4d 判据有效)" "$n_log" 'ENSURE_DIRS'
 fi

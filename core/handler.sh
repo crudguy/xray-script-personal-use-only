@@ -2329,10 +2329,37 @@ function handler_install() {
 }
 
 # =============================================================================
+# 函数名称: _bbr_persist_files
+# 功能描述: 原子写入 BBR 的两份持久化文件 —— modules-load.d 的模块自加载 +
+#           sysctl.d 的内核参数。内容固定 (tcp_bbr/sch_fq 与 bbr/fq), 幂等。
+#
+#           抽出来的动机: handler_bbr 有两条路径都会落盘 —— "从零启用"与
+#           "已生效但未持久化"(云镜像/面板可能只在内存里设过 BBR)。落盘逻辑
+#           必须同源, 否则口径一漂移就会出现"体检说缺失、安装说无需操作"。
+# 参数: $1 modules-load.d 文件路径  $2 sysctl.d 文件路径
+# 返回值: 0-两份均写入成功 1-目录创建或任一写入失败
+# =============================================================================
+function _bbr_persist_files() {
+    local modules_load_file="${1:-}"
+    local sysctl_conf_file="${2:-}"
+    [[ -n "${modules_load_file}" && -n "${sysctl_conf_file}" ]] || return 1
+    mkdir -p /etc/modules-load.d /etc/sysctl.d || return 1
+    if ! printf 'tcp_bbr\nsch_fq\n' | _atomic_write "${modules_load_file}"; then
+        return 1
+    fi
+    if ! printf 'net.core.default_qdisc = fq\nnet.ipv4.tcp_congestion_control = bbr\n' | _atomic_write "${sysctl_conf_file}"; then
+        return 1
+    fi
+    return 0
+}
+
+# =============================================================================
 # 函数名称: handler_bbr
 # 功能描述: 检测并按需启用内核 BBR 拥塞控制 (幂等)。
 #           1. 先读 net.ipv4.tcp_congestion_control 与 net.core.default_qdisc;
-#              两项已是 bbr/fq 时直接返回, 不产生任何写操作。
+#              两项已是 bbr/fq **且** 两份持久化文件齐全时直接返回, 不产生任何写操作。
+#              若已生效但持久化文件缺失 (云镜像/面板常只在内存里设过 BBR), 则只补齐
+#              这两份文件, 不做模块加载 —— 已生效本身说明模块/内建必然可用。
 #           2. 加载 tcp_bbr / sch_fq 模块 —— 这一步不可省: 发行版内核把 BBR 编成
 #              模块 (net/ipv4/tcp_bbr.ko), 未加载时算法不会出现在
 #              net.ipv4.tcp_available_congestion_control 里, 此时直接写 sysctl 必然失败
@@ -2359,11 +2386,23 @@ function handler_bbr() {
     current_cc="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
     current_qdisc="$(sysctl -n net.core.default_qdisc 2>/dev/null || true)"
 
-    # 已启用: 只报告, 不写文件
+    # 已生效: 内核参数已是 bbr/fq。但"生效"不等于"持久" —— 云镜像/面板可能只在
+    # 内存里设过 (sysctl -w), 重启即静默失效。故仍要确认两份持久化文件在不在。
     if [[ "${current_cc}" == 'bbr' && "${current_qdisc}" == 'fq' ]]; then
         echo -e "${GREEN}[$(_i18n '.title.tip')] ${NC}$(_i18n ".${CUR_FILE}.bbr.already")" >&2
         echo -e "  net.ipv4.tcp_congestion_control = ${current_cc}" >&2
         echo -e "  net.core.default_qdisc          = ${current_qdisc}" >&2
+        # 两份齐全 -> 真的无需操作 (零写盘)
+        if [[ -e "${modules_load_file}" && -e "${sysctl_conf_file}" ]]; then
+            return 0
+        fi
+        # 缺则补齐: 内容即当前生效值, 幂等无害; 补完即持久, 体检的"持久化"项随之转绿。
+        echo -e "${YELLOW}[$(_i18n '.title.tip')]${NC} $(_i18n ".${CUR_FILE}.bbr.persist_repair")" >&2
+        if ! _bbr_persist_files "${modules_load_file}" "${sysctl_conf_file}"; then
+            echo -e "${RED}[$(_i18n '.title.fail')]${NC} $(_i18n ".${CUR_FILE}.bbr.verify_failed")" >&2
+            return 2
+        fi
+        _audit_log 'bbr' 'persisted: already active, wrote persistence files'
         return 0
     fi
 
@@ -2377,13 +2416,8 @@ function handler_bbr() {
     # fq 缺失时 BBR 仍可工作, 只是效果打折, 故失败不阻断
     modprobe sch_fq 2>/dev/null || true
 
-    # 持久化: 模块自加载 + 内核参数 (两处均原子写)
-    mkdir -p /etc/modules-load.d /etc/sysctl.d || return 2
-    if ! printf 'tcp_bbr\nsch_fq\n' | _atomic_write "${modules_load_file}"; then
-        echo -e "${RED}[$(_i18n '.title.fail')]${NC} $(_i18n ".${CUR_FILE}.bbr.verify_failed")" >&2
-        return 2
-    fi
-    if ! printf 'net.core.default_qdisc = fq\nnet.ipv4.tcp_congestion_control = bbr\n' | _atomic_write "${sysctl_conf_file}"; then
+    # 持久化: 模块自加载 + 内核参数 (与"已生效但未持久化"分支共用同一落盘实现)
+    if ! _bbr_persist_files "${modules_load_file}" "${sysctl_conf_file}"; then
         echo -e "${RED}[$(_i18n '.title.fail')]${NC} $(_i18n ".${CUR_FILE}.bbr.verify_failed")" >&2
         return 2
     fi

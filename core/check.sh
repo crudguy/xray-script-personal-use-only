@@ -1746,6 +1746,20 @@ function _health_xray() {
         _health_item 'fail' "$(_i18n ".${CUR_FILE}.health.svc_active_label")${xray_active}"
     fi
 
+    # 开机自启 (systemd enable) —— 这才是"重启后自动拉起 xray"的那一项, 与
+    # 「内核网络」分区里的 "BBR 持久化" 是两码事, 别混 (二者判据完全不同)。
+    # 单元不存在时不判: 上面已出 fail, 这里再叠一条只是噪音。
+    local xray_enabled=''
+    if [[ "${has_systemctl}" -eq 1 && "${xray_unit_ok}" -eq 1 ]]; then
+        # 写成 if 而不是 `[[ ]] && x=1`: 后者条件为假时整条返回 1, 会被 set -e 判失败
+        if systemctl -q is-enabled 'xray' >/dev/null 2>&1; then xray_enabled='yes'; fi
+        if [[ "${xray_enabled}" == 'yes' ]]; then
+            _health_item 'pass' "$(_i18n ".${CUR_FILE}.health.svc_enabled_label")$(_i18n ".${CUR_FILE}.health.present")"
+        else
+            _health_item 'warn' "$(_i18n ".${CUR_FILE}.health.svc_enabled_label")$(_i18n ".${CUR_FILE}.health.svc_disabled")"
+        fi
+    fi
+
     xray_ver=''
     if [[ -x "${xray_bin}" ]]; then
         out="$("${xray_bin}" version 2>/dev/null || true)"

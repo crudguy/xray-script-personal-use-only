@@ -1588,6 +1588,7 @@ function handler_xray_config() {
     #     由 exec_handler 软失败回菜单 (不 _error 杀整个交互脚本)。
     _xray_apply_warp || return 1   # 启用 WARP 时追加 wireguard 出站
     _xray_apply_warp_balancer      # WARP 健康探测 + 自动回落 (未启用则清理残留)
+    _xray_apply_sockopt            # 出站 sockopt 网络调优 (字段集由本机实测决定)
     # 回写路由规则到脚本配置并持久化
     XRAY_RULES="$(echo "${XRAY_CONFIG}" | jq '.routing.rules')"
     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson rules "${XRAY_RULES}" '.rules = $rules')"
@@ -1772,6 +1773,16 @@ readonly WARP_PROBE_INTERVAL='30s'
 # 显式声明 DoH 解析器 (防劫持) + 一家明文兜底 (DoH 被 QoS 时仍能出结果)。
 readonly XRAY_DNS_SERVERS='["https://1.1.1.1/dns-query","https://8.8.8.8/dns-query","1.1.1.1"]'
 readonly XRAY_DNS_QUERY_STRATEGY='UseIPv4'
+# ---- 出站 sockopt 网络调优 ----
+# 服务端出站 (freedom) 直连目标站点时, 内核默认给"已建立但对端无响应"的连接留了很长超时
+# (Linux tcp_retries2 默认约 15 分钟), 代理层表现为"客户端卡住不动、看不出错"。
+# 显式 tcpUserTimeout 让链路在无 ACK 达该毫秒数时判定死亡, 客户端能立刻重试或换路。
+# tcpKeepAliveIdle/Interval 把长连接保活在 NAT / 中间设备老化之前, 避免"看着连着其实已断"。
+# 注: 文档字段名是**全小写** tcpcongestion, 且它依赖内核算法可用性 —— 内核已由 BBR 调优
+#     生效, socket 默认即继承, 故此处刻意不写, 免得在内核无该算法时把连接配置搞坏。
+readonly XRAY_SOCKOPT_USER_TIMEOUT=10000     # 毫秒; 无 ACK 即判死 (内核默认约 15 分钟)
+readonly XRAY_SOCKOPT_KEEPALIVE_IDLE=45      # 秒; 空闲多久开始保活探测 (Xray 出站默认同值)
+readonly XRAY_SOCKOPT_KEEPALIVE_INTERVAL=15  # 秒; 保活探测间隔
 
 # =============================================================================
 # 子函数名称: _xray_bin_path
@@ -2340,6 +2351,90 @@ function _xray_apply_domain_strategy() {
     else
         XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq 'del(.routing.domainStrategy)')"
     fi
+}
+
+# 出站 sockopt 支持性缓存: '' 未探测 / full 全套 / minimal 仅 tcpUserTimeout / off 不加
+_XRAY_SOCKOPT_MODE=''
+
+# =============================================================================
+# 子函数名称: _xray_sockopt_mode
+# 功能描述: 实测本机 xray 接受哪一档出站 sockopt (全套 -> 仅 tcpUserTimeout -> 不加),
+#           结果缓存到 _XRAY_SOCKOPT_MODE (进程内只测一次)。
+#           sockopt 里的 keep-alive / 用户超时字段属于"低版本不认识就拒绝整份配置"的
+#           类型, 按版本号猜并不可靠 (mKCP finalmask 的教训) —— 一律先拿本机二进制试,
+#           能解析才写进正式配置。
+# 参数: 无
+# 返回值: 恒 0 (结果读 _XRAY_SOCKOPT_MODE)
+# =============================================================================
+function _xray_sockopt_mode() {
+    if [[ -z "${_XRAY_SOCKOPT_MODE}" ]]; then
+        local frag_full='' frag_min=''
+        # 探测片段自带 outbounds: _xray_config_probe 的骨架是浅合并, 同名键被整体替换 ——
+        # 这里不需要 warp/block 占位出站 (片段里不含 balancer, 没有 selector 要解析)。
+        frag_full="$(jq -nc --argjson ut "${XRAY_SOCKOPT_USER_TIMEOUT}" \
+            --argjson ki "${XRAY_SOCKOPT_KEEPALIVE_IDLE}" \
+            --argjson kp "${XRAY_SOCKOPT_KEEPALIVE_INTERVAL}" '{
+            outbounds: [{
+                tag: "direct", protocol: "freedom",
+                sockopt: {
+                    tcpFastOpen: true, tcpUserTimeout: $ut,
+                    tcpKeepAliveIdle: $ki, tcpKeepAliveInterval: $kp
+                }
+            }]
+        }')"
+        frag_min="$(jq -nc --argjson ut "${XRAY_SOCKOPT_USER_TIMEOUT}" '{
+            outbounds: [{
+                tag: "direct", protocol: "freedom",
+                sockopt: {tcpUserTimeout: $ut}
+            }]
+        }')"
+        if _xray_config_probe "${frag_full}"; then
+            _XRAY_SOCKOPT_MODE='full'
+        elif _xray_config_probe "${frag_min}"; then
+            _XRAY_SOCKOPT_MODE='minimal'
+        else
+            _XRAY_SOCKOPT_MODE='off'
+            print_warn "$(_i18n '.handler.sockopt.unsupported')"
+            _xray_probe_error_hint
+        fi
+    fi
+    return 0
+}
+
+# =============================================================================
+# 子函数名称: _xray_apply_sockopt
+# 功能描述: 给所有 freedom 出站写入网络调优 sockopt。
+#           合并而非覆盖 —— 模板里已存在的 tcpFastOpen 等字段必须保留 (否则等于回退)。
+#           只改 protocol=="freedom" 的出站: blackhole / wireguard(WARP) 与它无关, 误改
+#           后者会把 WARP 隧道的 socket 选项也拖下水。
+# 参数: 无 (改写全局 XRAY_CONFIG)
+# 返回值: 恒 0 (off 档为零操作)
+# =============================================================================
+function _xray_apply_sockopt() {
+    _xray_sockopt_mode
+    local so_json=''
+    case "${_XRAY_SOCKOPT_MODE}" in
+    full)
+        so_json="$(jq -nc --argjson ut "${XRAY_SOCKOPT_USER_TIMEOUT}" \
+            --argjson ki "${XRAY_SOCKOPT_KEEPALIVE_IDLE}" \
+            --argjson kp "${XRAY_SOCKOPT_KEEPALIVE_INTERVAL}" \
+            '{tcpFastOpen: true, tcpUserTimeout: $ut,
+              tcpKeepAliveIdle: $ki, tcpKeepAliveInterval: $kp}')"
+        ;;
+    minimal)
+        so_json="$(jq -nc --argjson ut "${XRAY_SOCKOPT_USER_TIMEOUT}" \
+            '{tcpUserTimeout: $ut}')"
+        ;;
+    *)
+        return 0
+        ;;
+    esac
+    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson so "${so_json}" '
+        .outbounds |= map(
+            if .protocol == "freedom"
+            then .sockopt = ((.sockopt // {}) + $so)
+            else . end
+        )')"
 }
 
 

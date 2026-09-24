@@ -261,6 +261,9 @@
     "dns": {
       "unsupported": "This Xray build does not support a top-level dns section; it was not written (name resolution keeps using the system resolver)."
     },
+    "sockopt": {
+      "unsupported": "This Xray build does not support the outbound sockopt tuning fields; they were not written (connect timeout and keepalive keep the kernel defaults)."
+    },
     "geodata": {
       "close_cron": "Successfully stopped geodata auto-update task",
       "open_cron": "Successfully started geodata auto-update task",

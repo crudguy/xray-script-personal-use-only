@@ -261,6 +261,9 @@
     "dns": {
       "unsupported": "本机 Xray 不支持顶层 dns 段，本次未写入（域名解析仍走系统 resolver）。"
     },
+    "sockopt": {
+      "unsupported": "本机 Xray 不支持出站 sockopt 调优字段，本次未写入（连接超时与保活维持内核默认）。"
+    },
     "geodata": {
       "close_cron": "成功停止 geodata 自动更新任务",
       "open_cron": "成功开启 geodata 自动更新任务",

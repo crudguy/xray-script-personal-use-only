@@ -496,6 +496,34 @@ function _kcp_mask_json() {
 }
 
 # =============================================================================
+# 子函数名称: _kcp_fallback_id
+# 功能描述: 探测失败时的回退 id 选择, 仅依赖 xray 版本号 (26.2~26.5 → mkcp-aes128gcm,
+#           26.6+ → mkcp-legacy), 不靠"凭空猜一个 id 再让 xray -test 验证" (验证需要
+#           xray 二进制, 而走到这里正是因为探测拿不到 xray 的 -test 结果)。
+#           作为 get_kcp_finalmask 探测失败后的最后兜底, 保证落盘配置不是 26.x 已移除的
+#           kcpSettings.seed 死路; 具体拼装仍复用 _kcp_mask_json, 与探测成功路径同一套结构。
+# 参数: 无
+# 返回值: 0-stdout 打印 id ('mkcp-legacy' / 'mkcp-aes128gcm')
+# =============================================================================
+function _kcp_fallback_id() {
+    local ver='' major=0 minor=0
+    if cmd_exists 'xray'; then
+        ver="$(xray --version 2>/dev/null | head -1)"
+    elif [[ -x "${XRAY_BIN_PATH:-/usr/local/bin/xray}" ]]; then
+        ver="$("${XRAY_BIN_PATH:-/usr/local/bin/xray}" --version 2>/dev/null | head -1)"
+    fi
+    if [[ "${ver}" =~ Xray\ ([0-9]+)\.([0-9]+) ]]; then
+        major="${BASH_REMATCH[1]}"
+        minor="${BASH_REMATCH[2]}"
+    fi
+    if (( major > 26 )) || (( major == 26 && minor >= 6 )); then
+        printf '%s' 'mkcp-legacy'
+    else
+        printf '%s' 'mkcp-aes128gcm'
+    fi
+}
+
+# =============================================================================
 # 函数名称: get_kcp_finalmask
 # 功能描述: 生成 mKCP 的 finalmask 配置, 类型 id 由本机 xray 二进制实测选定。
 #
@@ -516,9 +544,17 @@ function _kcp_mask_json() {
 # =============================================================================
 function get_kcp_finalmask() {
     local seed="${1:-}"
-    local id='' json='' tmp_dir='' tmp_file=''
-    # 探测依赖本机 xray 二进制; 未安装时无从判断, 直接交给调用方回退
-    cmd_exists 'xray' || return 1
+    local id='' json='' tmp_dir='' tmp_file='' xray_bin=''
+    # 定位 xray: 优先 PATH, 兜底用代码库约定的绝对路径 (与 traffic.sh / check.sh 一致)。
+    # 仅依赖 command -v 会在脚本运行时 PATH 不含 /usr/local/bin 时漏掉已安装的 xray,
+    # 误判"未安装"而走死路回退 (写 kcpSettings.seed, 而 26.x 已移除该字段)。
+    if cmd_exists 'xray'; then
+        xray_bin="$(command -v xray)"
+    elif [[ -x "${XRAY_BIN_PATH:-/usr/local/bin/xray}" ]]; then
+        xray_bin="${XRAY_BIN_PATH:-/usr/local/bin/xray}"
+    else
+        return 1
+    fi
     # 临时文件落点: 与 _download_verified 同一套回退顺序。
     # 注: 不用 ${TMPFILE_DIR:-${SCRIPT_CONFIG_DIR}} 这种嵌套写法 —— 在 set -u 下,
     # 当 SCRIPT_CONFIG_DIR 未定义时会触发"未绑定的变量"而中断; 改为逐层判空, 行为不变。
@@ -542,7 +578,7 @@ function get_kcp_finalmask() {
             }],
             outbounds: [{protocol: "freedom"}]
         }' >"${tmp_file}" 2>/dev/null || continue
-        if xray run -test -config "${tmp_file}" >/dev/null 2>&1; then
+        if "${xray_bin}" run -test -config "${tmp_file}" >/dev/null 2>&1; then
             rm -f "${tmp_file}"
             printf '%s' "${json}"
             return 0
@@ -1645,14 +1681,16 @@ function _xray_apply_inbounds() {
             XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson fm "${KCP_MASK}" '
                 .inbounds[1].streamSettings |= (del(.finalMask) | .finalmask = $fm)')"
         else
-            # 探测不出 (xray 未安装 / 不支持 -test): 退回旧写法 kcpSettings.seed。
-            # 特意选"旧写法"而不是硬猜一个 finalmask id —— 旧写法在 26.2+ 会被 xray 明确
-            # 拒绝 (mkcp header & seed 已移除), 由上层校验拦下并回滚, 是一眼可见的失败;
-            # 而猜错的 finalmask id 在 ≤26.5 的 xray 上属于未知字段, 会被静默忽略 ——
-            # 配置照常加载, 但混淆对不上, 属静默故障, 比报错难查得多。
+            # 探测不出: 按本机 xray 版本选一个最贴近的 finalmask 写法写入,
+            # 不再写 26.x 已移除的 kcpSettings.seed (那会导致 26.x 直接加载失败、且难以排查)。
+            # 回退 id 由 _kcp_fallback_id 依版本判定 (26.2~26.5 → mkcp-aes128gcm, 26.6+ →
+            # mkcp-legacy); 具体拼装复用 _kcp_mask_json, 与探测成功路径用同一套结构。
+            local KCP_FALLBACK_ID='' KCP_FALLBACK_FM=''
+            KCP_FALLBACK_ID="$(_kcp_fallback_id)"
+            KCP_FALLBACK_FM="$(_kcp_mask_json "${KCP_FALLBACK_ID}" "${KCP_SEED}")"
             print_warn "$(_i18n '.handler.xray.kcp_mask_fallback')"
-            XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg seed "${KCP_SEED}" '
-                .inbounds[1].streamSettings.kcpSettings.seed = $seed')"
+            XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson fm "${KCP_FALLBACK_FM}" '
+                .inbounds[1].streamSettings |= (del(.finalMask) | .finalmask = $fm)')"
         fi
         ;;
     vision | xhttp | trojan | fallback | sni)

@@ -121,6 +121,7 @@
       "option6": "设置语言",
       "option7": "BBR 与内核网络加速",
       "option8": "配置备份与迁移",
+      "option9": "开/关 嗅探域名仅用于路由",
       "option0": "返回主菜单",
       "info1": "更新配置功能为整个配置的更新",
       "info2": "管理屏蔽或 WARP 分流",
@@ -128,7 +129,8 @@
       "info4": "(非 SNI 配置) 修改 Xray 监听端口，并自动重启服务",
       "info5": "geodata 由 https://github.com/Loyalsoldier/v2ray-rules-dat  提供",
       "info6": "开启/修复 BBR、只读体检、内核网络高并发调优与文件句柄上限",
-      "info7": "导出配置与证书为单个归档，或从归档还原（迁移 / 灾备）"
+      "info7": "导出配置与证书为单个归档，或从归档还原（迁移 / 灾备）",
+      "info8": "开启后嗅探出的域名只用于分流判定，出站改用客户端给的 IP 连接；套 CDN 时可能丢掉回源优选，默认关闭"
     },
     "route_management": {
       "title": "自定义分流",
@@ -263,6 +265,13 @@
     },
     "sockopt": {
       "unsupported": "本机 Xray 不支持出站 sockopt 调优字段，本次未写入（连接超时与保活维持内核默认）。"
+    },
+    "sniffing": {
+      "unsupported": "本机 Xray 不支持 sniffing.routeOnly 字段，本次未写入（出站仍按嗅探域名直连）。",
+      "not_installed": "尚未安装 Xray，请先安装后再设置该项。",
+      "no_config": "未找到 Xray 运行配置，请先执行一次「更新配置」。",
+      "enabled": "已开启：嗅探域名仅用于分流判定（出站改用客户端 IP，已重启服务生效）。",
+      "disabled": "已关闭：嗅探域名同时用于分流与出站连接（已重启服务生效）。"
     },
     "geodata": {
       "close_cron": "成功停止 geodata 自动更新任务",

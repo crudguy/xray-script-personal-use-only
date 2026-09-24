@@ -226,6 +226,7 @@ function menu_config() {
     echo -e "${GREEN}6.${NC} $(_i18n ".${CUR_FILE}.config_management.option6")"
     echo -e "${GREEN}7.${NC} $(_i18n ".${CUR_FILE}.config_management.option7")"
     echo -e "${GREEN}8.${NC} $(_i18n ".${CUR_FILE}.config_management.option8")"
+    echo -e "${GREEN}9.${NC} $(_i18n ".${CUR_FILE}.config_management.option9")"
 
     _menu_rule
     echo -e "1. $(_i18n ".${CUR_FILE}.config_management.info1")"
@@ -235,6 +236,7 @@ function menu_config() {
     echo -e "5. $(_i18n ".${CUR_FILE}.config_management.info5")"
     echo -e "7. $(_i18n ".${CUR_FILE}.config_management.info6")"
     echo -e "8. $(_i18n ".${CUR_FILE}.config_management.info7")"
+    echo -e "9. $(_i18n ".${CUR_FILE}.config_management.info8")"
     echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.config_management.option0")"
     _menu_rule
 }

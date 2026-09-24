@@ -5,6 +5,7 @@
   "xray": {
     "version": "",
     "warp": 0,
+    "sniffRouteOnly": 0,
     "rules": {
       "reset": "",
       "bt": 0,

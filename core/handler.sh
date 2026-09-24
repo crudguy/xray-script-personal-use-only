@@ -1287,8 +1287,9 @@ function handler_reset_script_config() {
     # 根据目标配置部分调用 reset_json_fields 进行重置
     case "${TARGET_CONFIG,,}" in
     xray)
-        # 重置 xray 部分，保留 version, warp, rules 字段
-        SCRIPT_CONFIG=$(reset_json_fields "${SCRIPT_CONFIG}" 'xray' 'version' 'warp' 'rules')
+        # 重置 xray 部分，保留 version, warp, rules, sniffRouteOnly 字段
+        # (后两者是用户显式设置的开关/规则, 与"配置本身"无关, 不该被重置掉)
+        SCRIPT_CONFIG=$(reset_json_fields "${SCRIPT_CONFIG}" 'xray' 'version' 'warp' 'rules' 'sniffRouteOnly')
         ;;
     nginx)
         # 重置 nginx 部分，保留 version, ca, ca_server 字段
@@ -1577,9 +1578,11 @@ function handler_xray_config() {
     # 采集参数 (声明为 local, 供下方 _xray_* 子函数经由 bash 动态作用域读取, 避免 20+ 处重复声明)
     local CONFIG_TAG XRAY_PORT XRAY_UUID FALLBACK_UUID TROJAN_PASSWORD KCP_SEED \
           TARGET_DOMAIN SERVER_NAMES PRIVATE_KEY SHORT_IDS XHTTP_PATH \
-          XRAY_RULES_STATUS XRAY_RULES_BT XRAY_RULES_CN XRAY_RULES_AD XRAY_RULES WARP_STATUS
+          XRAY_RULES_STATUS XRAY_RULES_BT XRAY_RULES_CN XRAY_RULES_AD XRAY_RULES WARP_STATUS \
+          XRAY_SNIFF_ROUTE_ONLY
     _xray_collect_params   # 从 SCRIPT_CONFIG 读取并填充上述 local + 加载配置模板到全局 XRAY_CONFIG
     _xray_apply_inbounds   # 按 CONFIG_TAG 应用 inbound 字段, 并做 REALITY serverNames 守卫
+    _xray_apply_sniffing   # 嗅探域名仅用于路由 (默认关: 配置零改写)
     _xray_apply_rules      # 按 XRAY_RULES_STATUS 保留/重置路由规则
     _xray_apply_dns        # 顶层 dns 段 (显式解析器; 字段集由本机实测决定)
     _xray_apply_domain_strategy  # 有 IP 类规则时切 IPIfNonMatch, 让 geoip 分流真正生效
@@ -1621,6 +1624,9 @@ function _xray_collect_params() {
     # 注: 与其它取 WARP 状态的调用点保持一致加 `|| true` —— jq 失败时取空串即可,
     #     不应让 set -e 把整个配置生成流程打断 (下方 is_enabled 会把空串当未启用)。
     WARP_STATUS="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.warp' || true)"      # 获取 WARP 状态
+    # 嗅探域名仅用于路由 (默认关): 键可能不存在 (老配置文件), 用 // 0 兜底 — is_enabled
+    # 只认 1/true/yes/y/on, 空串与 "null" 都会被判为关闭, 与"默认关"一致。
+    XRAY_SNIFF_ROUTE_ONLY="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.sniffRouteOnly // 0' || true)"
     # 加载对应配置标签的 Xray 配置模板 (写入全局 XRAY_CONFIG)
     XRAY_CONFIG="$(jq '.' ${SCRIPT_XRAY_DIR}/${CONFIG_TAG}.json)"
 }
@@ -1783,6 +1789,14 @@ readonly XRAY_DNS_QUERY_STRATEGY='UseIPv4'
 readonly XRAY_SOCKOPT_USER_TIMEOUT=10000     # 毫秒; 无 ACK 即判死 (内核默认约 15 分钟)
 readonly XRAY_SOCKOPT_KEEPALIVE_IDLE=45      # 秒; 空闲多久开始保活探测 (Xray 出站默认同值)
 readonly XRAY_SOCKOPT_KEEPALIVE_INTERVAL=15  # 秒; 保活探测间隔
+# ---- 嗅探域名仅用于路由 (sniffing.routeOnly, 默认关) ----
+# 默认 (关): 嗅探出的域名既参与路由判定, 也作为出站连接目标 —— 出站保持按域名直连,
+#             CDN 场景下域名解析能选到更近的回源节点, 这是本脚本一直以来的行为。
+# 开启:      嗅探结果只服务路由, 出站退回用客户端给的 IP 连接。代价是可能丢掉上述
+#             CDN 优选, 收益是出站不再产生额外域名解析 (减少解析开销与域名泄漏面)。
+# 因此做成显式开关而非默认行为: 影响面取决于上游是否套 CDN, 不该替所有用户决定。
+# 探测端口: `xray run -test` 只解析配置不监听, 取高位端口避免与真实服务撞车。
+readonly XRAY_SNIFF_PROBE_PORT=65124
 
 # =============================================================================
 # 子函数名称: _xray_bin_path
@@ -2179,6 +2193,8 @@ function _xray_probe_error_hint() {
 _XRAY_PROBE_ERR=''
 # 观测/均衡支持性缓存: '' 未探测 / full 支持 / plain 不支持 (降级为纯出站)
 _XRAY_OBS_MODE=''
+# sniffing.routeOnly 支持性缓存: '' 未探测 / on 支持 / off 不支持 (降级为不写该字段)
+_XRAY_SNIFF_MODE=''
 # 当前出站 tag (由 _warp_outbound_tag 填充, 与探测结果同步)
 _WARP_OB_TAG=''
 
@@ -2433,6 +2449,77 @@ function _xray_apply_sockopt() {
         .outbounds |= map(
             if .protocol == "freedom"
             then .sockopt = ((.sockopt // {}) + $so)
+            else . end
+        )')"
+}
+
+# =============================================================================
+# 子函数名称: _xray_sniff_mode
+# 功能描述: 实测本机 xray 是否接受 sniffing.routeOnly, 结果缓存到 _XRAY_SNIFF_MODE
+#           (进程内只测一次)。该字段是"嗅探域名仅用于路由"的载体, 属版本相关标识,
+#           按本仓惯例不写死 —— 若上游改名/移除, 探测失败时宁可不写该字段 (保持出站
+#           按域名直连的既有行为), 也不要把整份配置写坏。
+# 参数: 无
+# 返回值: 恒 0 (结果读 _XRAY_SNIFF_MODE: on 支持 / off 不支持)
+# =============================================================================
+function _xray_sniff_mode() {
+    if [[ -z "${_XRAY_SNIFF_MODE}" ]]; then
+        local frag=''
+        # 最小片段: 一个 127.0.0.1 高位端口的 vless 入站, 只在 sniffing 段带 routeOnly。
+        # 探测只关心该字段能否被解析 —— 配置越简单越不会被无关原因误判。
+        frag="$(jq -nc --argjson port "${XRAY_SNIFF_PROBE_PORT}" '{
+            inbounds: [{
+                tag: "sniff-probe", listen: "127.0.0.1", port: $port, protocol: "vless",
+                settings: {clients: [{id: "00000000-0000-0000-0000-000000000001"}], decryption: "none"},
+                sniffing: {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true}
+            }]
+        }')"
+        if _xray_config_probe "${frag}"; then
+            _XRAY_SNIFF_MODE='on'
+        else
+            _XRAY_SNIFF_MODE='off'
+            print_warn "$(_i18n '.handler.sniffing.unsupported')"
+            _xray_probe_error_hint
+        fi
+    fi
+    return 0
+}
+
+# =============================================================================
+# 子函数名称: _xray_apply_sniffing
+# 功能描述: 按 .xray.sniffRouteOnly 开关决定 sniffing 段的 routeOnly 字段。
+#           - 关 (默认): **仅当配置里确实存在该字段时才删除**。默认路径零改写, 保证
+#             "关" 时的产物与本功能引入前逐字节一致 (这是该开关的核心承诺)。
+#           - 开: 先实测本机支持性, 支持则给所有已启用 sniffing 的入站加 routeOnly:true。
+#           注: 官方文档写明 routeOnly "需要开启 destOverride 使用", 故作用域只圈
+#           `sniffing.enabled == true` 的入站 —— 本仓所有模板的 sniffing 恒为
+#           `{enabled:true, destOverride:[http,tls,quic]}` (由测试 T9n 锁住), 二者等价。
+# 参数: 无 (读全局 XRAY_CONFIG / XRAY_SNIFF_ROUTE_ONLY)
+# 返回值: 恒 0 (不支持时静默不写, 告警已由 _xray_sniff_mode 打印)
+# =============================================================================
+function _xray_apply_sniffing() {
+    if ! is_enabled "${XRAY_SNIFF_ROUTE_ONLY:-0}"; then
+        local has_residual=''
+        has_residual="$(echo "${XRAY_CONFIG}" | jq -r '
+            [.inbounds[]? | .sniffing? | select(.routeOnly != null)] | length > 0')"
+        if [[ "${has_residual}" == 'true' ]]; then
+            XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq '
+                .inbounds |= map(
+                    if .sniffing.enabled == true
+                    then del(.sniffing.routeOnly)
+                    else . end
+                )')"
+        fi
+        return 0
+    fi
+    _xray_sniff_mode
+    if [[ "${_XRAY_SNIFF_MODE}" != 'on' ]]; then
+        return 0
+    fi
+    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq '
+        .inbounds |= map(
+            if .sniffing.enabled == true
+            then .sniffing.routeOnly = true
             else . end
         )')"
 }
@@ -3769,6 +3856,54 @@ function handler_geodata_cron() {
 }
 
 # =============================================================================
+# 函数名称: handler_toggle_sniff_route_only
+# 功能描述: 切换"嗅探域名仅用于路由"(sniffing.routeOnly) 开关。
+#           改的是**已落盘**的运行配置 (只动 sniffing 字段, 其余原样保留), 而不是从模板
+#           重新生成整份配置 —— 后者会把端口/UUID/REALITY 等一并重算, 为一个布尔开关
+#           引入不必要的改动面。
+#           顺序与 handler_warp 一致: **先写配置并复核, 成功后才记状态**。这样落盘失败时
+#           配置已自动回滚、状态未变, 不会出现"界面说开了、配置没开"的错位。
+# 参数: 无 (读全局 SCRIPT_CONFIG)
+# 返回值: 0-已切换 (调用方可以重启生效); 非 0-未切换 (未装 Xray / 缺运行配置 /
+#         本机不支持该字段 / 落盘复核失败), 调用方不应重启
+# =============================================================================
+function handler_toggle_sniff_route_only() {
+    # 未装 Xray 时没有运行配置可改, 属"预期内不可用": 提示后返回非 0 (不触发重启)。
+    local xray_ver=''
+    xray_ver="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.version // empty' || true)"
+    if [[ -z "${xray_ver}" ]]; then
+        print_warn "$(_i18n '.handler.sniffing.not_installed')"
+        return 1
+    fi
+    if [[ ! -f "${XRAY_CONFIG_PATH}" ]]; then
+        print_warn "$(_i18n '.handler.sniffing.no_config')"
+        return 1
+    fi
+    local cur='' next=''
+    cur="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.sniffRouteOnly // 0' || true)"
+    if is_enabled "${cur}"; then next=0; else next=1; fi
+    # 读当前落盘配置到全局 XRAY_CONFIG (persist_xray_config 的输入), 再应用开关。
+    XRAY_CONFIG="$(jq '.' "${XRAY_CONFIG_PATH}")" || return 1
+    local XRAY_SNIFF_ROUTE_ONLY="${next}"
+    _xray_apply_sniffing
+    # 开启方向若本机实测不支持, 不留半开状态: 此时配置一个字节都没改, 直接返回非 0
+    # (具体原因已由 _xray_sniff_mode 打印到 stderr)。
+    if [[ "${next}" == '1' && "${_XRAY_SNIFF_MODE}" != 'on' ]]; then
+        return 1
+    fi
+    if ! persist_xray_config; then
+        return 1
+    fi
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson v "${next}" '.xray.sniffRouteOnly = $v')"
+    persist_script_config
+    if [[ "${next}" == '1' ]]; then
+        print_info "$(_i18n '.handler.sniffing.enabled')"
+    else
+        print_info "$(_i18n '.handler.sniffing.disabled')"
+    fi
+}
+
+# =============================================================================
 # 函数名称: handler_warp
 # 功能描述: 管理 WARP (原生 WireGuard 出站) 开关。
 #           1. 已启用 -> 关闭: 摘掉 wireguard 出站, 并同步清理"指向它的分流规则"。
@@ -4406,6 +4541,15 @@ function main() {
     --subscription) handler_subscription "$@" ;; # 生成订阅 (base64/Clash/sing-box)
     --nginx-cron) handler_nginx_cron ;;         # 管理 Nginx Cron
     --geodata-cron) handler_geodata_cron ;;     # 管理 GeoData Cron
+    --sniff-route-only)
+        # 嗅探域名仅用于路由: 切换开关。仅在**确实切换成功**时才重启 —— 未装 Xray /
+        # 本机不支持该字段 / 落盘复核失败都会返回非 0, 此时重启既无意义又会掩盖原因。
+        local _sniff_rc=0
+        handler_toggle_sniff_route_only || _sniff_rc=$?
+        if [[ "${_sniff_rc}" -eq 0 ]]; then
+            handler_restart
+        fi
+        ;;
     --warp) handler_warp ;;                     # 管理 WARP
     --reset-warp) handler_reset_warp ;;         # 重置 WARP
     --traffic) handler_traffic ;;               # 显示流量统计

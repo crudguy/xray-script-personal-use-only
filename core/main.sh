@@ -565,6 +565,7 @@ function processes_config() {
         6) processes_language ;;            # 选择 6：设置语言 (同进程内重载 i18n)
         7) processes_bbr ;;                 # 选择 7：BBR 与内核网络加速（体检/调优）
         8) processes_backup ;;              # 选择 8：配置备份与迁移（导出/导入）
+        9) exec_handler '--sniff-route-only' ;; # 选择 9：开/关"嗅探域名仅用于路由"
         *) break ;;                          # 0/EOF/非法 -> 退回主菜单
         esac
     done

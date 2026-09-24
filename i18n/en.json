@@ -121,6 +121,7 @@
       "option6": "Language",
       "option7": "BBR & kernel network tuning",
       "option8": "Backup & Migration",
+      "option9": "Enable/Disable sniffed domain for routing only",
       "option0": "Back to main menu",
       "info1": "Full config update",
       "info2": "Manage blocking or WARP routing",
@@ -128,7 +129,8 @@
       "info4": "(Non-SNI) Change Xray listen port and restart service",
       "info5": "geodata provided by  https://github.com/Loyalsoldier/v2ray-rules-dat ",
       "info6": "Enable/repair BBR, read-only health check, kernel net tuning and nofile limit",
-      "info7": "Export config and certificates into a single archive, or restore from one (migration / DR)"
+      "info7": "Export config and certificates into a single archive, or restore from one (migration / DR)",
+      "info8": "When on, sniffed domains are used for routing decisions only and outbounds connect to the client-supplied IP; may lose CDN origin selection. Off by default"
     },
     "route_management": {
       "title": "Custom Routing",
@@ -263,6 +265,13 @@
     },
     "sockopt": {
       "unsupported": "This Xray build does not support the outbound sockopt tuning fields; they were not written (connect timeout and keepalive keep the kernel defaults)."
+    },
+    "sniffing": {
+      "unsupported": "This Xray build does not support the sniffing.routeOnly field; it was not written (outbounds keep connecting by the sniffed domain).",
+      "not_installed": "Xray is not installed yet. Please install it before changing this option.",
+      "no_config": "Xray runtime config not found. Please run \"Update Configuration\" first.",
+      "enabled": "Enabled: sniffed domains are used for routing only (outbounds use the client IP; service restarted).",
+      "disabled": "Disabled: sniffed domains are used for both routing and outbound connections (service restarted)."
     },
     "geodata": {
       "close_cron": "Successfully stopped geodata auto-update task",

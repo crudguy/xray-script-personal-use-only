@@ -120,6 +120,8 @@ function exec_read() {
 #           1. 显示 Web 配置菜单 (仅 Nginx 默认页面一项)。
 #           2. Web 前端固定为 Nginx 默认页面。
 #           3. 根据 is_change 参数决定是仅更改配置还是执行完整安装流程。
+#           4. 完整安装分支收尾会打印分享链接/二维码与订阅三件套, 属"输出型", 故
+#              (_pause_after_action) 暂停一次再回菜单, 避免刚生成的分享信息被顶出屏幕。
 # 参数:
 #   $1: is_change - 控制流程模式。'y' 表示仅更改 web 配置；
 #                   'n' 表示执行完整安装流程 (安装脚本、Nginx、Xray 配置)。
@@ -152,6 +154,9 @@ function processes_web_config() {
         # SNI 安装完成后同样生成订阅三件套 (base64/Clash/sing-box), 让用户一次拿到所有客户端配置。
         # best-effort, 失败不中断安装。
         bash "${CUR_DIR}/share.sh" --subscription || true
+        # SNI 完整安装收尾同属"输出型" (分享链接 + 二维码 + 订阅三件套), 挂一次暂停再回菜单,
+        # 否则刚生成的分享信息会被菜单重绘顶出屏幕。见 _pause_after_action 的说明。
+        _pause_after_action
     fi
 }
 
@@ -199,6 +204,9 @@ function processes_ca_vendor() {
 #           2. 根据用户选择确定 XTLS 配置类型 (Vision, mKCP, XHTTP, Trojan, Fallback, SNI)。
 #           3. 如果选择了 SNI，则调用 processes_web_config 进行特殊处理。
 #           4. 否则，设置脚本配置并执行安装和 Xray 配置。
+#           5. 非 SNI 分支收尾会打印分享链接/二维码与订阅三件套 (与一键安装同款), 属
+#              "输出型", 故执行完暂停一次 (_pause_after_action) 再回菜单, 避免刚生成的
+#              分享信息被主菜单重绘顶出屏幕。
 # 参数: 无
 # 返回值: 无 (通过调用其他函数和脚本执行操作)
 # =============================================================================
@@ -235,6 +243,11 @@ function processes_xray_config() {
         # 安装完成后顺带生成订阅三件套 (base64/Clash/sing-box): Clash/sing-box 不能直接吃屏幕裸链接,
         # 必须靠订阅文件; 首次安装特意生成, 之后配置变更由刷新机制自动重建。best-effort, 失败不中断安装。
         bash "${CUR_DIR}/share.sh" --subscription || true
+        # 收尾同「一键安装」是"输出型": 上方 --share 打分享链接 + 二维码, 这里再打订阅三件套,
+        # 三四十行, 与主菜单每轮重绘 (banner 10 + 状态 7 + 菜单 21 + 提示 1 ≈ 39 行) 体量相当。
+        # 不暂停的话, 紧接的菜单重绘会把用户刚生成、最需要复制的分享信息直接顶出屏幕
+        # (改配置后同样会刷新分享信息, 与一键安装是同一个坑)。见 _pause_after_action 的说明。
+        _pause_after_action
     fi
 }
 

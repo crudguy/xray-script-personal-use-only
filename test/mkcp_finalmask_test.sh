@@ -80,8 +80,10 @@ assert_eq "T1c: 迁移不得顺手删掉 kcpSettings 原有容量参数" "$caps"
 # ---------------------------------------------------------------------------
 mask_fn="$(awk '/^function _kcp_mask_json\(\) \{/,/^\}/' "$HANDLER")"
 probe_fn="$(awk '/^function get_kcp_finalmask\(\) \{/,/^\}/' "$HANDLER")"
+fallback_id_fn="$(awk '/^function _kcp_fallback_id\(\) \{/,/^\}/' "$HANDLER")"
 assert_ne "T2: 抽到 _kcp_mask_json 函数体" "$mask_fn" ""
 assert_ne "T2b: 抽到 get_kcp_finalmask 函数体" "$probe_fn" ""
+assert_ne "T2e: 抽到 _kcp_fallback_id 函数体" "$fallback_id_fn" ""
 
 # mkcp 分支在 handler 里出现多次 (另两处在 generate/read 的 case 中), 故按内容挑选:
 # 逐个 mkcp 臂写文件, 取含 get_kcp_finalmask 的那个。
@@ -94,7 +96,7 @@ ARM_FILE="$(grep -l 'get_kcp_finalmask' "$SB"/arm_*.txt 2>/dev/null | head -1 ||
 assert_ne "T2c: 抽到 handler 的 mkcp 分支" "$ARM_FILE" ""
 assert_eq "T2d: mkcp 分支在 handler 中唯一" "$(grep -l 'get_kcp_finalmask' "$SB"/arm_*.txt 2>/dev/null | wc -l | tr -d ' ')" "1"
 
-if [[ -z "$mask_fn" || -z "$probe_fn" || -z "$ARM_FILE" ]]; then
+if [[ -z "$mask_fn" || -z "$probe_fn" || -z "$fallback_id_fn" || -z "$ARM_FILE" ]]; then
     echo "==== mkcp_finalmask_test: PASS=$PASS FAIL=$FAIL ===="
     exit 1
 fi
@@ -211,6 +213,7 @@ fi
     printf '%s\n' "TMPFILE_DIR=''"
     printf '%s\n' "$mask_fn"
     printf '%s\n' "$probe_fn"
+    printf '%s\n' "$fallback_id_fn"
     printf '%s\n' 'XRAY_CONFIG="$(cat "${HARNESS_TEMPLATE}")"'
     printf '%s\n' "KCP_SEED='${SEED}'"
     printf '%s\n' 'CONFIG_TAG=mkcp'
@@ -252,10 +255,12 @@ assert_eq "T5g: seed 落在 settings.password" \
 assert_eq "T5h: 该场景不打印回退告警" "$(grep -c 'WARN' "$SB/err.txt" || true)" '0'
 
 cfg_fallback="$(run_apply 'neither')"
-assert_eq "T5i: 探测不出 -> 退回旧写法 kcpSettings.seed" \
-    "$(printf '%s' "$cfg_fallback" | jq -r '.inbounds[1].streamSettings.kcpSettings.seed')" "$SEED"
-assert_eq "T5j: 回退时不得留下任何 finalmask (避免静默不生效)" \
-    "$(printf '%s' "$cfg_fallback" | jq -r '[.inbounds[1].streamSettings | (has("finalmask") or has("finalMask"))] | any')" 'false'
+assert_eq "T5i: 探测不出 -> 按版本回退到 finalmask(mkcp-aes128gcm)" \
+    "$(printf '%s' "$cfg_fallback" | jq -r '.inbounds[1].streamSettings.finalmask.udp[0].type')" 'mkcp-aes128gcm'
+assert_eq "T5ib: 回退写法 seed 落在 settings.password" \
+    "$(printf '%s' "$cfg_fallback" | jq -r '.inbounds[1].streamSettings.finalmask.udp[0].settings.password')" "$SEED"
+assert_eq "T5ic: 回退写法不再写 26.x 已移除的 kcpSettings.seed" \
+    "$(printf '%s' "$cfg_fallback" | jq -r '.inbounds[1].streamSettings.kcpSettings | has("seed")')" 'false'
 assert_contains "T5k: 回退时给出提示 (提示走 stderr)" "$(cat "$SB/err.txt")" 'WARN'
 
 cfg_dirty="$(run_apply 'legacy' "$SB/dirty_template.json")"
@@ -281,15 +286,16 @@ read_back() { # $1=配置 JSON
 }
 assert_eq "T6e: finalmask(mkcp-legacy) -> 反读出 seed" "$(read_back "$cfg_legacy")" "$SEED"
 assert_eq "T6f: finalmask(mkcp-aes128gcm) -> 反读出 seed" "$(read_back "$cfg_aes")" "$SEED"
-assert_eq "T6g: 老配置 kcpSettings.seed -> 仍能反读" "$(read_back "$cfg_fallback")" "$SEED"
+old_style_seed="$(jq -nc --arg s "$SEED" '.inbounds[1].streamSettings.kcpSettings.seed = $s')"
+assert_eq "T6g: 老配置 kcpSettings.seed -> 仍能反读 (向后兼容)" "$(read_back "$old_style_seed")" "$SEED"
 assert_eq "T6h: camelCase finalMask -> 也能反读 (兼容旧写入)" "$(read_back "$(cat "$SB/dirty_template.json")")" 'STALE'
 
 # ---------------------------------------------------------------------------
 # T7 静态守卫: 回退分支必须"明确提示 + 明确落旧字段", 不得静默硬猜
 # ---------------------------------------------------------------------------
 assert_contains "T7: 回退分支有提示" "$(cat "$ARM_FILE")" 'kcp_mask_fallback'
-assert_contains "T7b: 回退分支写 kcpSettings.seed" "$(cat "$ARM_FILE")" 'kcpSettings.seed = $seed'
-assert_not_contains "T7c: 分支内不再有硬编码的模板默认值写法" "$(cat "$ARM_FILE")" '|= (. //'
+assert_contains "T7b: 回退分支按版本选 id (_kcp_fallback_id)" "$(cat "$ARM_FILE")" '_kcp_fallback_id'
+assert_not_contains "T7c: 回退分支不再写 26.x 已移除的 kcpSettings.seed" "$(cat "$ARM_FILE")" 'kcpSettings.seed ='
 
 # ---------------------------------------------------------------------------
 # T8 i18n: 回退提示双语齐备
@@ -323,6 +329,60 @@ neg_cfg="$(PATH="$SB/bin:/usr/bin:/bin" STUB_MODE='aes' STUB_LOG=/dev/null bash 
 neg_type="$(printf '%s' "$neg_cfg" | jq -r '.inbounds[1].streamSettings.finalmask.udp[0].type' 2>/dev/null || true)"
 assert_ne "T9: 破损副本确实产出了配置" "$neg_type" ""
 assert_ne "T9b(NEG): 写死的写法在 aes-only 机器上被同一判据抓到 (判据非恒绿)" "$neg_type" 'mkcp-aes128gcm'
+
+# ---------------------------------------------------------------------------
+# T10 绝对路径兜底 + 版本回退: 复现用户机器 (xray 在 /usr/local/bin, 脚本运行时 PATH 不含它)
+#      command -v 找不到时, 必须靠 XRAY_BIN_PATH (默认 /usr/local/bin/xray) 兜底探到 xray。
+#      另外验证 _kcp_fallback_id 按版本选 id (26.3.27 → aes128gcm, 26.6 → legacy)。
+# ---------------------------------------------------------------------------
+mkdir -p "$SB/absbin" "$SB/absbin6"
+cat > "$SB/absbin/xray" <<'STUB'
+#!/usr/bin/env bash
+printf 'called\n' >> "${ABS_CALLS:-/dev/null}"
+case "$1" in
+  --version) printf 'Xray 26.3.27 (Xray, Penetrates Everything.)\n' ;;
+  run)      cfg="${!#}"; grep -q '"mkcp-aes128gcm"' "$cfg" ;;
+  *)        exit 1 ;;
+esac
+STUB
+chmod +x "$SB/absbin/xray"
+cat > "$SB/absbin6/xray" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+  --version) printf 'Xray 26.6.0 (Xray, Penetrates Everything.)\n' ;;
+  *)         exit 1 ;;
+esac
+STUB
+chmod +x "$SB/absbin6/xray"
+
+: > "$SB/abs_calls.log"
+{
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf '%s\n' 'set -Eeuo pipefail'
+    printf '%s\n' 'cmd_exists() { command -v "$1" >/dev/null 2>&1; }'
+    printf '%s\n' "SCRIPT_NAME='xray-script-personal-use-only'"
+    printf '%s\n' "SCRIPT_CONFIG_DIR='${SB}/cfg'"
+    printf '%s\n' "TMPFILE_DIR=''"
+    printf '%s\n' "$mask_fn"
+    printf '%s\n' "$probe_fn"
+    printf '%s\n' 'if get_kcp_finalmask "$1"; then printf "\nRC=0\n"; else printf "\nRC=1\n"; fi'
+} > "$SB/probe_abs.sh"
+out_abs="$(PATH='/usr/bin:/bin' XRAY_BIN_PATH="$SB/absbin/xray" ABS_CALLS="$SB/abs_calls.log" bash "$SB/probe_abs.sh" "$SEED" 2>&1 || true)"
+assert_contains "T10: PATH 无 xray 但 XRAY_BIN_PATH 指向已装 xray -> 探测成功" "$out_abs" '"type":"mkcp-aes128gcm"'
+assert_contains "T10b: 该场景返回 0" "$out_abs" 'RC=0'
+assert_contains "T10c: 绝对路径 xray 确实被调用 (command -v 兜底生效)" "$(cat "$SB/abs_calls.log")" 'called'
+
+{
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf '%s\n' 'set -Eeuo pipefail'
+    printf '%s\n' 'cmd_exists() { command -v "$1" >/dev/null 2>&1; }'
+    printf '%s\n' "$fallback_id_fn"
+    printf '%s\n' 'printf "%s" "$(_kcp_fallback_id)"'
+} > "$SB/fallback_id.sh"
+fb_aes="$(PATH='/usr/bin:/bin' XRAY_BIN_PATH="$SB/absbin/xray" bash "$SB/fallback_id.sh" 2>/dev/null || true)"
+assert_eq "T10d: 26.3.27 -> 回退 mkcp-aes128gcm" "$fb_aes" 'mkcp-aes128gcm'
+fb_legacy="$(PATH='/usr/bin:/bin' XRAY_BIN_PATH="$SB/absbin6/xray" bash "$SB/fallback_id.sh" 2>/dev/null || true)"
+assert_eq "T10e: 26.6 -> 回退 mkcp-legacy" "$fb_legacy" 'mkcp-legacy'
 
 # ---------------------------------------------------------------------------
 echo "==== mkcp_finalmask_test: PASS=$PASS FAIL=$FAIL ===="

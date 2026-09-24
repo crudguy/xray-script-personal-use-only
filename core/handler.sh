@@ -3083,6 +3083,16 @@ function handler_change_xray_port() {
         XRAY_PORT="${CONFIG_DATA['port']:-${XRAY_PORT}}"
         ;;
     esac
+    # 兜底: 上面两条分支拿到的都必须是个数字 —— 否则下一行 jq 会甩出
+    #       "invalid JSON text passed to --argjson" 并以非 0 退出, 而本文件跑在
+    #       set -Eeuo pipefail 下, 赋值失败会 **直接终止整个人机交互脚本**, 用户看到的是
+    #       "脚本在第 N 行意外失败", 和刚才"改个端口"的动作完全对不上。
+    #       可达路径: mkcp 模式下用户直接回车 (交 generate.sh 现算), 而 generate.sh
+    #       没能算出值 (其 generate_random 依赖 od 取随机, od 缺失/异常即输出空串)。
+    #       此时回落到默认端口 —— 端口是可见的 (分享链接/体检报告都会显示), 不会误导。
+    if [[ ! "${XRAY_PORT}" =~ ^[0-9]+$ ]]; then
+        XRAY_PORT="443"
+    fi
 
     # 更新脚本配置中的 Xray 端口
     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson port "${XRAY_PORT}" '.xray.port = $port')"

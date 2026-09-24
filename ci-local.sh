@@ -37,9 +37,13 @@ export LANG=C.UTF-8
 ROOT="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
 cd "$ROOT" || exit 1
 
-# 收集被跟踪的 shell 脚本清单 (供 ShellCheck 使用; 用数组避免 SC2046 单词拆分告警,
-# 也顺带修了"文件名含空格"时命令替换会错误拆分的隐患)
-mapfile -t sh_files < <(git ls-files '*.sh')
+# 收集 shell 脚本清单 (供 ShellCheck 使用; 用数组避免 SC2046 单词拆分告警,
+# 也顺带修了"文件名含空格"时命令替换会错误拆分的隐患)。
+# ⚠️ 必须带上 --others: 只用 `git ls-files` 会**漏掉尚未 git add 的新文件**, 于是出现
+#    "本地门禁全绿、提交后 CI 变红" —— CI 在 checkout 后所有文件都已跟踪, 一个不落。
+#    2026-09-24 实测踩到: 新测试里的一条 SC2034 本地没报, 提交后才暴露。
+#    --exclude-standard 让 .gitignore 覆盖的产物 (如 .workbuddy/tmp/*.sh) 仍被排除。
+mapfile -t sh_files < <(git ls-files --cached --others --exclude-standard '*.sh')
 
 NO_SHELLCHECK=0
 FILTER=""
@@ -67,7 +71,7 @@ while IFS= read -r f; do
     printf '  FAIL %s\n' "$f"
     fail=1
   fi
-done < <(git ls-files '*.sh')
+done < <(git ls-files --cached --others --exclude-standard '*.sh')
 [ "$fail" -eq 0 ] && echo "语法检查通过 ✓" || { echo "语法检查失败"; exit 1; }
 
 # ---- [2/5] 行尾守卫 (要求 LF) ----
@@ -78,7 +82,7 @@ while IFS= read -r f; do
     echo "::error file=$f::含 CR (CRLF), 本仓库 *.sh 必须为 LF"
     bad=1
   fi
-done < <(git ls-files '*.sh')
+done < <(git ls-files --cached --others --exclude-standard '*.sh')
 [ "$bad" -eq 0 ] && echo "全部 LF ✓" || { echo "行尾检查失败"; exit 1; }
 
 # ---- [3/5] ShellCheck 门禁 ----

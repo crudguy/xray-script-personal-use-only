@@ -70,6 +70,7 @@ readonly STAGE_PREFIX='xray-script-personal-use-only-bk.'    # 解包暂存目�
 # 顺序即导出/展示顺序; 恢复目标由 _member_spec 按 id 推导 (见文件头红线 1)。
 readonly -a MEMBER_IDS=(
     script_config
+    warp_credentials
     xray_config
     nginx_conf
     nginx_confd
@@ -159,6 +160,10 @@ function _usage() {
 function _member_spec() {
     case "${1:-}" in
     script_config) printf 'file|%s' "${SCRIPT_CONFIG_PATH}" ;;
+    # WARP 凭据 (原生 WireGuard 出站用): 与 script_config 同目录, 未启用 WARP 时不存在
+    # (成员缺失即跳过)。带上它的意义是"重置出口"在导入后仍可复用原凭据, 而不是重新注册
+    # —— 重新注册会额外占用一台 Cloudflare 设备额度, 且可能被限流拒绝。
+    warp_credentials) printf 'file|%s' "${SCRIPT_CONFIG_DIR}/warp.json" ;;
     xray_config) printf 'file|%s' "${XRAY_CONFIG_PATH}" ;;
     nginx_conf) printf 'file|%s' "${NGINX_CONFIG_DIR}/nginx.conf" ;;
     nginx_confd) printf 'dir|%s' "${NGINX_CONFIG_DIR}/conf.d" ;;

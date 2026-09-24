@@ -214,6 +214,7 @@
       "config_update": "正在更新 Xray 配置",
       "kcp_mask_fallback": "未能实时探测本机 Xray 的 mKCP 混淆写法，已按 Xray 版本回退到兼容写法写入；如启动仍报 finalmask 相关错误，请更新 Xray 后重跑「更新配置」。",
       "kcp_mask_probe_error": "本机 Xray 拒绝了两种 mKCP 混淆写法，最后一条报错如下（供排查）：",
+      "probe_error": "本机 Xray 未接受该配置，原始报错如下（可用于排查）：",
       "kcp_mask_healed": "已检测到 mKCP 混淆写法与当前 Xray 版本不兼容，已按本机 Xray 实测自动重写，无需手动操作。",
       "kcp_mask_heal_failed": "mKCP 混淆写法自愈失败，已回滚到原配置。请手动更新 Xray 后重跑「更新配置」。"
     },

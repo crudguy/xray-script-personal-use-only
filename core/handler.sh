@@ -567,7 +567,10 @@ function get_kcp_finalmask() {
     if [[ ! -d "${tmp_dir}" || ! -w "${tmp_dir}" ]]; then
         tmp_dir="${TMPDIR:-/tmp}"
     fi
-    tmp_file="$(mktemp "${tmp_dir%/}/.${SCRIPT_NAME}-kcp.XXXXXXXX")" || return 1
+    # 模板必须带 .json 后缀 —— xray 26.x 按扩展名判断配置格式, 无后缀会直接
+    # "Failed to get format of <path>" (exit 23) 拒载整份配置。此前漏了后缀, 使本函数
+    # 的逐个候选实测恒失败、一路退到 _kcp_fallback_id 的版本号猜测 (2026-09-24 实测确认)。
+    tmp_file="$(mktemp "${tmp_dir%/}/.${SCRIPT_NAME}-kcp.XXXXXXXX.json")" || return 1
     for id in 'mkcp-legacy' 'mkcp-aes128gcm'; do
         json="$(_kcp_mask_json "${id}" "${seed}")" || continue
         # 最小配置: 只留一个 mKCP 入站与一个 freedom 出站, 不引路由/geoip/DNS ——
@@ -1880,8 +1883,9 @@ function _warp_gen_keypair() {
         tmp_dir="${TMPDIR:-/tmp}"
     fi
     local key_pem='' tmp_file=''
+    # .json 后缀是必需的: xray 26.x 靠扩展名判断配置格式 (见 _xray_config_probe 的说明)
     key_pem="$(mktemp "${tmp_dir%/}/.${SCRIPT_NAME}-warpkey.XXXXXXXX")" || return 1
-    tmp_file="$(mktemp "${tmp_dir%/}/.${SCRIPT_NAME}-warpprobe.XXXXXXXX")" || {
+    tmp_file="$(mktemp "${tmp_dir%/}/.${SCRIPT_NAME}-warpprobe.XXXXXXXX.json")" || {
         rm -f "${key_pem}"
         return 1
     }
@@ -2123,16 +2127,28 @@ function _xray_apply_warp() {
 # 返回值: 0-被接受; 1-被拒绝 / 无 xray / 建不了临时文件
 # =============================================================================
 function _xray_config_probe() {
+    # 每次调用先清空上一次的报错: 降级提示只该打"导致这次降级"的原因, 不是历史残留
+    _XRAY_PROBE_ERR=''
     local fragment="${1:-}"
     [[ -n "${fragment}" ]] || return 1
     local bin='' tmp_dir='' tmp_file=''
-    bin="$(_xray_bin_path)" || return 1
+    bin="$(_xray_bin_path)" || {
+        _XRAY_PROBE_ERR='xray binary not found on this host'
+        return 1
+    }
     tmp_dir="${TMPFILE_DIR:-}"
     [[ -z "${tmp_dir}" ]] && tmp_dir="${SCRIPT_CONFIG_DIR:-}"
     if [[ ! -d "${tmp_dir}" || ! -w "${tmp_dir}" ]]; then
         tmp_dir="${TMPDIR:-/tmp}"
     fi
-    tmp_file="$(mktemp "${tmp_dir%/}/.${SCRIPT_NAME}-xrayprobe.XXXXXXXX")" || return 1
+    # .json 后缀是必需的: xray 26.x 按扩展名判断配置格式, 无后缀一律
+    # "Failed to get format of <path>" (exit 23) 拒载整份配置 —— 那会把"探测链路坏了"
+    # 伪装成"本机不支持该写法", 让降级链一路走到底。此处曾长期漏后缀, 使本机 26.3.27
+    # 明明支持的 observatory / 顶层 dns 段被静默跳过 (2026-09-24 用同版本二进制实测定位)。
+    tmp_file="$(mktemp "${tmp_dir%/}/.${SCRIPT_NAME}-xrayprobe.XXXXXXXX.json")" || {
+        _XRAY_PROBE_ERR="mktemp failed in ${tmp_dir}"
+        return 1
+    }
     # 骨架里放 direct / warp / warp-out / block 四个占位出站: balancer 的 selector 与
     # fallbackTag 都要能解析到对应 tag, 否则会被误判成"引用了不存在的出站"而谎报不支持。
     if ! jq -nc --argjson frag "${fragment}" '
@@ -2145,15 +2161,41 @@ function _xray_config_probe() {
                 {tag: "block", protocol: "blackhole"}
             ]
         } + $frag' >"${tmp_file}" 2>/dev/null; then
+        _XRAY_PROBE_ERR='jq failed to build the probe skeleton'
         rm -f "${tmp_file}"
         return 1
     fi
+    # 用 if 接住而不是 `out="$(...)"` 裸赋值: set -e 下赋值语句会继承命令替换的退出码,
+    # 非 0 会当场杀掉整个交互脚本 (自愈路径踩过同一个坑)。
     local rc=0
-    "${bin}" run -test -config "${tmp_file}" >/dev/null 2>&1 || rc=1
+    if out="$("${bin}" run -test -config "${tmp_file}" 2>&1)"; then
+        rc=0
+    else
+        rc=1
+        _XRAY_PROBE_ERR="${out}"
+    fi
     rm -f "${tmp_file}"
     return "${rc}"
 }
 
+# =============================================================================
+# 子函数名称: _xray_probe_error_hint
+# 功能描述: 把上一次 _xray_config_probe 被拒时 xray 的原始报错转到 stderr。降级链走到
+#           底时调用 —— 只要报错是 "Failed to get format" 之类, 一眼就能看出是探测环境
+#           问题而不是"本机不支持", 不必再去猜根因。
+#           **只能写 stderr**: 调用方 (--share / --export-config) 会消费 stdout。
+# 参数: 无 (读全局 _XRAY_PROBE_ERR)
+# 返回值: 恒 0
+# =============================================================================
+function _xray_probe_error_hint() {
+    [[ -n "${_XRAY_PROBE_ERR}" ]] || return 0
+    print_warn "$(_i18n '.handler.xray.probe_error')"
+    printf '%s\n' "${_XRAY_PROBE_ERR}" >&2
+    return 0
+}
+
+# 上一次探测被拒时 xray 的原始报错 (供 _xray_probe_error_hint 转 stderr)
+_XRAY_PROBE_ERR=''
 # 观测/均衡支持性缓存: '' 未探测 / full 支持 / plain 不支持 (降级为纯出站)
 _XRAY_OBS_MODE=''
 # 当前出站 tag (由 _warp_outbound_tag 填充, 与探测结果同步)
@@ -2188,6 +2230,7 @@ function _xray_observatory_mode() {
         else
             _XRAY_OBS_MODE='plain'
             print_warn "$(_i18n '.handler.warp.no_observatory')"
+            _xray_probe_error_hint
         fi
     fi
     return 0
@@ -2276,6 +2319,7 @@ function _xray_dns_mode() {
         else
             _XRAY_DNS_MODE='off'
             print_warn "$(_i18n '.handler.dns.unsupported')"
+            _xray_probe_error_hint
         fi
     fi
     return 0

@@ -214,6 +214,7 @@
       "config_update": "Updating Xray configuration",
       "kcp_mask_fallback": "Could not probe this host's Xray for its mKCP obfuscation syntax in real time; fell back to the version-compatible form based on the Xray version. If Xray still reports a finalmask error on start, update Xray and re-run \"Update Config\".",
       "kcp_mask_probe_error": "This host's Xray rejected both mKCP obfuscation syntaxes; the last error is shown below for diagnosis:",
+      "probe_error": "This host's Xray rejected the configuration; the raw error is shown below for diagnosis:",
       "kcp_mask_healed": "Detected that the mKCP obfuscation syntax is incompatible with the current Xray build; auto-rewrote it based on this host's Xray. No manual action needed.",
       "kcp_mask_heal_failed": "mKCP obfuscation self-heal failed; reverted to the original config. Please update Xray manually, then re-run the update-config flow."
     },

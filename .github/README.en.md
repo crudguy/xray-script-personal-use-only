@@ -20,7 +20,7 @@
   * Ad blocking (optional)
   * Add custom WARP Proxy routing rules
   * Add custom blocking routing rules
-* Toggle Cloudflare WARP Proxy ( :whale: Docker deployment)
+* Toggle Cloudflare WARP Proxy (native WireGuard outbound)
 * Toggle geodata auto-update
 * Xray port defaults and custom input:
   * VLESS-mKCP: randomly generated
@@ -210,7 +210,7 @@ Options fall into two groups:
 | `--bbr` | Enable/repair BBR congestion control | Idempotent, safe to re-run |
 | `--net-tune` | Kernel network tuning for high concurrency | Changes kernel parameters; asks for confirmation |
 | `--nofile-limit` | Raise the process file-descriptor limit | Changes kernel parameters; asks for confirmation |
-| `--export-config [--with-docker] [--yes]` | Export config and certificates to an archive | Container data is included only with `--with-docker` |
+| `--export-config [--yes]` | Export config and certificates to an archive | Use `--yes` for unattended mode |
 | `--import-config <archive> [--yes]` | Restore config and certificates from an archive | A rollback point is created before writing |
 | `--subscription` | Generate base64 / Clash / sing-box subscriptions | Written to `~/.xray-script-personal-use-only/` |
 | `--start` / `--stop` / `--restart` | Start / stop / restart the Xray service | Idempotent, with an active-state recheck |
@@ -228,8 +228,8 @@ bash ${HOME}/xray-script-personal-use-only.sh --health
 # Force the script itself to the latest commit
 bash ${HOME}/xray-script-personal-use-only.sh --force-update
 
-# Export before migrating (including container data), then restore on the new host
-bash ${HOME}/xray-script-personal-use-only.sh --export-config --with-docker --yes
+# Export before migrating, then restore on the new host
+bash ${HOME}/xray-script-personal-use-only.sh --export-config --yes
 bash ${HOME}/xray-script-personal-use-only.sh --import-config /root/xray-backup.tar.gz --yes
 ```
 
@@ -370,7 +370,7 @@ After switching to a non-SNI config, Nginx will be stopped but kept on the machi
 
 Installation flow:
 
-Update package index -> install dependencies -> [install Docker] -> [install Cloudflare-warp] -> install Xray -> install Nginx -> issue certificate -> apply configuration
+Update package index -> install dependencies -> install Xray -> install Nginx -> issue certificate -> apply configuration
 
 **Average install time on a 1-core 1GB server (for reference only):**
 
@@ -378,8 +378,6 @@ Update package index -> install dependencies -> [install Docker] -> [install Clo
 | ------------------- | --------- |
 | Update package index| 0-10 min  |
 | Install dependencies| 0-5 min   |
-| Install Docker      | 1-2 min   |
-| Install Cloudflare-warp | 3-5 min |
 | Install Xray        | < 0.5 min |
 | Install Nginx       | 13-15 min |
 | Issue certificate   | 1-2 min   |
@@ -402,7 +400,7 @@ The downside is long compilation time.
 
 **Nginx:** `/usr/local/nginx`
 
-**Cloudflare-warp:** `$HOME/.xray-script-personal-use-only/docker/warp`
+**Cloudflare WARP:** `$HOME/.xray-script-personal-use-only/warp.json` (WireGuard credentials)
 
 **Script state:** `$HOME/.xray-script-personal-use-only/{config.json, commit}` (script config and installed commit record)
 
@@ -468,10 +466,6 @@ When using SNI configuration, the script may install the following dependencies:
 
 [xhttp 五合一配置][xhttp 五合一配置]
 
-[部署 Cloudflare WARP Proxy][haoel]
-
-[cloudflare-warp 镜像][e7h4n]
-
 [V2Ray 路由规则文件加强版][v2ray-rules-dat]
 
 [kirin10000/Xray-script][kirin10000/Xray-script]
@@ -483,7 +477,5 @@ When using SNI configuration, the script may install the following dependencies:
 [XHTTP]: https://github.com/XTLS/Xray-core/discussions/4113 (XHTTP: Beyond REALITY)
 [lxhao61/integrated-examples]: https://github.com/lxhao61/integrated-examples (以 V2Ray（v4 版） 或 Xray、Nginx 或 Caddy（v2 版）、Hysteria 等打造常用科学上网的优化配置及最优组合示例，且提供集成特定插件的 Caddy（v2 版） 文件，分享给大家食用及自己备份。)
 [xhttp 五合一配置]: https://github.com/XTLS/Xray-core/discussions/4118 (xhttp 五合一配置 \( reality 直连与过 CDN 共存, 附小白可抄的配置\))
-[haoel]: https://github.com/haoel/haoel.github.io#943-docker-%E4%BB%A3%E7%90%86 (使用 Docker 快速部署 Cloudflare WARP Proxy)
-[e7h4n]: https://github.com/e7h4n/cloudflare-warp (cloudflare-warp 镜像)
 [v2ray-rules-dat]: https://github.com/Loyalsoldier/v2ray-rules-dat (V2Ray 路由规则文件加强版)
 [kirin10000/Xray-script]: https://github.com/kirin10000/Xray-script (kirin10000/Xray-script)

@@ -57,7 +57,7 @@
       "title": "卸载管理",
       "option1": "卸载 Xray",
       "option2": "卸载 Nginx",
-      "info1": "卸载 Xray 核心并收口本项目痕迹 (Nginx/acme.sh/证书/Docker 保留)",
+      "info1": "卸载 Xray 核心并收口本项目痕迹 (Nginx/acme.sh/证书 保留)",
       "info2": "仅卸载本项目编译版 Nginx (检测到发行版会拒绝, 避免误删其它站点)",
       "option0": "退出"
     },
@@ -138,10 +138,10 @@
       "option5": "添加 WARP ip 分流",
       "option6": "添加 WARP domain 分流",
       "option0": "返回管理配置",
-      "info1": "WARP Proxy 功能通过 Docker 部署, 开启时自动安装 Docker",
-      "info2": "WARP Proxy 详情 https://github.com/haoel/haoel.github.io?tab=readme-ov-file#1043-docker-%E4%BB%A3%E7%90%86",
-      "info3": "每次成功开启 WARP Proxy 都会重新申请 WARP 账号, 频繁操作可能导致 IP 被 Cloud­flare 拉黑",
-      "info4": "清空 WARP 容器日志文件，并重置容器",
+      "info1": "WARP Proxy 走 Xray 原生 WireGuard 出站; 首次开启会向 Cloudflare 注册一台设备",
+      "info2": "注册凭据保存在本地, 之后反复开关均复用同一台设备, 不再联网申请",
+      "info3": "「重置 WARP Proxy」会丢弃本地凭据并重新注册; 频繁重置可能导致 IP 被 Cloudflare 拉黑",
+      "info4": "丢弃本地 WARP 凭据并重新注册一台设备 (重启 Xray 后生效)",
       "info5": "添加关于 ip 的屏蔽分流, 相关分流添加在 ruleTag 为 block-ip 中",
       "info6": "添加关于 domain 的屏蔽分流, 相关分流添加在 ruleTag 为 block-domain 中",
       "info7": "(需要开启 WARP)添加关于 ip 的 WARP 分流, 相关分流添加在 ruleTag 为 warp-ip 中",
@@ -219,7 +219,7 @@
       "kcp_mask_heal_failed": "mKCP 混淆写法自愈失败，已回滚到原配置。请手动更新 Xray 后重跑「更新配置」。"
     },
     "purge": {
-      "scope_notice": "本操作卸载 Xray（含其配置与日志），并清理本项目写入的 cron 定时任务与 Nginx 站点配置；Nginx、acme.sh（含已签发证书）与 Docker 容器不会被卸载。",
+      "scope_notice": "本操作卸载 Xray（含其配置与日志），并清理本项目写入的 cron 定时任务与 Nginx 站点配置；Nginx 与 acme.sh（含已签发证书）不会被卸载。",
       "fail": "Xray 卸载未成功完成（可能未安装），已跳过后续清理。",
       "cron_removed": "已移除本项目的 cron 定时任务。",
       "cron_empty": "未发现本项目的 cron 定时任务，无需清理。",
@@ -251,7 +251,7 @@
       "no_curl": "缺少 curl，无法注册 WARP 账号。",
       "register_failed": "WARP 注册失败（HTTP {code}）。部分机房 IP 段会被 Cloudflare 注册端点直接拒绝，可稍后重试。",
       "register_parse_failed": "WARP 注册响应缺少必要字段（接口地址或 peer 公钥），本次启用已放弃，配置未改动。",
-      "enabled": "WARP 已启用（原生 WireGuard 出站，不再需要 Docker）。",
+      "enabled": "WARP 已启用（原生 WireGuard 出站）。",
       "disabled": "WARP 已关闭，指向 WARP 的分流规则已一并移除。",
       "reset_done": "WARP 出口已重置（已重新注册设备），重启 Xray 后生效。",
       "reset_need_enable": "WARP 未启用，无需重置。",
@@ -357,7 +357,7 @@
     "input_retry_exhausted": "输入连续无效已达重试上限, 已中止本次操作。请确认输入格式后重新运行。"
   },
   "backup": {
-    "usage": "用法: backup.sh --export [输出文件] [--with-docker] | --import <归档文件> [--yes]",
+    "usage": "用法: backup.sh --export [输出文件] | --import <归档文件> [--yes]",
     "err.missing_tool": "缺少必需的依赖命令: ",
     "err.no_script_config": "未找到脚本配置，请先完成安装: ",
     "err.mktemp": "无法创建暂存目录，请检查磁盘空间与权限",
@@ -752,29 +752,6 @@
     "download": {
       "no_sha256": "未提供 SHA256 摘要, 已跳过摘要体检 —— 该下载物将被直接信任, 且后续可能被执行",
       "via_proxy": "当前配置了 GH_PROXY, 下载将经由第三方反代; 未锁定摘要时, 代理方具备替换下载内容的能力"
-    }
-  },
-  "docker": {
-    "install": {
-      "start": "正在安装 Docker",
-      "centos8_fix": "检测到 CentOS 8，正在修复安装脚本兼容性问题",
-      "dry_run": "执行安装前检查（dry-run）",
-      "running": "正在运行 Docker 安装脚本",
-      "fail_download": "Docker 安装脚本下载或校验失败，请检查网络后重试。"
-    },
-    "warp": {
-      "build": {
-        "start": "正在构建 WARP 镜像",
-        "fail": "WARP 镜像构建失败"
-      },
-      "enable": {
-        "start": "正在开启 WARP 容器",
-        "success": "WARP 容器已启用 (IP: ${container_ip})"
-      },
-      "disable": {
-        "stop": "正在停止 WARP 容器",
-        "success": "WARP 容器已停止"
-      }
     }
   },
   "ssl": {

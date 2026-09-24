@@ -67,7 +67,7 @@ Xray 版本可选最新版、稳定版或自选版。
 
 ### 备份与迁移
 
-导出 / 导入归档，含 Xray 配置、Nginx 站点与证书、脚本配置，可选带上容器数据；导入前自动生成回退点，失败自动回退。
+导出 / 导入归档，含 Xray 配置、Nginx 站点与证书、脚本配置；导入前自动生成回退点，失败自动回退。
 
 ### 界面语言
 
@@ -75,7 +75,7 @@ Xray 版本可选最新版、稳定版或自选版。
 
 ### 附带组件
 
-- Cloudflare WARP Proxy：Docker 部署，启用时自动安装 Docker，支持重置
+- Cloudflare WARP Proxy：Xray 原生 WireGuard 出站，无需额外依赖，支持重置
 
 ## 安装与启动
 
@@ -139,7 +139,7 @@ bash ~/xray-script-personal-use-only.sh <参数>
 | `--bbr` | 启用 / 修复 BBR，幂等可重复执行 |
 | `--net-tune` | 内核网络高并发调优 |
 | `--nofile-limit` | 提升进程文件句柄上限 |
-| `--export-config [--with-docker] [--yes]` | 导出配置与证书归档 |
+| `--export-config [--yes]` | 导出配置与证书归档 |
 | `--import-config <归档> [--yes]` | 从归档还原 |
 | `--subscription` | 生成 base64 / Clash / sing-box 三种订阅 |
 | `--start` / `--stop` / `--restart` | 启动 / 停止 / 重启 Xray 服务（幂等，带 active 复查） |
@@ -157,8 +157,8 @@ bash ~/xray-script-personal-use-only.sh --health
 # 强制刷新脚本到最新提交
 bash ~/xray-script-personal-use-only.sh --force-update
 
-# 导出配置归档（含 docker、非交互确认）
-bash ~/xray-script-personal-use-only.sh --export-config --with-docker --yes
+# 导出配置归档（非交互确认）
+bash ~/xray-script-personal-use-only.sh --export-config --yes
 ```
 
 > **注意**：改端口（`change-port`）、切换 CA（`ca-server`）等仍为**交互菜单项**，公开入口暂未提供非交互参数；如需 `bash ... --change-port` 形式的调用可继续补转发。其它高频运维动作（体检 / 启停 / 分享 / 订阅 / 导出导入）均已支持非交互。
@@ -239,7 +239,7 @@ bash ~/xray-script-personal-use-only.sh --export-config --with-docker --yes
 | --- | --- |
 | xray-script-personal-use-only | `/usr/local/xray-script-personal-use-only` |
 | Nginx | `/usr/local/nginx` |
-| Cloudflare WARP | `~/.xray-script-personal-use-only/docker/warp` |
+| Cloudflare WARP | `~/.xray-script-personal-use-only/warp.json`（WireGuard 凭据）|
 | 脚本状态 | `~/.xray-script-personal-use-only/{config.json, commit}` |
 
 *此脚本仅供交流学习使用，请勿使用此脚本行违法之事。网络非法外之地，行非法之事，必将接受法律制裁。*

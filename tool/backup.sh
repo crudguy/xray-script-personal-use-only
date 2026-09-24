@@ -7,7 +7,7 @@
 # =============================================================================
 # 脚本名称: backup.sh
 # 功能描述: 配置导出与导入 —— 备份 / 迁移 / 灾备。
-#           --export [输出文件] [--with-docker]  把配置与证书打包为单个 tar.gz
+#           --export [输出文件]                把配置与证书打包为单个 tar.gz
 #           --import <归档文件> [--yes]          从归档还原 (写前自动备份当前状态)
 # 作者: crudguy
 # 时间: 2026-09-19
@@ -19,7 +19,6 @@
 #   - /usr/local/etc/xray/config.json:  Xray 最终配置
 #   - /usr/local/nginx/conf/:           Nginx 配置树 (含 certs/, 站点与证书)
 #   - ${HOME}/.acme.sh/:                acme.sh 状态 (仅在使用中的域名)
-#   - ${SCRIPT_CONFIG_DIR}/docker/:     WARP 数据 (需 --with-docker)
 #
 # 三条设计红线:
 #   1. 恢复目标一律由本脚本的固定成员表 (_member_spec) 推导, **绝不采信归档内
@@ -58,7 +57,6 @@ readonly XRAY_CONFIG_PATH="/usr/local/etc/xray/config.json" # Xray 最终配置�
 readonly NGINX_CONFIG_DIR="/usr/local/nginx/conf"           # Nginx 配置目录
 readonly NGINX_BIN="/usr/local/nginx/sbin/nginx"            # 本项目编译的 Nginx
 readonly ACME_HOME="${HOME}/.acme.sh"                       # acme.sh 状态目录
-readonly DOCKER_DATA_DIR="${SCRIPT_CONFIG_DIR}/docker"      # WARP 数据
 readonly BACKUP_DIR="${SCRIPT_CONFIG_DIR}/backup"           # 默认备份输出目录
 
 # --- 归档格式常量 ---
@@ -81,7 +79,6 @@ readonly -a MEMBER_IDS=(
     nginx_web
     nginx_certs
     acme
-    docker
 )
 
 # --- 暂存目录登记表 ---
@@ -171,7 +168,6 @@ function _member_spec() {
     nginx_web) printf 'dir|%s' "${NGINX_CONFIG_DIR}/web" ;;
     nginx_certs) printf 'dir|%s' "${NGINX_CONFIG_DIR}/certs" ;;
     acme) printf 'acme|%s' "${ACME_HOME}" ;;
-    docker) printf 'dir|%s' "${DOCKER_DATA_DIR}" ;;
     *) return 1 ;;
     esac
 }
@@ -330,12 +326,10 @@ function _copy_member() {
 #           4. 归档收紧为 0600 并回显路径、大小、摘要。
 # 参数:
 #   $1: 输出文件路径 (空则用 ${BACKUP_DIR}/xray-script-personal-use-only-backup-<时间戳>.tar.gz)
-#   $2: 1=含 docker 数据, 0=不含 (默认)
 # 返回值: 无 (失败即 _fail)
 # =============================================================================
 function _do_export() {
     local out_path="${1:-}"
-    local with_docker="${2:-0}"
     local stage=''
     local members_ndjson=''
     local id=''
@@ -351,7 +345,6 @@ function _do_export() {
     local host=''
     local tag=''
     local ver=''
-    local wd_bool='false'
     local sha=''
     local size=''
 
@@ -370,10 +363,6 @@ function _do_export() {
     : >"${members_ndjson}"
 
     for id in "${MEMBER_IDS[@]}"; do
-        # docker 数据可能很大 (WARP 数据), 默认不带, 需显式 --with-docker
-        if [[ "${id}" == 'docker' && "${with_docker}" != '1' ]]; then
-            continue
-        fi
         spec="$(_member_spec "${id}")" || continue
         kind="${spec%%|*}"
         src="${spec#*|}"
@@ -399,11 +388,6 @@ function _do_export() {
     mkdir -p "$(dirname -- "${out_path}")" 2>/dev/null || _fail "$(_i18n '.backup.err.outdir')$(dirname -- "${out_path}")"
     out_path="$(cd -P -- "$(dirname -- "${out_path}")" && pwd -P)/$(basename -- "${out_path}")" || _fail "$(_i18n '.backup.err.outdir')${out_path}"
 
-    # 注: 显式 if 而非 `(( )) && xxx` —— 后者在表达式为假时整条 AND 列表返回非 0,
-    #     一旦它落在函数末尾或别处被误判就会触发 set -e, 不值得为省两行冒险。
-    if ((with_docker == 1)); then
-        wd_bool='true'
-    fi
     created="$(date '+%Y-%m-%dT%H:%M:%S%z')"
     host="$(hostname 2>/dev/null || echo unknown)"
     tag="$(jq -r '.xray.tag // ""' "${SCRIPT_CONFIG_PATH}" 2>/dev/null || true)"
@@ -417,10 +401,9 @@ function _do_export() {
         --arg created "${created}" \
         --arg host "${host}" \
         --arg tag "${tag}" \
-        --argjson wd "${wd_bool}" \
         --slurpfile m "${members_ndjson}" \
         '{magic:$magic, schema:$schema, generator_version:$gen, created:$created,
-          host:$host, tag:$tag, with_docker:$wd, members:$m}')" || _fail "$(_i18n '.backup.err.manifest')"
+          host:$host, tag:$tag, members:$m}')" || _fail "$(_i18n '.backup.err.manifest')"
     printf '%s\n' "${manifest}" >"${stage}/${MANIFEST_NAME}" || _fail "$(_i18n '.backup.err.manifest')"
 
     # 显式列出成员名打包: 不使用通配, 保证归档顶层结构固定且可被导入侧预检
@@ -687,7 +670,6 @@ function _do_import() {
     local host=''
     local tag=''
     local contents=''
-    local wd=0
     local restored=0
     local answer=''
 
@@ -716,7 +698,6 @@ function _do_import() {
     host="$(jq -r '.host // "?"' "${stage}/${MANIFEST_NAME}" 2>/dev/null || true)"
     tag="$(jq -r '.tag // "?"' "${stage}/${MANIFEST_NAME}" 2>/dev/null || true)"
     contents="$(jq -r '[.members[]?.id] | join(", ")' "${stage}/${MANIFEST_NAME}" 2>/dev/null || true)"
-    wd="$(jq -r 'if .with_docker then 1 else 0 end' "${stage}/${MANIFEST_NAME}" 2>/dev/null || echo 0)"
 
     echo >&2
     echo -e "  $(_i18n '.backup.label.archive')  : ${archive}" >&2
@@ -748,7 +729,7 @@ function _do_import() {
     [[ -f "${SCRIPT_CONFIG_PATH}" ]] || _fail "$(_i18n '.backup.err.pre_backup_failed')"
     pre_archive="${BACKUP_DIR}/pre-import-$(date '+%Y%m%d-%H%M%S').tar.gz"
     _info "$(_i18n '.backup.import.pre_backup')"
-    _do_export "${pre_archive}" "${wd}" || _fail "$(_i18n '.backup.err.pre_backup_failed')"
+    _do_export "${pre_archive}" || _fail "$(_i18n '.backup.err.pre_backup_failed')"
     rollback_stage="$(_make_stage 'rollback')" || _fail "$(_i18n '.backup.err.mktemp')"
     _CLEANUP_DIRS+=("${rollback_stage}") # 见 _do_export 中的说明 (命令替换不传回数组改动)
     tar -xzf "${pre_archive}" -C "${rollback_stage}" "${MANIFEST_NAME}" "${PAYLOAD_DIR}" \
@@ -792,7 +773,7 @@ function _do_import() {
 # 功能描述: 解析参数并分派到导出 / 导入。支持 --help。
 # 参数:
 #   $1: 动作 (--export | --import | --help)
-#   $@: 其余参数 (位置参数为输出/输入文件; --with-docker / --yes 为开关)
+#   $@: 其余参数 (位置参数为输出/输入文件; --yes 为开关)
 # 返回值: 无 (由被调函数决定; 失败经 _fail 退出)
 # =============================================================================
 function main() {
@@ -803,11 +784,9 @@ function main() {
 
     local arg=''
     local a=''
-    local with_docker=0
     local assume_yes=0
     for a in "$@"; do
         case "${a}" in
-        --with-docker) with_docker=1 ;;
         --yes | -y) assume_yes=1 ;;
         -h | --help) action='--help' ;;
         -*) _fail "$(_i18n '.backup.err.unknown_option')${a}" ;;
@@ -816,7 +795,7 @@ function main() {
     done
 
     case "${action}" in
-    --export) _do_export "${arg}" "${with_docker}" ;;
+    --export) _do_export "${arg}" ;;
     --import) _do_import "${arg}" "${assume_yes}" ;;
     --help | '') _usage ;;
     *) _fail "$(_i18n '.backup.err.unknown_option')${action}" ;;

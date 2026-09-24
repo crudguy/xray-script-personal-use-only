@@ -710,7 +710,7 @@ function processes_uninstall() {
     choose="$(exec_menu '--uninstall')"
     # 根据用户选择执行不同的卸载操作
     case ${choose} in
-    1) exec_handler '--purge' ;;       # 选择 1：卸载 Xray (保留 Nginx/acme.sh/证书/Docker)
+    1) exec_handler '--purge' ;;       # 选择 1：卸载 Xray (保留 Nginx/acme.sh/证书)
     2) exec_handler '--nginx-purge' ;; # 选择 2：卸载 Nginx (仅本项目编译版, 发行版拒绝)
     *) return 0 ;;                       # 其他情况：返回主菜单
     esac
@@ -750,7 +750,7 @@ function main() {
     # 如果参数是 --fallback，则执行快速安装 Fallback
     --fallback) exec_handler '--quick' 'Fallback' ;;
     # 配置备份 / 迁移: 直达 handler, 便于脚本化与 cron 无交互调用
-    # 注: shift 之后用 "$@" 透传剩余参数 —— 写死 "${2:-}" 会吞掉 --with-docker / --yes
+    # 注: shift 之后用 "$@" 透传剩余参数 —— 写死 "${2:-}" 会吞掉 --yes 等开关
     --export-config) shift; exec_handler '--export-config' "$@" ;;
     --import-config) shift; exec_handler '--import-config' "$@" ;;
     # BBR 与内核网络: 直达 handler, 便于脚本化与 cron 无交互调用

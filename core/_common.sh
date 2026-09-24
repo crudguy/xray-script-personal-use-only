@@ -66,7 +66,7 @@ if [[ "${XRAY_SCRIPT_DEBUG:-0}" == '1' ]]; then set -x; fi
 #     写入, 脚本调用的 curl/jq/tar 就可能被同名恶意程序抢先命中。
 #     该白名单是 sudo 默认 secure_path 的超集, 已覆盖脚本实际依赖的全部命令:
 #     jq curl wget systemctl sed awk grep cut tr sort uniq tar unzip gzip openssl
-#     gpg crontab flock mktemp nginx xray docker ss lsof 等 (均在 /bin /sbin /usr/bin
+#     gpg crontab flock mktemp nginx xray ss lsof 等 (均在 /bin /sbin /usr/bin
 #     /usr/sbin /usr/local/bin /usr/local/sbin /snap/bin 之内)。
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/snap/bin
 export PATH

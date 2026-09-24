@@ -8,7 +8,7 @@
 # 脚本名称: handler.sh
 # 功能描述: xray-script-personal-use-only 项目的处理器脚本。
 #           负责执行具体的操作，如安装/卸载 Xray/Nginx、配置文件生成、
-#           启动/停止服务、管理 Docker 容器、处理路由规则等。
+#           启动/停止服务、处理路由规则等。
 #           由 main.sh 调用，根据传入参数执行相应功能。
 # 作者: crudguy
 # 时间: 2026-09-19
@@ -58,7 +58,6 @@ readonly READ_PATH="${CUR_DIR}/read.sh"         # 用户输入读取脚本
 #       一律用 NGINX_PREFIX_DIR (与 core/_common.sh 的 _nginx_binary 同源)。
 readonly NGINX_PATH="${SERVICE_DIR}/nginx.sh"   # Nginx 服务管理脚本 (非安装目录!)
 readonly SSL_PATH="${SERVICE_DIR}/ssl.sh"       # SSL 证书管理脚本
-readonly DOCKER_PATH="${SERVICE_DIR}/docker.sh" # Docker 容器管理脚本
 readonly TRAFFIC_PATH="${TOOL_DIR}/traffic.sh"  # 流量统计脚本
 readonly GEODATA_PATH="${TOOL_DIR}/geodata.sh"  # GeoData 更新脚本
 readonly BACKUP_PATH="${TOOL_DIR}/backup.sh"    # 配置导出/导入脚本
@@ -159,21 +158,6 @@ function _audit_log() {
 function exec_generate() {
     # 执行 generate.sh 脚本，并传递所有参数
     bash "${GENERATE_PATH}" "$@"
-}
-
-# =============================================================================
-# 函数名称: exec_docker
-# 功能描述: 执行 docker.sh 脚本，用于管理 Docker 相关操作。
-#           如果执行失败，则退出当前脚本。
-# 参数:
-#   $@: 传递给 docker.sh 脚本的参数
-# 返回值: 无 (docker.sh 的退出码即为当前函数的退出码)
-# 退出码: 如果 docker.sh 执行失败 (返回非 0)，则当前脚本也退出 (|| exit 1)
-# =============================================================================
-function exec_docker() {
-    # 执行 docker.sh 脚本，并传递所有参数
-    # 如果 docker.sh 返回非 0 状态码，则当前脚本也退出
-    bash "${DOCKER_PATH}" "$@" || exit 1
 }
 
 # =============================================================================
@@ -3463,7 +3447,7 @@ function _purge_crontab_entries() {
 #           3. 回滚本项目写入 Nginx 的站点/SNI 配置 (Nginx 本体保留)。
 #           4. 执行上游卸载, 并重置 config.json 的 xray 字段。
 #
-#           保留 Nginx、acme.sh (含已签发证书)、Docker 容器与用户自建站点配置。
+#           保留 Nginx、acme.sh (含已签发证书) 与用户自建站点配置。
 # 参数: 无
 # 返回值: 无 (通过调用外部脚本执行卸载)
 # =============================================================================
@@ -3625,7 +3609,7 @@ function handler_traffic() {
 #           转发给 tool/backup.sh, 参数原样透传 (它自己解析位置参数与开关)。
 # 参数:
 #   $1 (可选): 输出文件路径; 省略则落在 ${SCRIPT_CONFIG_DIR}/backup/ 下按时间戳命名
-#   $@ (可选): --with-docker 等开关
+#   $@ (可选): --yes 等开关
 # 返回值: 无 (失败时 _error 终止)
 # =============================================================================
 function handler_export_config() {
@@ -3698,22 +3682,6 @@ function handler_geodata_cron() {
         # Xray 未安装时必须给出反馈: 原实现在这里静默返回, 用户在菜单里选了本项却
         # 得不到任何输出 —— 既可能误以为"已经设好了", 也可能以为脚本卡死。
         echo -e "${YELLOW}[$(_i18n '.title.warn')]${NC} $(_i18n ".${CUR_FILE}.geodata.not_installed")" >&2
-    fi
-}
-
-# =============================================================================
-# 函数名称: handler_docker
-# 功能描述: 确保 Docker 已安装。
-#           1. 检查系统中是否存在 docker 命令。
-#           2. 如果不存在，则调用 exec_docker 安装 Docker。
-# 参数: 无
-# 返回值: 无 (通过调用其他函数执行操作)
-# =============================================================================
-function handler_docker() {
-    # 检查 docker 命令是否存在
-    if ! cmd_exists 'docker'; then
-        # 如果不存在，则调用 docker.sh 安装 Docker
-        exec_docker '--install'
     fi
 }
 

@@ -57,7 +57,7 @@
       "title": "Uninstall",
       "option1": "Uninstall Xray",
       "option2": "Uninstall Nginx",
-      "info1": "Remove Xray core and project traces (Nginx/acme.sh/certs/Docker kept)",
+      "info1": "Remove Xray core and project traces (Nginx/acme.sh/certs kept)",
       "info2": "Remove only the project-built Nginx (refuses distro builds to protect other sites)",
       "option0": "Exit"
     },
@@ -138,10 +138,10 @@
       "option5": "Add WARP IP route",
       "option6": "Add WARP domain route",
       "option0": "Back to management",
-      "info1": "WARP Proxy is deployed via Docker, Docker will be auto-installed.",
-      "info2": "WARP Proxy details: https://github.com/haoel/haoel.github.io?tab=readme-ov-file#1043-docker-proxy",
-      "info3": "Re-applying WARP account frequently may get IP banned by Cloudflare.",
-      "info4": "Clear WARP container log files and reset the container.",
+      "info1": "WARP Proxy uses Xray's native WireGuard outbound; the first enable registers one device with Cloudflare.",
+      "info2": "Credentials are stored locally and reused on every later toggle, so no further registration is needed.",
+      "info3": "Resetting WARP Proxy discards the local credentials and registers a new device; frequent resets may get the IP banned by Cloudflare.",
+      "info4": "Discard local WARP credentials and register a new device (takes effect after Xray restart).",
       "info5": "Add IP-based block route to ruleTag block-ip.",
       "info6": "Add domain-based block route to ruleTag block-domain.",
       "info7": "(WARP must be enabled) Add WARP IP route to ruleTag warp-ip.",
@@ -219,7 +219,7 @@
       "kcp_mask_heal_failed": "mKCP obfuscation self-heal failed; reverted to the original config. Please update Xray manually, then re-run the update-config flow."
     },
     "purge": {
-      "scope_notice": "This operation removes Xray (including its configuration and logs), and cleans up the cron jobs and Nginx site configuration written by this project. Nginx, acme.sh (including issued certificates) and Docker containers are left untouched.",
+      "scope_notice": "This operation removes Xray (including its configuration and logs), and cleans up the cron jobs and Nginx site configuration written by this project. Nginx and acme.sh (including issued certificates) are left untouched.",
       "fail": "Xray removal did not complete (it may not be installed); the subsequent cleanup was skipped.",
       "cron_removed": "Removed the cron jobs written by this project.",
       "cron_empty": "No cron jobs written by this project were found; nothing to clean.",
@@ -251,7 +251,7 @@
       "no_curl": "curl is missing, cannot register a WARP account.",
       "register_failed": "WARP registration failed (HTTP {code}). Some hosting IP ranges are rejected outright by the Cloudflare endpoint; retry later.",
       "register_parse_failed": "The WARP registration response lacks required fields (interface address or peer public key); this enable attempt was aborted and the config is unchanged.",
-      "enabled": "WARP enabled (native WireGuard outbound, Docker no longer required).",
+      "enabled": "WARP enabled (native WireGuard outbound).",
       "disabled": "WARP disabled; the routing rules that pointed at WARP were removed as well.",
       "reset_done": "WARP exit reset (device re-registered). Restart Xray to take effect.",
       "reset_need_enable": "WARP is not enabled, nothing to reset.",
@@ -357,7 +357,7 @@
     "input_retry_exhausted": "Too many consecutive invalid inputs; operation aborted. Please check the expected format and run again."
   },
   "backup": {
-    "usage": "Usage: backup.sh --export [output file] [--with-docker] | --import <archive> [--yes]",
+    "usage": "Usage: backup.sh --export [output file] | --import <archive> [--yes]",
     "err.missing_tool": "Missing required command: ",
     "err.no_script_config": "Script config not found; install first: ",
     "err.mktemp": "Cannot create a staging directory; check disk space and permissions",
@@ -752,29 +752,6 @@
     "download": {
       "no_sha256": "No SHA256 digest provided — digest verification skipped; the payload is trusted as-is and may be executed afterwards",
       "via_proxy": "GH_PROXY is set, so the download goes through a third-party reverse proxy; without a pinned digest the proxy can substitute the payload"
-    }
-  },
-  "docker": {
-    "install": {
-      "start": "Installing Docker",
-      "centos8_fix": "Detected CentOS 8, fixing installation script compatibility",
-      "dry_run": "Performing pre-installation check (dry-run)",
-      "running": "Running Docker installation script",
-      "fail_download": "Failed to download or verify the Docker installation script, please check your network and retry."
-    },
-    "warp": {
-      "build": {
-        "start": "Building WARP image",
-        "fail": "Failed to build WARP image"
-      },
-      "enable": {
-        "start": "Enabling WARP container",
-        "success": "WARP container enabled (IP: ${container_ip})"
-      },
-      "disable": {
-        "stop": "Stopping WARP container",
-        "success": "WARP container stopped"
-      }
     }
   },
   "ssl": {

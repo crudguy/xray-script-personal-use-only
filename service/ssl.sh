@@ -122,8 +122,8 @@ function set_default_ca() {
 # acme.sh 安装链路的供应链锁定。
 #
 # 背景 (为什么必须有这两个默认值): 本项目为所有第三方安装脚本设计了
-# `_download_verified` 三重体检 (体积 / SHA256 摘要 / bash 语法), Xray (handler.sh:83)
-# 与 Docker (docker.sh:54) 两处都已内置摘要; 但本文件原先引用了一个**从未被定义**
+# `_download_verified` 三重体检 (体积 / SHA256 摘要 / bash 语法), Xray 安装脚本
+# (core/handler.sh 的 XRAY_INSTALL_SHA256) 已内置摘要; 但本文件原先引用了一个**从未被定义**
 # 的 ACME_SH_INSTALL_SHA256, `${VAR:-}` 恒为空 => 摘要体检被静默跳过, 只剩"体积≥512B
 # 与 bash -n"两道弱校验, 而下载物随后以 root 身份执行。这里补上真实摘要以堵住该缺口。
 #

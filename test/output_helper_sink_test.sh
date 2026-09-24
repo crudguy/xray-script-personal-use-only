@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
 # 测试名称: output_helper_sink_test.sh
-# 测试目标: 输出助手 (print_* 与短名 _error/_warn/_info/_pass/_fail) 的
-#           「单一真源 + 刻意差异」契约, 以及由下沉顺带修复的 share.sh 崩溃回归。
+# 测试目标: 输出助手 (print_* 与短名 _error/_warn/_info/_pass, 及 check.sh 的 _check_*) 的
+#           「单一真源 + 刻意差异 + 无同名遮蔽」契约, 以及由下沉顺带修复的 share.sh 崩溃回归。
 #
 # 为什么需要本测试 (审计结论):
 #   1) 短名助手曾有三套同源副本: main.sh / handler.sh 各一份 _error (逐字相同),
@@ -16,6 +16,9 @@
 #          [错误] 脚本在第 N 行意外失败 (退出码 127): _error "..."
 #      恰恰就是该分支注释里说要避免的"看不懂的报错"。
 #   修法 = 把短名统一下沉到 core/_common.sh (print_* 的别名), 各脚本删副本。
+#   后续: check.sh 的三个本地助手 (_info/_pass/_fail) 虽为刻意实现, 却与 _common.sh 的
+#      同名别名重名 —— 构成"同名不同行为"的遮蔽陷阱 (且 check.sh 的 _fail 还与 backup.sh
+#      的同名函数语义相反)。本次加 _check_ 前缀消歧义, 行为与视觉零变化。
 #
 # 锁定不变量:
 #   T1 单一真源   —— main.sh / handler.sh / backup.sh 不得再有短名副本; _common.sh 提供四个别名
@@ -23,8 +26,9 @@
 #                    (同输入下 stdout、stderr、退出码三项全等)
 #   T3 share 回归 —— 仅抽 _common.sh 的实现 + share.sh 的 cache_json_data, 未安装分支
 #                    必须 rc=1 并打出错误行, 且**不得**出现"未找到命令"/"command not found"/127
-#   T4 刻意差异   —— check._info 用黄且只取首参; check._fail 不退出; backup._fail exit 1
+#   T4 刻意差异   —— check 的 _check_info 用黄且只取首参; _check_fail 不退出; backup._fail exit 1
 #   T5 负向校验   —— 把别名改成指向不存在的函数, T3 的判据必须变红 (证明断言非恒绿)
+#   T6 消歧义     —— check.sh 用 _check_ 前缀后不得再有裸 _info/_pass/_fail; _test 保持原名
 #
 # 实现: 用 awk/grep 抽**真实函数体** (不另写实现, 避免漂移), 桩件走 heredoc。
 #   别名型函数 (`function _error() { print_error "$@"; }`) 是单行, 抽取器需先试单行形态,
@@ -154,13 +158,13 @@ assert_eq "stdout 保持干净 (错误只走 stderr)" "" "$(cat "${SB}/so")"
 # ---------------------------------------------------------------------------
 echo "== T4: 刻意差异被保留 (非疏漏, 不得被'顺手统一') =="
 # ---------------------------------------------------------------------------
-ci="$(extract_fn core/check.sh _info)"
-assert_contains "check._info 用黄色" "$ci" 'YELLOW'
-assert_not_contains "check._info 不是绿色 (故与 handler/backup 不同)" "$ci" 'GREEN'
-assert_contains "check._info 只取首参" "$ci" '"${1:-}"'
+ci="$(extract_fn core/check.sh _check_info)"
+assert_contains "check._check_info 用黄色" "$ci" 'YELLOW'
+assert_not_contains "check._check_info 不是绿色 (故与 handler/backup 不同)" "$ci" 'GREEN'
+assert_contains "check._check_info 只取首参" "$ci" '"${1:-}"'
 
-cf="$(extract_fn core/check.sh _fail)"
-assert_not_contains "check._fail 不退出 (体检要跑完全部检查项)" "$cf" 'exit 1'
+cf="$(extract_fn core/check.sh _check_fail)"
+assert_not_contains "check._check_fail 不退出 (体检要跑完全部检查项)" "$cf" 'exit 1'
 bf="$(extract_fn tool/backup.sh _fail)"
 assert_contains "backup._fail 退出 (备份失败即终止)" "$bf" 'exit 1'
 assert_contains "common._info 走 print_info" "$(extract_fn "$COMMON" _info)" 'print_info'
@@ -194,6 +198,36 @@ else
     else
         ok
     fi
+fi
+
+# ---------------------------------------------------------------------------
+echo "== T6: check.sh 助手加 _check_ 前缀 (消同名遮蔽歧义) =="
+# ---------------------------------------------------------------------------
+# 三个 _check_* 定义须齐全; 且**不得**再有裸 _info/_pass/_fail 的定义或调用 ——
+# 有则说明漏改 (又回到遮蔽), 或像 _fail 那样"未定义即崩"。
+for fn in _check_info _check_pass _check_fail; do
+    if [[ -n "$(extract_fn core/check.sh "$fn")" ]]; then ok; else bad "core/check.sh 缺 $fn 定义"; fi
+done
+for fn in _info _pass _fail; do
+    # 注: grep -c 无匹配时退出码为 1, 在 set -e 下会直接杀掉脚本 (命令替换里的退出码
+    #     同样是赋值语句的退出码) -> 必须 `|| true` 接住, 否则本用例在"零匹配"(=期望结果)
+    #     时反而崩溃。
+    n="$(grep -cE "(^function ${fn}\(\) \{)|(^[[:space:]]*${fn} )" core/check.sh || true)"
+    assert_eq "check.sh 无裸 ${fn} 定义/调用" "0" "$n"
+done
+# _test 全仓独此一份、无重名 -> 本次刻意不扩大改动面
+assert_contains "check._test 保持原名 (无歧义, 未一并改名)" "$(extract_fn core/check.sh _test)" 'title.test'
+
+# NEG: 副本里把 _check_info 全量改回裸 _info, 上面的检测必须变红 (否则判据恒绿)
+cp core/check.sh "${SB}/check_neg.sh"
+sed -i -e 's/^function _check_info() {/function _info() {/' \
+    -e 's/^\([[:space:]]*\)_check_info /\1_info /' "${SB}/check_neg.sh"
+if [[ -z "$(extract_fn "${SB}/check_neg.sh" _check_info)" ]]; then
+    ok
+    neg_n="$(grep -cE "(^function _info\(\) \{)|(^[[:space:]]*_info )" "${SB}/check_neg.sh" || true)"
+    if [[ "${neg_n}" -ge 1 ]]; then ok; else bad "NEG: 裸 _info 未被 T6 检测命中 (判据恒绿?)"; fi
+else
+    bad "NEG: 改坏未生效 (sed 未命中 _check_info 定义), 本用例无意义"
 fi
 
 echo "---"

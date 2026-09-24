@@ -47,17 +47,17 @@ if [[ -z "$hit2" ]]; then assert_ok true '无 printf "...${title}/${msg}/${I18N_
 # T2 行为: 标题译文含 % 时原样输出
 # ---------------------------------------------------------------------------
 echo "[T2] 行为: 含 % 的标题原样输出"
-# 抽取 check.sh 里真实的 _info, 用桩件提供颜色常量与 i18n
-awk '/^function _info\(\) \{/{c=1} c{print} c&&/^\}$/{exit}' core/check.sh > "$SB/fns.sh"
+# 抽取 check.sh 里真实的 _check_info, 用桩件提供颜色常量与 i18n
+awk '/^function _check_info\(\) \{/{c=1} c{print} c&&/^\}$/{exit}' core/check.sh > "$SB/fns.sh"
 if [[ ! -s "$SB/fns.sh" ]]; then
-    echo "  [FAIL] 无法从 core/check.sh 抽取 _info"
+    echo "  [FAIL] 无法从 core/check.sh 抽取 _check_info"
     FAIL=$((FAIL+1))
 else
     cat > "$SB/drv.sh" <<'DRV'
 YELLOW=$'\033[33m'; GREEN=$'\033[32m'; RED=$'\033[31m'; NC=$'\033[0m'
 _i18n() { printf '%s' 'INFO 100% done %E4%BB%A3 %x'; }
 source "$1"
-_info 'body message'
+_check_info 'body message'
 DRV
     out="$(bash "$SB/drv.sh" "$SB/fns.sh" 2>&1 || true)"
     if [[ "$out" == *'INFO 100% done %E4%BB%A3 %x'* ]]; then

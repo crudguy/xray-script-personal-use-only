@@ -258,6 +258,11 @@ _test() { printf '[test] %s\n' "$*" >&2; }
 _pass() { printf '[pass] %s\n' "$*" >&2; }
 _info() { printf '[info] %s\n' "$*" >&2; }
 _fail() { printf '[fail] %s\n' "$*" >&2; }
+# check.sh 的报告语汇自 2026-09-24 起带 _check_ 前缀 (消除与 _common.sh 短名别名的遮蔽
+# 歧义); 本用例抽取的 check.sh 函数 (如 ensure_firewall_port_open) 调的是 _check_*, 故另桩。
+_check_pass() { printf '[pass] %s\n' "$*" >&2; }
+_check_info() { printf '[info] %s\n' "$*" >&2; }
+_check_fail() { printf '[fail] %s\n' "$*" >&2; }
 # 让被测函数定位到我们准备的 fake nginx
 _nginx_binary() { printf '%s' "${_S_FAKE_NGINX}"; }
 

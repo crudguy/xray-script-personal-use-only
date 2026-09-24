@@ -2,7 +2,7 @@
 # P2-4 子项⑤ 回归守卫: 错误提示附可执行建议 (纯 bash, 不依赖 jq / 真实环境)。
 # 锁定:
 #   (1) 3 个错误打印**实现**均支持可选第 2 参数 hint, 且 hint 走 stderr;
-#       check.sh 的 _fail 是"体检项标记"必须不退出; 其余 2 个必须 exit 1。
+#       check.sh 的 _check_fail 是"体检项标记"必须不退出; 其余 2 个必须 exit 1。
 #       注: 短名 _error 已下沉到 _common.sh, 且实现为 print_error 的**别名**
 #           (main.sh / handler.sh 不再各自内联副本)。别名体只有 `print_error "$@"`,
 #           不含 hint=... / exit 1 等字样, 套用本测试"抽函数体做静态断言"的范式会误报,
@@ -38,7 +38,7 @@ extract_fn(){ # $1=file $2=funcname
 }
 
 echo "== T1: 静态契约 — 4 个错误函数支持可选 hint =="
-for spec in "$COMMON:print_error" "$CHECK:_fail" "$BACKUP:_fail"; do
+for spec in "$COMMON:print_error" "$CHECK:_check_fail" "$BACKUP:_fail"; do
     f="${spec%%:*}"; fn="${spec##*:}"
     body="$(extract_fn "$f" "$fn")"
     if [[ -n "$body" ]]; then ok "$f:$fn 可抽取"; else bad "$f:$fn 抽取失败"; fi
@@ -46,10 +46,10 @@ for spec in "$COMMON:print_error" "$CHECK:_fail" "$BACKUP:_fail"; do
     assert_has "$f:$fn 引用 title.hint" "$body" ".title.hint"
 done
 
-echo "== T2: 终止性 — check._fail 不退出, 其余 exit 1 =="
-case "$(extract_fn "$CHECK" _fail)" in
-    *"exit 1"*) bad "check.sh _fail 不应 exit (会中断体检汇总)";;
-    *) ok "check.sh _fail 不退出 (纯打印)";;
+echo "== T2: 终止性 — check._check_fail 不退出, 其余 exit 1 =="
+case "$(extract_fn "$CHECK" _check_fail)" in
+    *"exit 1"*) bad "check.sh _check_fail 不应 exit (会中断体检汇总)";;
+    *) ok "check.sh _check_fail 不退出 (纯打印)";;
 esac
 for spec in "$COMMON:print_error" "$BACKUP:_fail"; do
     f="${spec%%:*}"; fn="${spec##*:}"
@@ -81,7 +81,7 @@ run_fn(){ # $1=file $2=fn $3=msg [ $4=hint ]
     ERR="$(cat "$TMPD/e")"
 }
 
-for spec in "$COMMON:print_error" "$CHECK:_fail" "$BACKUP:_fail"; do
+for spec in "$COMMON:print_error" "$CHECK:_check_fail" "$BACKUP:_fail"; do
     f="${spec%%:*}"; fn="${spec##*:}"
     # --- 有 hint ---
     run_fn "$f" "$fn" '出事了' '这样做可修复'
@@ -103,10 +103,10 @@ for spec in "$COMMON:print_error" "$CHECK:_fail" "$BACKUP:_fail"; do
     assert_not "$f:$fn(空hint) 不打印建议行" "$ERR" 'HINT'
 done
 
-echo "== T5: 退出码 — 终止型 rc=1; check._fail rc=0 =="
+echo "== T5: 退出码 — 终止型 rc=1; check._check_fail rc=0 =="
 run_fn "$COMMON"  print_error 'x' 'y'; assert_eq "print_error rc=1"      "1" "$RC"
 run_fn "$BACKUP"  _fail       'x' 'y'; assert_eq "backup._fail rc=1"     "1" "$RC"
-run_fn "$CHECK"   _fail       'x' 'y'; assert_eq "check._fail rc=0(不退出)" "0" "$RC"
+run_fn "$CHECK"   _check_fail 'x' 'y'; assert_eq "check._check_fail rc=0(不退出)" "0" "$RC"
 
 echo "== T6: 关键调用点已接入第 2 实参 =="
 assert_eq "check.sh 接入 5 处"   "5" "$(grep -c '_hint")' "$CHECK" 2>/dev/null || true)"

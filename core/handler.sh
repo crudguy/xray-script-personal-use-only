@@ -519,8 +519,11 @@ function get_kcp_finalmask() {
     local id='' json='' tmp_dir='' tmp_file=''
     # 探测依赖本机 xray 二进制; 未安装时无从判断, 直接交给调用方回退
     cmd_exists 'xray' || return 1
-    # 临时文件落点: 与 _download_verified 同一套回退顺序
-    tmp_dir="${TMPFILE_DIR:-${SCRIPT_CONFIG_DIR}}"
+    # 临时文件落点: 与 _download_verified 同一套回退顺序。
+    # 注: 不用 ${TMPFILE_DIR:-${SCRIPT_CONFIG_DIR}} 这种嵌套写法 —— 在 set -u 下,
+    # 当 SCRIPT_CONFIG_DIR 未定义时会触发"未绑定的变量"而中断; 改为逐层判空, 行为不变。
+    tmp_dir="${TMPFILE_DIR:-}"
+    [[ -z "${tmp_dir}" ]] && tmp_dir="${SCRIPT_CONFIG_DIR:-}"
     if [[ ! -d "${tmp_dir}" || ! -w "${tmp_dir}" ]]; then
         tmp_dir="${TMPDIR:-/tmp}"
     fi
@@ -547,6 +550,74 @@ function get_kcp_finalmask() {
     done
     rm -f "${tmp_file}"
     return 1
+}
+
+# =============================================================================
+# 函数名称: heal_mkcp_finalmask
+# 功能描述: mKCP finalmask 类型 id 自适应自愈 (Xray 26.x 版本相关)。
+#           背景: Xray 26.6 把 finalmask 的类型 id 从 mkcp-aes128gcm 改名成
+#           mkcp-legacy, 二者互不兼容 —— 写错一边, xray 会以 "unknown config id"
+#           拒绝加载整份配置。若用户升级 (或降级) Xray 后没有重新跑"更新配置",
+#           已落盘的 mKCP config 就会因 id 过期而加载失败 (见 2026-09-23 的残留风险说明)。
+#           本函数在 xray 安装/升级后、启动前跑一次: 若本机 xray 已不接受当前 config
+#           里的 finalmask 写法, 就用 get_kcp_finalmask 按新 xray 实测重选 id 并原地重写。
+# 参数: 无
+# 返回值: 恒 0 (自愈失败也不阻断安装/启动, 只告警; 交原流程的 -test 守卫兜底)
+# =============================================================================
+function heal_mkcp_finalmask() {
+    # 前置: 本机必须已装 xray (否则无从探测, 且无配置可修)
+    cmd_exists 'xray' || return 0
+    # 仅当已落盘 config 存在才处理 (全新安装尚无 config, 交给后续的 xray-config 流程)
+    local cfg="${XRAY_CONFIG_PATH:-/usr/local/etc/xray/config.json}"
+    [[ -f "${cfg}" ]] || return 0
+    # 只关心 mKCP 配置 (其它协议无 finalmask, 跳过以免无谓开销与误伤)
+    local net=''
+    net="$(jq -r '.inbounds[1].streamSettings.network // empty' "${cfg}" 2>/dev/null || true)"
+    [[ "${net}" == 'kcp' ]] || return 0
+    # 当前 config 本机 xray 能接受 -> 无需动作 (也顺便确认不是 routing/证书等其它错误)
+    if _verify_xray_config "${cfg}"; then
+        return 0
+    fi
+    # 校验失败 -> 仅当错误指向 finalmask/mkcp 时才自愈, 其它错误不动 (避免乱重写)
+    local err=''
+    # 注: xray 校验失败时退出码非 0, 此赋值在 set -e (handler.sh:32) 下会抢先退出,
+    # 故用 || true 兜住; 真正判错交给下方 grep 关键词, 而非退出码。
+    err="$(xray run -test -config "${cfg}" 2>&1)" || true
+    if ! printf '%s' "${err}" | grep -qiE 'finalmask|mkcp|unknown config id'; then
+        return 0
+    fi
+    # 取 seed: 优先从已落盘 config 反读, 否则退回脚本配置 (.xray.kcp)
+    local seed=''
+    seed="$(jq -r '
+        .inbounds[1].streamSettings.finalmask.udp[0].settings.value //
+        .inbounds[1].streamSettings.finalmask.udp[0].settings.password //
+        .inbounds[1].streamSettings.kcpSettings.seed // empty
+    ' "${cfg}" 2>/dev/null || true)"
+    [[ -z "${seed}" ]] && seed="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.kcp // empty' 2>/dev/null || true)"
+    [[ -z "${seed}" ]] && return 0
+    # 按新 xray 实测重选 id
+    local fm=''
+    if ! fm="$(get_kcp_finalmask "${seed}")"; then
+        return 0
+    fi
+    # 原地重写 finalmask 并原子落盘
+    local new_cfg=''
+    if ! new_cfg="$(jq --argjson fm "${fm}" '
+        .inbounds[1].streamSettings |= (del(.finalMask) | .finalmask = $fm)
+    ' "${cfg}" 2>/dev/null)"; then
+        return 0
+    fi
+    # 写前备份
+    cp -f "${cfg}" "${cfg}.bak" 2>/dev/null || true
+    printf '%s\n' "${new_cfg}" | _atomic_write "${cfg}" || return 0
+    # 写后复核: 仍不通过则回滚备份 (自愈失败时宁可回到原状, 交原流程 -test 守卫报错)
+    if ! _verify_xray_config "${cfg}"; then
+        cp -f "${cfg}.bak" "${cfg}" 2>/dev/null || true
+        print_warn "$(_i18n '.handler.xray.kcp_mask_heal_failed')"
+        return 0
+    fi
+    print_warn "$(_i18n '.handler.xray.kcp_mask_healed')"
+    return 0
 }
 
 # =============================================================================
@@ -2197,6 +2268,8 @@ function handler_install() {
     handler_bbr || true
     # 日志轮转: 安装 logrotate 配置 (幂等; 非 Linux / 无 logrotate 时静默跳过)
     _ensure_logrotate || true
+    # mKCP finalmask 类型 id 自适应自愈: 升级/重装 Xray 后, 已落盘 config 若因 id 改名而失效则自动重写
+    heal_mkcp_finalmask || true
 }
 
 # =============================================================================
@@ -2787,6 +2860,8 @@ function handler_stop() {
 # 返回值: 无 (通过 systemctl 命令执行操作)
 # =============================================================================
 function handler_restart() {
+    # mKCP finalmask 类型 id 自适应自愈: Xray 升级/降级后已落盘 config 可能因 id 改名而失效, 重启前先修正
+    heal_mkcp_finalmask || true
     # 重启前配置自检: 配置文件存在却无法解析时终止, 避免带着坏配置重启
     if [[ -f "${XRAY_CONFIG_PATH}" ]] && command -v jq >/dev/null 2>&1 && ! jq -e . "${XRAY_CONFIG_PATH}" >/dev/null 2>&1; then
         _error "$(_i18n '.handler.persist.invalid_json')"

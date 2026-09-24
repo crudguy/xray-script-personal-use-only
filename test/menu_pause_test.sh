@@ -17,7 +17,9 @@
 #   5. i18n: .main.pause_hint 在 zh / en 均存在且非空;
 #   6. 安装收尾 (一键安装) 同属输出型: processes_full_installation 的两处快速安装
 #      分支必须都挂暂停 (否则刚装好的分享链接会被菜单重绘顶出屏幕);
-#   7. (NEG) 把 7) 分支的暂停去掉后, 静态守卫必须报错 —— 证明守卫不是摆设。
+#   7. 配置更新收尾 (processes_xray_config 非 SNI 分支) 与 SNI 完整安装收尾
+#      (processes_web_config 完整安装分支) 同样打分享三件套, 也必须挂暂停;
+#   8. (NEG) 去掉 7) 分支 / web_config 收尾的暂停后, 静态守卫必须报错 —— 证明守卫不是摆设。
 #
 # 运行: bash test/menu_pause_test.sh
 # =============================================================================
@@ -175,10 +177,12 @@ awk '/^function processes_full_installation\(\) \{/,/^\}/' "$MAIN" > "$SB/full.f
 assert_ne "T6: 抽到 processes_full_installation 函数体" "$(cat "$SB/full.fn")" ""
 
 # 判定规则: 每处 exec_handler '--quick' 起, 到本分支结束 (;;) 之间必须出现暂停调用。
+# 注: 匹配限定为行首的真实调用行 —— 若写成裸 /_pause_after_action/, 注释里
+#     "见 _pause_after_action 的说明" 也会被算作"已挂", 令 NEG 假绿 (T7 踩到过)。
 quick_pause_report() { # $1=待检函数体文件
     awk '
         /exec_handler .--quick/ { in_blk=1; has=0; next }
-        in_blk && /_pause_after_action/ { has=1 }
+        in_blk && /^[[:space:]]*_pause_after_action/ { has=1 }
         in_blk && /;;/ { print (has ? "PAUSED" : "MISSING"); in_blk=0; seen=1 }
         END { if (!seen) print "NOQUICK" }
     ' "$1"
@@ -205,6 +209,55 @@ for f in zh en; do
     v="$(jq -r '.main.install_done_tip // ""' "i18n/${f}.json" 2>/dev/null || true)"
     assert_ne "T6c(${f}): i18n/${f}.json 的 .main.install_done_tip 非空" "${v}" ""
 done
+
+# ---------------------------------------------------------------------------
+# T7 配置更新 / SNI 安装收尾同样是"输出型"
+#   背景: processes_xray_config 的非 SNI 分支 (即「更新配置」: 改协议类型后重新安装)
+#   与 processes_web_config 的完整安装分支, 末尾都打分享链接 + 二维码
+#   (exec_handler '--share') 加订阅三件套 (share.sh --subscription), 三四十行。
+#   不暂停则紧接的菜单重绘把刚生成的分享信息顶出屏幕 —— 与 T6 是同一个坑
+#   (用户反馈: 更新配置后安装完直接跳菜单, 生成的分享信息被顶上去)。
+# ---------------------------------------------------------------------------
+awk '/^function processes_xray_config\(\) \{/,/^\}/' "$MAIN" > "$SB/xcfg.fn"
+assert_ne "T7: 抽到 processes_xray_config 函数体" "$(cat "$SB/xcfg.fn")" ""
+awk '/^function processes_web_config\(\) \{/,/^\}/' "$MAIN" > "$SB/wcfg.fn"
+assert_ne "T7b: 抽到 processes_web_config 函数体" "$(cat "$SB/wcfg.fn")" ""
+
+# 判定规则: 每处 exec_handler '--share' 起, 到本分支结束 (;;) 或函数末尾 (}) 之间,
+#   必须出现暂停调用。
+share_pause_report() { # $1=待检函数体文件
+    awk '
+        /exec_handler .--share/ { in_blk=1; has=0; next }
+        in_blk && /^[[:space:]]*_pause_after_action/ { has=1 }
+        in_blk && (/;;/ || /^}$/) { print (has ? "PAUSED" : "MISSING"); in_blk=0; seen=1 }
+        END { if (!seen) print "NOSHARE" }
+    ' "$1"
+}
+
+assert_eq "T7c: 更新配置收尾 (processes_xray_config) 挂了暂停" \
+    "$(share_pause_report "$SB/xcfg.fn")" "PAUSED"
+assert_eq "T7d: SNI 完整安装收尾 (processes_web_config) 挂了暂停" \
+    "$(share_pause_report "$SB/wcfg.fn")" "PAUSED"
+
+# T7e/T7f: 确认锚点分支确实是"会打分享信息"的那一支 —— 否则报告恒 NOSHARE
+#          也不算通过 (守卫必须锚在有输出的分支上)。
+assert_contains "T7e: 更新配置分支确实调用 --share" "$(cat "$SB/xcfg.fn")" "--share"
+assert_contains "T7f: 更新配置分支确实生成订阅三件套" "$(cat "$SB/xcfg.fn")" '--subscription'
+assert_contains "T7g: SNI 完整安装分支确实调用 --share" "$(cat "$SB/wcfg.fn")" "--share"
+
+# T7 (NEG): 删掉 web_config 那个新增暂停后, 同一判据必须报 MISSING (守卫非摆设);
+#           同时同一副本里 xray_config 的暂停不得被误伤 (仍 PAUSED)。
+awk '
+    /exec_handler .--share/ { in_blk=1 }
+    in_blk && /^[[:space:]]*_pause_after_action/ && !done { done=1; next }
+    { print }
+' "$MAIN" > "$SB/main_nopause2.sh"
+awk '/^function processes_web_config\(\) \{/,/^\}/' "$SB/main_nopause2.sh" > "$SB/wcfg_nopause.fn"
+awk '/^function processes_xray_config\(\) \{/,/^\}/' "$SB/main_nopause2.sh" > "$SB/xcfg_nopause.fn"
+assert_eq "T7h(NEG): 删掉 web_config 暂停后守卫报 MISSING" \
+    "$(share_pause_report "$SB/wcfg_nopause.fn")" "MISSING"
+assert_eq "T7i(NEG): 同一 NEG 副本里 xray_config 的暂停不受影响 (仍 PAUSED)" \
+    "$(share_pause_report "$SB/xcfg_nopause.fn")" "PAUSED"
 
 # ---------------------------------------------------------------------------
 echo "==== menu_pause_test: PASS=$PASS FAIL=$FAIL ===="

@@ -234,7 +234,6 @@ mk_cfg "$SB/neg.json" 'mkcp-legacy'
 jq '. + {__break_routing__:true}' "$SB/neg.json" > "$SB/neg.json.tmp" && mv -f "$SB/neg.json.tmp" "$SB/neg.json"
 PATH="$SB/bin:/usr/bin:/bin" STUB_ACCEPT='aes128gcm' STUB_BREAK_ROUTING='1' \
     XRAY_CONFIG_PATH="$SB/neg.json" bash "$SB/heal_neg.sh" >/dev/null 2>&1 || true
-neg_type="$(cfg_type "$SB/neg.json")"
 # NEG 信号: 破损守卫放行后, 自愈会真的进入重写路径 (重写后复核仍因 routing 错误失败而回滚,
 # 并打印 kcp_mask_heal_failed); 而 T6 原守卫下啥也不打印。故以"是否出现 heal_failed"断言守卫非虚设。
 # (config 类型因回滚仍是 mkcp-legacy, 故不能拿它做断言 —— 那是自愈"写后复核回滚"在正确工作)

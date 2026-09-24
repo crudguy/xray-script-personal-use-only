@@ -2744,7 +2744,16 @@ function handler_custom_site_add() {
 
     domain="${CONFIG_DATA['custom-domain']:-}"
     proxy_target="${CONFIG_DATA['proxy-target']:-}"
-    IFS=$'\t' read -r scheme host port <<<"$(parse_proxy_target "${proxy_target}")" || _error "failed to parse proxy target"
+    # 注: parse_proxy_target 失败时**输出为空** —— 直接 `<<<"$(...)"` 去读, read 只会读到
+    #     一个空行并返回 0, 原先跟在后面的 `|| _error` 永远进不去 (是死代码)。后果比看起来
+    #     严重: port 为空 -> jq --argjson port "" 报错 -> 变量被置空 -> 后续渲染用空目标,
+    #     最终被误报成 "failed to render custom site config", 真正的原因 (代理目标格式非法)
+    #     被完全掩盖。必须先判定 parse 本身的成败再读字段。
+    local proxy_fields=''
+    if ! proxy_fields="$(parse_proxy_target "${proxy_target}")"; then
+        _error "failed to parse proxy target"
+    fi
+    IFS=$'\t' read -r scheme host port <<<"${proxy_fields}"
 
     updated_script_config="$(echo "${SCRIPT_CONFIG}" | jq \
         --arg domain "${domain}" \
@@ -2853,7 +2862,12 @@ function _custom_site_read_inputs() {
 
     new_domain="$(read_custom_site_domain_update "${old_domain}")"
     new_proxy_target="$(read_custom_site_proxy_target_update "${old_proxy_target}")"
-    IFS=$'\t' read -r new_scheme new_host new_port <<<"$(parse_proxy_target "${new_proxy_target}")" || _error "failed to parse proxy target"
+    # 注: 同 handler_custom_site_add —— 必须先看 parse 的成败, 不能依赖 read 的返回值。
+    local new_proxy_fields=''
+    if ! new_proxy_fields="$(parse_proxy_target "${new_proxy_target}")"; then
+        _error "failed to parse proxy target"
+    fi
+    IFS=$'\t' read -r new_scheme new_host new_port <<<"${new_proxy_fields}"
 
     updated_script_config="$(echo "${SCRIPT_CONFIG}" | jq \
         --argjson idx "$((site_index - 1))" \

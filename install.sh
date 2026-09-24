@@ -834,8 +834,12 @@ function _update_xray_script() {
     [[ -n "${backup_dir}" && -d "${backup_dir}" ]] && rm -rf "${backup_dir}" || true
     # 打印更新完成信息
     echo -e "${GREEN}[${I18N_DATA['tip']}]${NC} ${I18N_DATA['completed']}"
-    # 重启脚本
-    bash "${CUR_DIR}/${CUR_FILE}"
+    # 重启脚本。
+    # 注: 新实例同样要跑交互菜单, 其退出码 (含菜单里的"安全退出") 必须原样透传 —— 不能让它
+    #     触发本层的 ERR trap 再叠一条"[错误] 脚本在第 N 行意外失败 (退出码 1)"。这是递归
+    #     重启链 (自更新后 bash 自身), 不接住的话链上每一层都会各报一次 (实测一次失败叠两条)。
+    #     与 main() 末尾交接 main.sh 的处置同款。
+    bash "${CUR_DIR}/${CUR_FILE}" || exit $?
     # 退出脚本，避免重复执行
     exit 0
 }
@@ -1072,10 +1076,17 @@ function main() {
     fi
 
     # 启动主脚本: 无交互直达参数原样转发 (含其附加参数), 否则只传快速安装选项
+    #
+    # 注: main.sh 返回非 0 属**可预期**——交互菜单里的 _error (例如 Xray 配置校验未通过、
+    #     已回滚为上一份可用配置) 会先打印可读错误再"安全退出"。此处必须显式接住该退出码,
+    #     否则这条调用本身失败会触发本脚本的 ERR trap, 在用户已经看到的可读错误之后**再叠一条**
+    #     "[错误] 脚本在第 N 行意外失败 (退出码 1)", 让一次优雅退出看起来像脚本崩溃
+    #     (实测: 手动安装 mKCP、配置校验失败时出现该噪音)。用 exit 透传退出码 —— exit 不会
+    #     触发 ERR trap, 故不再叠报。
     if [[ -n "${DIRECT_CALL}" ]]; then
-        bash "${CORE_DIR}/main.sh" "${DIRECT_ARGS[@]}"
+        bash "${CORE_DIR}/main.sh" "${DIRECT_ARGS[@]}" || exit $?
     else
-        bash "${CORE_DIR}/main.sh" "${QUICK_INSTALL}"
+        bash "${CORE_DIR}/main.sh" "${QUICK_INSTALL}" || exit $?
     fi
 }
 

@@ -385,5 +385,48 @@ fb_legacy="$(PATH='/usr/bin:/bin' XRAY_BIN_PATH="$SB/absbin6/xray" bash "$SB/fal
 assert_eq "T10e: 26.6 -> 回退 mkcp-legacy" "$fb_legacy" 'mkcp-legacy'
 
 # ---------------------------------------------------------------------------
+# T11 探测失败自曝原因: 两种写法都被拒时, 必须把本机 xray 的最后一条报错打到 stderr。
+#      不变量: 诊断**只能**走 stderr —— 调用方是 `if KCP_MASK="$(get_kcp_finalmask ...)"; then`,
+#      stdout 被命令替换捕获, 往里写会把诊断文本混进返回的 JSON 里。
+# ---------------------------------------------------------------------------
+mkdir -p "$SB/rejbin"
+cat > "$SB/rejbin/xray" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+  --version) printf 'Xray 26.9.9 (Xray, Penetrates Everything.)\n' ;;
+  run)       printf 'BOOM_PROBE_REJECTED\n' >&2; exit 23 ;;
+  *)         exit 1 ;;
+esac
+STUB
+chmod +x "$SB/rejbin/xray"
+{
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf '%s\n' 'set -Eeuo pipefail'
+    printf '%s\n' '_i18n() { printf "%s" "$1"; }'
+    printf '%s\n' 'print_warn() { printf "[WARN] %s\n" "$*" >&2; }'
+    printf '%s\n' 'cmd_exists() { command -v "$1" >/dev/null 2>&1; }'
+    printf '%s\n' "SCRIPT_NAME='xray-script-personal-use-only'"
+    printf '%s\n' "SCRIPT_CONFIG_DIR='${SB}/cfg'"
+    printf '%s\n' "TMPFILE_DIR=''"
+    printf '%s\n' "$mask_fn"
+    printf '%s\n' "$probe_fn"
+    printf '%s\n' 'rc=0'
+    printf '%s\n' "out=\"\$(get_kcp_finalmask '${SEED}' 2>'${SB}/t11.err')\" || rc=\$?"
+    printf '%s\n' 'printf "RC=%s\n" "$rc"'
+    printf '%s\n' 'printf "OUT=%s\n" "$out"'
+} > "$SB/probe_rej.sh"
+t11_out="$(PATH='/usr/bin:/bin' XRAY_BIN_PATH="$SB/rejbin/xray" bash "$SB/probe_rej.sh" 2>/dev/null || true)"
+t11_err="$(cat "$SB/t11.err" 2>/dev/null || true)"
+assert_contains "T11: 两种写法都被拒 -> 返回 1" "$t11_out" 'RC=1'
+assert_contains "T11b: 失败时把 xray 报错打到 stderr (自曝原因)" "$t11_err" 'BOOM_PROBE_REJECTED'
+assert_contains "T11c: 诊断提示走 i18n 键" "$t11_err" 'kcp_mask_probe_error'
+assert_not_contains "T11d: 诊断不得污染 stdout (调用方会捕获 stdout)" "$t11_out" 'BOOM_PROBE_REJECTED'
+assert_not_contains "T11e: stdout 上不出现任何候选 finalmask" "$t11_out" 'mkcp-aes128gcm'
+assert_contains "T11f: zh 诊断提示非空" \
+    "$(jq -r '.handler.xray.kcp_mask_probe_error // ""' i18n/zh.json)" '本机 Xray'
+assert_contains "T11g: en 诊断提示非空" \
+    "$(jq -r '.handler.xray.kcp_mask_probe_error // ""' i18n/en.json)" 'Xray'
+
+# ---------------------------------------------------------------------------
 echo "==== mkcp_finalmask_test: PASS=$PASS FAIL=$FAIL ===="
 [[ $FAIL -eq 0 ]]

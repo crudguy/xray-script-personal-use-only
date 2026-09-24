@@ -93,6 +93,13 @@ printf 'worker_processes 1;\n' >"${FAKE_NGINX_CONF_DIR}/nginx.conf"
 # load_i18n 也从它读 language。缺这一份整个用例都跑不起来。
 printf '{"version":"vTEST","language":"zh","xray":{"tag":"Vision"}}\n' >"${SB}/home/.xray-script-personal-use-only/config.json"
 
+# WARP 凭据 (原生 WireGuard 出站使用): 与 config.json 同目录。真实机器上未启用 WARP 时
+# 该文件不存在, 备份成员 warp_credentials 会走"源缺失即跳过"分支, 故 T2 对两侧都做断言。
+# 内容刻意用真实字段名 (private_key/peer_public_key/address), 与 handler.sh 的
+# _warp_ensure_credentials 复用判据一致, 便于日后核对。
+WARP_CRED_FILE="${SB}/home/.xray-script-personal-use-only/warp.json"
+printf '{"private_key":"AAA","peer_public_key":"BBB","address":["172.16.0.2/32"],"reserved":[1,2,3]}\n' >"${WARP_CRED_FILE}"
+
 # 把 backup.sh 拷进沙箱并把两个硬编码目标路径改写到沙箱内。
 # 用锚点断言: 锚点没命中就 ABORT, 避免上游改了写法而测试静默"测了个假的"。
 patch_backup() {
@@ -186,6 +193,21 @@ bk_run --export "${SB}/out/b3.tar.gz" >/dev/null 2>&1 || true
 has_b="$(tar -xzOf "${SB}/out/b3.tar.gz" manifest.json 2>/dev/null | jq -r '[.members[]?.id] | any(. == "xray_config")')"
 [[ "${has_b}" == 'false' ]] && ok "T2 源缺失时成员被跳过" || bad "T2 源缺失却仍收录 (got '${has_b}')"
 printf '{"log":{"loglevel":"warning"},"inbounds":[]}\n' >"${FAKE_XRAY_CONF}" # 复原
+
+# WARP 凭据: 收录 / 载荷逐字节一致 / 缺失时跳过 (回归: 曾漏收, 迁移后"重置出口"退化为重新注册)
+WARP_SRC_SHA="$(sha256sum "${WARP_CRED_FILE}" | cut -d' ' -f1)"
+has_w="$(tar -xzOf "${ARCH}" manifest.json 2>/dev/null | jq -r '[.members[]?.id] | any(. == "warp_credentials")')"
+[[ "${has_w}" == 'true' ]] && ok "T2 WARP 凭据被收录" || bad "T2 WARP 凭据未收录 (got '${has_w}')"
+# 注: tar 取不出成员时 rc≠0, 这里必须 `|| true` 接住 —— 本用例是 set -Eeuo pipefail,
+# 否则"载荷缺失"这种**正是要断言的情况**会让脚本就地终止, 后面的断言全部看不到。
+w_pack_sha="$( { tar -xzOf "${ARCH}" payload/warp_credentials/warp.json 2>/dev/null || true; } | sha256sum | cut -d' ' -f1)"
+[[ "${w_pack_sha}" == "${WARP_SRC_SHA}" ]] \
+    && ok "T2 WARP 凭据载荷逐字节一致" || bad "T2 WARP 凭据载荷缺失/不一致 (got '${w_pack_sha}')"
+
+rm -f "${WARP_CRED_FILE}"
+bk_run --export "${SB}/out/b4.tar.gz" >/dev/null 2>&1 || true
+has_w2="$(tar -xzOf "${SB}/out/b4.tar.gz" manifest.json 2>/dev/null | jq -r '[.members[]?.id] | any(. == "warp_credentials")')"
+[[ "${has_w2}" == 'false' ]] && ok "T2 WARP 凭据缺失时被跳过" || bad "T2 WARP 凭据缺失却仍收录 (got '${has_w2}')"
 
 # ---------------------------------------------------------------------------
 # 4. T3: 归档安全预检 —— 三类恶意归档必须被拒
@@ -307,6 +329,8 @@ done
 # 先把目标改成一个"可辨识"的内容, 再导入 ARCH —— 若还原生效, 内容必须变回去。
 printf '{"log":{"loglevel":"error"},"inbounds":[{"port":1}]}\n' >"${FAKE_XRAY_CONF}"
 BEFORE_HASH="$(sha256sum "${FAKE_XRAY_CONF}" | cut -d' ' -f1)"
+# WARP 凭据此刻已缺失 (T2 段末删的), 正好等价于"迁移到新机器"的真实场景: 导入后应被还原。
+rm -f "${WARP_CRED_FILE}"
 
 rc=0
 bk_run --import "${ARCH}" --yes >"${SB}/import.log" 2>&1 || rc=$?
@@ -335,6 +359,13 @@ if [[ -n "${want_hash}" && "${AFTER_HASH}" == "${want_hash}" ]]; then
     ok "T4 还原内容与归档载荷逐字节一致"
 else
     bad "T4 还原内容与归档载荷不一致"
+fi
+
+# WARP 凭据回迁闭环: 导入前不存在, 导入后必须凭空出现且与导出时的内容逐字节一致
+if [[ -f "${WARP_CRED_FILE}" ]] && [[ "$(sha256sum "${WARP_CRED_FILE}" | cut -d' ' -f1)" == "${WARP_SRC_SHA}" ]]; then
+    ok "T4 WARP 凭据被还原且内容一致"
+else
+    bad "T4 WARP 凭据未还原/内容不一致"
 fi
 
 if ls "${SB}/home/.xray-script-personal-use-only/backup"/pre-import-*.tar.gz >/dev/null 2>&1; then

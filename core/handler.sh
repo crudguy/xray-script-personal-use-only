@@ -126,11 +126,64 @@ function _audit_log() {
     if [[ ! -e "${AUDIT_LOG_PATH}" ]]; then
         { : >"${AUDIT_LOG_PATH}"; } 2>/dev/null && chmod 600 "${AUDIT_LOG_PATH}" 2>/dev/null || true
     fi
-    printf '%s\n' "${record}" >>"${AUDIT_LOG_PATH}" 2>/dev/null || true
+    # 注: 这里必须用 `{ ...; } 2>/dev/null` 包一层, 不能写 `printf ... >>"$X" 2>/dev/null` ——
+    #     bash 打开重定向失败时报错走的是**当时的** stderr, 直接写在命令上的 `2>/dev/null`
+    #     罩不住它 (实测: 组形式能吞, 直接形式会把 "没有那个文件或目录" 喷到终端)。
+    #     审计是旁路, 配置目录不可写时不能往用户屏幕上插一行报错 (会插在分享链接/二维码中间)。
+    { printf '%s\n' "${record}" >>"${AUDIT_LOG_PATH}"; } 2>/dev/null || true
     # 同步 syslog (系统无 logger 命令时静默跳过)
     if command -v logger >/dev/null 2>&1; then
         logger -t xray-script-personal-use-only "${record}" 2>/dev/null || true
     fi
+    return 0
+}
+
+# =============================================================================
+# 函数名称: _audit_dispatch
+# 功能描述: dispatch 层审计留痕收口 —— 为 handler 各臂没有自行记录的写操作补一条记录。
+#
+# 为什么需要它:
+#   各臂里散落的 `_audit_log` 只覆盖了 49 个臂里的一部分 (安装 / 卸载 / 启停 / 证书 /
+#   备份 / BBR 调优), 而**改配置类**恰恰是零留痕 —— routing(分流规则)、xray-config、
+#   change-domain、change-port、warp / reset-warp、sniff-route-only、custom-sites、
+#   geodata-cron、nginx-cron、remove-certificate…… 这些才是事后最需要回溯的动作
+#   ("前天那台机器上的分流规则是谁改的?")。反过来, 只读的 net-status / health 反倒
+#   留了痕 —— 覆盖面与"变更审计"的语义正好反了, 故在此统一收口。
+#
+# 为什么放 dispatch 层而不是逐臂去补:
+#   1) 动作名天然可得 (option 去掉 `--` 前缀), 不必为三十多个臂各写一份, 也不会漏。
+#   2) 菜单路径与 CLI 直调 (`bash handler.sh --routing ...`) 都经过 main, 一处收口两处覆盖。
+#   3) 调用点在 case **之前** (事前留痕): 不少失败路径直接 `_error`/exit, case 之后的代码
+#      根本跑不到, 而"有人请求执行了 purge"这件事本身就是要审计的内容。动作的结果
+#      (成功 / 失败 / 版本号 / 变更条数) 仍由臂内既有的 `_audit_log` 补充。
+#
+# 参数:
+#   $1: option —— handler main 收到的第一个参数 (如 --routing)
+#   $2: detail —— 其余参数拼成的补充说明 (可选; 只含子命令/类型/端口, 不含密钥)
+# 返回值: 恒为 0 (审计失败绝不影响主流程)
+# =============================================================================
+function _audit_dispatch() {
+    local option="${1:-}"
+    local detail="${2:-}"
+    # 无 option (异常调用) 不记录
+    [[ -n "${option}" ]] || return 0
+    # 排除名单 —— 下列选项不在本层重复记录, 分两类:
+    #   A. 臂内已自行留痕, 且细节比这里更丰富 (版本号 / 变更条数 / .failed 后缀):
+    #      purge / start / stop / restart / install / nginx-install / quick /
+    #      export-config / import-config / nginx-purge / bbr / net-tune /
+    #      nofile-limit / net-status / health
+    #   B. 纯只读查询: share / traffic / sni-ports
+    #      查看类操作回答不了"谁改了什么", 不进变更审计; 又因 audit.log 目前尚无轮转
+    #      (见审计报告 P3), 放进来只会把真正的变更记录挤出日志。
+    #  注: net-status / health 臂内的留痕**刻意保留** —— "上次体检是什么时候、结果如何"
+    #      对无人值守机器有值班价值, 属诊断历史, 与 B 类新增排除项不冲突。
+    case "${option}" in
+    --purge | --start | --stop | --restart | --install | --nginx-install | --quick) return 0 ;;
+    --export-config | --import-config | --nginx-purge) return 0 ;;
+    --bbr | --net-tune | --nofile-limit | --net-status | --health) return 0 ;;
+    --share | --traffic | --sni-ports) return 0 ;;
+    esac
+    _audit_log "${option#--}" "${detail}"
     return 0
 }
 
@@ -4501,6 +4554,10 @@ function main() {
 
     local option="${1:-}" # 获取第一个参数作为操作选项
     shift             # 移除第一个参数，剩下的参数留给具体函数处理
+
+    # 审计留痕收口 (dispatch 层): 补齐各臂没有自行记录的写操作, 见 _audit_dispatch 的说明。
+    # 位置在 case **之前** —— 不少失败路径直接 _error/exit, 放到 case 之后就记不到了。
+    _audit_dispatch "${option}" "$*"
 
     # 根据第一个参数调用对应的处理器函数
     case "${option}" in

@@ -253,7 +253,11 @@
       "enabled": "WARP 已启用（原生 WireGuard 出站，不再需要 Docker）。",
       "disabled": "WARP 已关闭，指向 WARP 的分流规则已一并移除。",
       "reset_done": "WARP 出口已重置（已重新注册设备），重启 Xray 后生效。",
-      "reset_need_enable": "WARP 未启用，无需重置。"
+      "reset_need_enable": "WARP 未启用，无需重置。",
+      "no_observatory": "本机 Xray 不支持 observatory/balancer，已跳过 WARP 健康探测与自动回落（出站本身照常可用）。"
+    },
+    "dns": {
+      "unsupported": "本机 Xray 不支持顶层 dns 段，本次未写入（域名解析仍走系统 resolver）。"
     },
     "geodata": {
       "close_cron": "成功停止 geodata 自动更新任务",

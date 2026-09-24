@@ -1608,10 +1608,13 @@ function handler_xray_config() {
     _xray_collect_params   # 从 SCRIPT_CONFIG 读取并填充上述 local + 加载配置模板到全局 XRAY_CONFIG
     _xray_apply_inbounds   # 按 CONFIG_TAG 应用 inbound 字段, 并做 REALITY serverNames 守卫
     _xray_apply_rules      # 按 XRAY_RULES_STATUS 保留/重置路由规则
+    _xray_apply_dns        # 顶层 dns 段 (显式解析器; 字段集由本机实测决定)
+    _xray_apply_domain_strategy  # 有 IP 类规则时切 IPIfNonMatch, 让 geoip 分流真正生效
     # 注: 必须接住非 0 —— 启用了 WARP 却没写进出站, 路由规则会指向不存在的 tag,
     #     xray 会拒绝加载整份配置, 比"这次配置更新失败"严重得多。中止本次生成,
     #     由 exec_handler 软失败回菜单 (不 _error 杀整个交互脚本)。
     _xray_apply_warp || return 1   # 启用 WARP 时追加 wireguard 出站
+    _xray_apply_warp_balancer      # WARP 健康探测 + 自动回落 (未启用则清理残留)
     # 回写路由规则到脚本配置并持久化
     XRAY_RULES="$(echo "${XRAY_CONFIG}" | jq '.routing.rules')"
     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson rules "${XRAY_RULES}" '.rules = $rules')"
@@ -1777,15 +1780,34 @@ readonly WARP_API_USER_AGENT='okhttp/3.12.1'
 readonly WARP_ENDPOINT_FALLBACK='engage.cloudflareclient.com:2408'
 # 官方客户端同款 MTU: WARP 隧道内层取 1280 以避免分片
 readonly WARP_MTU='1280'
+# 启用健康探测时的出站 tag。刻意与 balancer tag 分开命名 —— routing 规则里的
+# outboundTag 可以指向 balancer, 于是"规则仍写 warp、实际由 balancer 接管"成为可能:
+# 所有往规则里写 outboundTag=warp 的代码路径 (菜单加分流 / 保留既有规则) 都不必改动。
+readonly WARP_OUTBOUND_TAG='warp-out'
+# ---- WARP 健康探测与自动回落 ----
+# WARP 出站指向 Cloudflare 任播 IP, 隧道抖动或出口被目标站点风控时会出现"TCP 连得上但
+# 数据不通"的状态, 光看进程活着判断不出来。observatory 周期探测真实可用性, balancer 在
+# 探测判定失效时把流量交给 fallbackTag, 实现"WARP 挂了自动走直连"而不是干等超时。
+# balancer 的 selector 只放 WARP 自己: 若把 direct 也放进去做"选优", leastPing 会因为
+# 直连延迟更低而把本该走 WARP 的流量抢走, 违背分流本意。
+readonly WARP_BALANCER_TAG='warp-balancer'
+# 探测目标取 Cloudflare 自家 204 端点: WARP 出口必然可达; 墙外 VPS 直连通常也可达。
+readonly WARP_PROBE_URL='https://cp.cloudflare.com/generate_204'
+readonly WARP_PROBE_INTERVAL='30s'
+# ---- 顶层 DNS ----
+# 不写 dns 段时 Xray 的域名解析交给系统 resolver (主机商 DNS), 结果不可控。
+# 显式声明 DoH 解析器 (防劫持) + 一家明文兜底 (DoH 被 QoS 时仍能出结果)。
+readonly XRAY_DNS_SERVERS='["https://1.1.1.1/dns-query","https://8.8.8.8/dns-query","1.1.1.1"]'
+readonly XRAY_DNS_QUERY_STRATEGY='UseIPv4'
 
 # =============================================================================
-# 子函数名称: _warp_xray_bin
+# 子函数名称: _xray_bin_path
 # 功能描述: 定位本机 xray 可执行文件 (PATH 优先, 兜底代码库约定的绝对路径)。
 #           仅依赖 command -v 会在运行时 PATH 不含 /usr/local/bin 时漏掉已安装的 xray。
 # 参数: 无
 # 返回值: 0-stdout 输出路径; 1-未找到
 # =============================================================================
-function _warp_xray_bin() {
+function _xray_bin_path() {
     if cmd_exists 'xray'; then
         command -v xray
         return 0
@@ -1836,7 +1858,7 @@ function _warp_key_probe() {
 # =============================================================================
 function _warp_gen_keypair() {
     local bin=''
-    bin="$(_warp_xray_bin)" || {
+    bin="$(_xray_bin_path)" || {
         print_warn "$(_i18n '.handler.warp.no_xray')"
         return 1
     }
@@ -2046,9 +2068,12 @@ function _warp_forget_credentials() {
 # =============================================================================
 function _warp_outbound_json() {
     local creds="${1:-}"
+    # 出站 tag 由调用方按"是否启用健康探测"决定 (见 _warp_outbound_tag); 默认仍是 warp ——
+    # 不开探测时, 规则里的 outboundTag=warp 必须能直接落到这个出站上。
+    local tag="${2:-warp}"
     [[ -n "${creds}" ]] || return 1
-    printf '%s' "${creds}" | jq -c --argjson mtu "${WARP_MTU}" '{
-        tag: "warp",
+    printf '%s' "${creds}" | jq -c --argjson mtu "${WARP_MTU}" --arg tag "${tag}" '{
+        tag: $tag,
         protocol: "wireguard",
         settings: {
             secretKey: .private_key,
@@ -2075,12 +2100,232 @@ function _warp_outbound_json() {
 # =============================================================================
 function _xray_apply_warp() {
     is_enabled "${WARP_STATUS}" || return 0
-    local creds='' outbound=''
+    local creds='' outbound='' tag=''
     creds="$(_warp_ensure_credentials)" || return 1
-    outbound="$(_warp_outbound_json "${creds}")" || return 1
+    _warp_outbound_tag     # 实测决定出站 tag (开探测时交给同名 balancer 接管)
+    tag="${_WARP_OB_TAG}"
+    outbound="$(_warp_outbound_json "${creds}" "${tag}")" || return 1
     [[ -n "${outbound}" ]] || return 1
-    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson ob "${outbound}" '
-        del(.outbounds[] | select(.tag == "warp")) | .outbounds += [$ob]')"
+    # del 两个候选 tag: 形态切换 (探测由可用变不可用, 或反之) 时旧出站要能被清掉, 否则
+    # 会留下一个指向失效凭据/失效 tag 的僵尸出站。
+    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson ob "${outbound}" \
+        --arg ot "${WARP_OUTBOUND_TAG}" '
+        del(.outbounds[] | select(.tag == "warp" or .tag == $ot)) | .outbounds += [$ob]')"
+}
+
+# =============================================================================
+# 子函数名称: _xray_config_probe
+# 功能描述: 把候选配置片段套进最小骨架, 实测本机 xray 能否接受。
+#           新增顶层段 (observatory / dns) 属于"低版本不认识就拒绝整份配置"的字段 ——
+#           按版本号猜并不可靠 (mKCP finalmask 的教训: 两种写法互不兼容, 写错一边整份
+#           被拒), 所以一律先拿本机二进制试, 能解析才写进正式配置。
+# 参数: $1 片段 JSON (对象; 浅合并进骨架)
+# 返回值: 0-被接受; 1-被拒绝 / 无 xray / 建不了临时文件
+# =============================================================================
+function _xray_config_probe() {
+    local fragment="${1:-}"
+    [[ -n "${fragment}" ]] || return 1
+    local bin='' tmp_dir='' tmp_file=''
+    bin="$(_xray_bin_path)" || return 1
+    tmp_dir="${TMPFILE_DIR:-}"
+    [[ -z "${tmp_dir}" ]] && tmp_dir="${SCRIPT_CONFIG_DIR:-}"
+    if [[ ! -d "${tmp_dir}" || ! -w "${tmp_dir}" ]]; then
+        tmp_dir="${TMPDIR:-/tmp}"
+    fi
+    tmp_file="$(mktemp "${tmp_dir%/}/.${SCRIPT_NAME}-xrayprobe.XXXXXXXX")" || return 1
+    # 骨架里放 direct / warp / warp-out / block 四个占位出站: balancer 的 selector 与
+    # fallbackTag 都要能解析到对应 tag, 否则会被误判成"引用了不存在的出站"而谎报不支持。
+    if ! jq -nc --argjson frag "${fragment}" '
+        {
+            log: {loglevel: "none"},
+            outbounds: [
+                {tag: "direct", protocol: "freedom"},
+                {tag: "warp", protocol: "freedom"},
+                {tag: "warp-out", protocol: "freedom"},
+                {tag: "block", protocol: "blackhole"}
+            ]
+        } + $frag' >"${tmp_file}" 2>/dev/null; then
+        rm -f "${tmp_file}"
+        return 1
+    fi
+    local rc=0
+    "${bin}" run -test -config "${tmp_file}" >/dev/null 2>&1 || rc=1
+    rm -f "${tmp_file}"
+    return "${rc}"
+}
+
+# 观测/均衡支持性缓存: '' 未探测 / full 支持 / plain 不支持 (降级为纯出站)
+_XRAY_OBS_MODE=''
+# 当前出站 tag (由 _warp_outbound_tag 填充, 与探测结果同步)
+_WARP_OB_TAG=''
+
+# =============================================================================
+# 子函数名称: _xray_observatory_mode
+# 功能描述: 实测本机 xray 是否接受 observatory + routing.balancers, 结果缓存到
+#           _XRAY_OBS_MODE (进程内只测一次)。不支持时打印一次告警并降级为纯出站 ——
+#           出站本身照常可用, 只是少了"WARP 挂了自动走直连"。
+# 参数: 无
+# 返回值: 恒 0 (结果读 _XRAY_OBS_MODE)
+# =============================================================================
+function _xray_observatory_mode() {
+    if [[ -z "${_XRAY_OBS_MODE}" ]]; then
+        local frag=''
+        frag="$(jq -nc --arg bt "${WARP_BALANCER_TAG}" --arg url "${WARP_PROBE_URL}" \
+            --arg iv "${WARP_PROBE_INTERVAL}" --arg sel "${WARP_OUTBOUND_TAG}" '{
+            observatory: {
+                subjectSelector: [$sel], probeUrl: $url, probeInterval: $iv,
+                enableConcurrency: true
+            },
+            routing: {
+                balancers: [{
+                    tag: $bt, selector: [$sel], fallbackTag: "direct",
+                    strategy: {type: "leastPing"}
+                }]
+            }
+        }')"
+        if _xray_config_probe "${frag}"; then
+            _XRAY_OBS_MODE='full'
+        else
+            _XRAY_OBS_MODE='plain'
+            print_warn "$(_i18n '.handler.warp.no_observatory')"
+        fi
+    fi
+    return 0
+}
+
+# =============================================================================
+# 子函数名称: _warp_outbound_tag
+# 功能描述: 决定 wireguard 出站用哪个 tag。开探测时用 WARP_OUTBOUND_TAG (warp-out), 让
+#           同名 tag 的 balancer 顶替指向它的规则; 降级时用 warp, 规则直接落到出站。
+# 参数: 无
+# 返回值: 恒 0 (结果读 _WARP_OB_TAG)
+# =============================================================================
+function _warp_outbound_tag() {
+    if [[ -z "${_WARP_OB_TAG}" ]]; then
+        _xray_observatory_mode
+        if [[ "${_XRAY_OBS_MODE}" == 'full' ]]; then
+            _WARP_OB_TAG="${WARP_OUTBOUND_TAG}"
+        else
+            _WARP_OB_TAG='warp'
+        fi
+    fi
+    return 0
+}
+
+# =============================================================================
+# 子函数名称: _xray_apply_warp_balancer
+# 功能描述: 给 WARP 出站加健康探测与自动回落。
+#           启用: 写 observatory (周期探测 warp-out) + routing.balancers
+#                 (tag=warp-balancer, selector=[warp-out], fallbackTag=direct,
+#                  strategy=leastPing)。路由规则里的 outboundTag 仍是 "warp" ——
+#                 由 balancer 顶替同名 tag, 于是"菜单加分流/保留既有规则"等所有写规则
+#                 的路径都不用改, 也不会出现两份副本不一致。
+#           未启用: 幂等清掉可能残留的观测/均衡段。
+# 参数: 无 (读父函数 local 的 WARP_STATUS, 改写全局 XRAY_CONFIG)
+# 返回值: 0-成功 (含降级与未启用的零操作)
+# =============================================================================
+function _xray_apply_warp_balancer() {
+    if ! is_enabled "${WARP_STATUS}"; then
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg bt "${WARP_BALANCER_TAG}" '
+            del(.observatory) | del(.burstObservatory)
+            | if (.routing.balancers | type) == "array" then
+                .routing.balancers |= map(select(.tag != $bt))
+              else . end
+            | if (.routing.balancers | type) == "array" and (.routing.balancers | length) == 0 then
+                del(.routing.balancers)
+              else . end')"
+        return 0
+    fi
+    _warp_outbound_tag
+    # 降级形态 (出站 tag=warp): 不能写 balancer —— 它的 selector 会解析不到 warp-out,
+    # 反而让配置加载失败。
+    [[ "${_WARP_OB_TAG}" == "${WARP_OUTBOUND_TAG}" ]] || return 0
+    local obs='' bal=''
+    obs="$(jq -nc --arg url "${WARP_PROBE_URL}" --arg iv "${WARP_PROBE_INTERVAL}" \
+        --arg sel "${WARP_OUTBOUND_TAG}" '
+        {subjectSelector: [$sel], probeUrl: $url, probeInterval: $iv, enableConcurrency: true}')"
+    bal="$(jq -nc --arg bt "${WARP_BALANCER_TAG}" --arg sel "${WARP_OUTBOUND_TAG}" '
+        [{tag: $bt, selector: [$sel], fallbackTag: "direct", strategy: {type: "leastPing"}}]')"
+    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson obs "${obs}" --argjson bal "${bal}" '
+        .observatory = $obs
+        | .routing = ((.routing // {}) | .balancers = $bal)')"
+}
+
+# 顶层 DNS 支持性缓存: '' 未探测 / full 全字段 / minimal 仅 servers / off 不加
+_XRAY_DNS_MODE=''
+
+# =============================================================================
+# 子函数名称: _xray_dns_mode
+# 功能描述: 实测本机 xray 能接受哪一档 dns 段 (全字段 -> 仅 servers -> 不加), 结果缓存
+#           到 _XRAY_DNS_MODE (进程内只测一次)。queryStrategy / enableParallelQuery 是较新
+#           版本才有的字段, 老版本遇到会拒绝整份配置, 所以逐档降级而不是按版本号猜。
+# 参数: 无
+# 返回值: 恒 0 (结果读 _XRAY_DNS_MODE)
+# =============================================================================
+function _xray_dns_mode() {
+    if [[ -z "${_XRAY_DNS_MODE}" ]]; then
+        local frag_full='' frag_min=''
+        frag_full="$(jq -nc --argjson servers "${XRAY_DNS_SERVERS}" \
+            --arg qs "${XRAY_DNS_QUERY_STRATEGY}" \
+            '{dns: {servers: $servers, queryStrategy: $qs, enableParallelQuery: true}}')"
+        frag_min="$(jq -nc --argjson servers "${XRAY_DNS_SERVERS}" '{dns: {servers: $servers}}')"
+        if _xray_config_probe "${frag_full}"; then
+            _XRAY_DNS_MODE='full'
+        elif _xray_config_probe "${frag_min}"; then
+            _XRAY_DNS_MODE='minimal'
+        else
+            _XRAY_DNS_MODE='off'
+            print_warn "$(_i18n '.handler.dns.unsupported')"
+        fi
+    fi
+    return 0
+}
+
+# =============================================================================
+# 子函数名称: _xray_apply_dns
+# 功能描述: 写入顶层 dns 段 (显式解析器), 让 Xray 内部的域名解析不再依赖系统 resolver。
+# 参数: 无 (改写全局 XRAY_CONFIG)
+# 返回值: 恒 0
+# =============================================================================
+function _xray_apply_dns() {
+    _xray_dns_mode
+    local dns_json=''
+    case "${_XRAY_DNS_MODE}" in
+    full)
+        dns_json="$(jq -nc --argjson servers "${XRAY_DNS_SERVERS}" \
+            --arg qs "${XRAY_DNS_QUERY_STRATEGY}" \
+            '{servers: $servers, queryStrategy: $qs, enableParallelQuery: true}')"
+        ;;
+    minimal)
+        dns_json="$(jq -nc --argjson servers "${XRAY_DNS_SERVERS}" '{servers: $servers}')"
+        ;;
+    *)
+        return 0
+        ;;
+    esac
+    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson dns "${dns_json}" '.dns = $dns')"
+}
+
+# =============================================================================
+# 子函数名称: _xray_apply_domain_strategy
+# 功能描述: 规则集里存在 IP 类条件 (geoip:cn / private-ip / 自定义 IP) 时, 把
+#           routing.domainStrategy 从默认的 AsIs 切成 IPIfNonMatch。
+#           原因: AsIs 下 IP 规则只对"客户端直接发 IP"的连接生效, 客户端发域名时规则
+#           形同虚设 (开关开了却不生效)。IPIfNonMatch 是"其余规则都没命中, 再把域名解析
+#           成 IP 重匹配一次", 代价是一次带缓存的解析。
+#           没有 IP 规则时保持 AsIs 并清掉残留, 不给纯域名分流场景增加解析开销。
+# 参数: 无 (改写全局 XRAY_CONFIG)
+# 返回值: 恒 0
+# =============================================================================
+function _xray_apply_domain_strategy() {
+    local has_ip_rule=''
+    has_ip_rule="$(echo "${XRAY_CONFIG}" | jq -r '
+        [(.routing.rules // [])[] | select(((.ip // []) | length) > 0)] | length > 0')"
+    if [[ "${has_ip_rule}" == 'true' ]]; then
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq '.routing.domainStrategy = "IPIfNonMatch"')"
+    else
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq 'del(.routing.domainStrategy)')"
+    fi
 }
 
 
@@ -3448,19 +3693,38 @@ function handler_warp() {
     XRAY_CONFIG="$(jq '.' "${XRAY_CONFIG_PATH}")"
     if is_enabled "${WARP_STATUS}"; then
         WARP_STATUS=0
-        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq '
-            del(.outbounds[] | select(.tag == "warp"))
-            | del(.routing.rules[] | select(.outboundTag == "warp"))')"
+        # 一次清干净: 出站 (两种候选 tag) / 指向它的规则 / 观测与均衡段。
+        # 规则必须两处副本都清 —— Xray 配置里那份, 以及 SCRIPT_CONFIG.rules (权威副本,
+        # _xray_apply_rules 的 case 0 会整份写回配置)。只删一处的话, 下次"更新配置"会把
+        # 规则写回来而出站已删 -> xray 拒绝加载整份配置。
+        # 注: 权威副本里规则 tag 恒为 "warp"(从不改写), $bt 分支纯属对历史残留的防御。
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg bt "${WARP_BALANCER_TAG}" \
+            --arg ot "${WARP_OUTBOUND_TAG}" '
+            del(.outbounds[] | select(.tag == "warp" or .tag == $ot))
+            | del(.routing.rules[]? | select(.outboundTag == "warp" or .outboundTag == $bt))
+            | del(.observatory) | del(.burstObservatory)
+            | if (.routing.balancers | type) == "array" then
+                .routing.balancers |= map(select(.tag != $bt))
+              else . end
+            | if (.routing.balancers | type) == "array" and (.routing.balancers | length) == 0 then
+                del(.routing.balancers)
+              else . end')"
         SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq '
             if (.rules | type) == "array" then .rules |= map(select(.outboundTag != "warp")) else . end')"
     else
-        local creds='' outbound=''
+        local creds='' outbound='' tag=''
         creds="$(_warp_ensure_credentials)" || return 1
-        outbound="$(_warp_outbound_json "${creds}")" || return 1
+        _warp_outbound_tag
+        tag="${_WARP_OB_TAG}"
+        outbound="$(_warp_outbound_json "${creds}" "${tag}")" || return 1
         [[ -n "${outbound}" ]] || return 1
         WARP_STATUS=1
-        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson ob "${outbound}" '
-            del(.outbounds[] | select(.tag == "warp")) | .outbounds += [$ob]')"
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson ob "${outbound}" \
+            --arg ot "${WARP_OUTBOUND_TAG}" '
+            del(.outbounds[] | select(.tag == "warp" or .tag == $ot)) | .outbounds += [$ob]')"
+        # 同一次动作里就把观测/均衡带上 —— 否则"开 WARP"之后要再走一次"更新配置"才
+        # 有自动回落, 而用户多半开完就重启了。
+        _xray_apply_warp_balancer
     fi
     if ! persist_xray_config; then
         return 1
@@ -3491,12 +3755,16 @@ function handler_reset_warp() {
     fi
     XRAY_CONFIG="$(jq '.' "${XRAY_CONFIG_PATH}")"
     _warp_forget_credentials
-    local creds='' outbound=''
+    local creds='' outbound='' tag=''
     creds="$(_warp_ensure_credentials)" || return 1
-    outbound="$(_warp_outbound_json "${creds}")" || return 1
+    _warp_outbound_tag
+    tag="${_WARP_OB_TAG}"
+    outbound="$(_warp_outbound_json "${creds}" "${tag}")" || return 1
     [[ -n "${outbound}" ]] || return 1
-    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson ob "${outbound}" '
-        del(.outbounds[] | select(.tag == "warp")) | .outbounds += [$ob]')"
+    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson ob "${outbound}" \
+        --arg ot "${WARP_OUTBOUND_TAG}" '
+        del(.outbounds[] | select(.tag == "warp" or .tag == $ot)) | .outbounds += [$ob]')"
+    _xray_apply_warp_balancer   # 形态由实测决定, 顺势补齐/摘掉观测段 (幂等)
     persist_xray_config || return 1
     print_info "$(_i18n '.handler.warp.reset_done')"
 }

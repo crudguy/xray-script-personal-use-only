@@ -253,7 +253,11 @@
       "enabled": "WARP enabled (native WireGuard outbound, Docker no longer required).",
       "disabled": "WARP disabled; the routing rules that pointed at WARP were removed as well.",
       "reset_done": "WARP exit reset (device re-registered). Restart Xray to take effect.",
-      "reset_need_enable": "WARP is not enabled, nothing to reset."
+      "reset_need_enable": "WARP is not enabled, nothing to reset.",
+      "no_observatory": "This Xray build does not support observatory/balancer; WARP health probing and auto-fallback were skipped (the outbound itself still works)."
+    },
+    "dns": {
+      "unsupported": "This Xray build does not support a top-level dns section; it was not written (name resolution keeps using the system resolver)."
     },
     "geodata": {
       "close_cron": "Successfully stopped geodata auto-update task",

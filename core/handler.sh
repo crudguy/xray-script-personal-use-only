@@ -1608,7 +1608,10 @@ function handler_xray_config() {
     _xray_collect_params   # 从 SCRIPT_CONFIG 读取并填充上述 local + 加载配置模板到全局 XRAY_CONFIG
     _xray_apply_inbounds   # 按 CONFIG_TAG 应用 inbound 字段, 并做 REALITY serverNames 守卫
     _xray_apply_rules      # 按 XRAY_RULES_STATUS 保留/重置路由规则
-    _xray_apply_warp       # 启用 WARP 时追加 socks 出站
+    # 注: 必须接住非 0 —— 启用了 WARP 却没写进出站, 路由规则会指向不存在的 tag,
+    #     xray 会拒绝加载整份配置, 比"这次配置更新失败"严重得多。中止本次生成,
+    #     由 exec_handler 软失败回菜单 (不 _error 杀整个交互脚本)。
+    _xray_apply_warp || return 1   # 启用 WARP 时追加 wireguard 出站
     # 回写路由规则到脚本配置并持久化
     XRAY_RULES="$(echo "${XRAY_CONFIG}" | jq '.routing.rules')"
     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson rules "${XRAY_RULES}" '.rules = $rules')"
@@ -1747,19 +1750,337 @@ function _xray_apply_rules() {
 }
 
 # =============================================================================
+# WARP 出站 (原生 WireGuard)
+#
+# 背景: 原实现靠 Docker 拉 cloudflare-warp 容器, Xray 侧用 socks 出站指向容器暴露的
+#   40001 端口。代价是必须装 Docker、多一个常驻容器、多一跳 socks 转发, 且注册动作
+#   在容器里由 warp-cli 完成。Xray 26.x 自带 wireguard 出站, 可直连 Cloudflare WARP
+#   端点, 于是改为: 一次性注册拿到 WireGuard 凭据 -> 落 warp.json 复用 -> 出站直接写
+#   wireguard。注册只做一次, 之后反复开关 WARP 不再联网。
+#
+# 凭据来源优先级:
+#   1) ${SCRIPT_CONFIG_DIR}/warp.json —— 本脚本自己注册并落盘的, 复用零联网
+#   2) 向 Cloudflare 注册端点现注册一份 (需 curl 能访问 api.cloudflareclient.com)
+#
+# 已知识别风险: 注册端点对部分机房 IP 段会直接回 500 (社区有实测案例)。此时保持既有
+#   配置不动 + 明确报错, 绝不把状态位改成"已启用" —— 否则路由规则会指向不存在的出站,
+#   整份 Xray 配置都会加载失败。
+# =============================================================================
+
+# WARP 凭据文件 (含私钥; 由 _atomic_write 保证 600 权限)
+readonly WARP_CREDENTIALS_PATH="${SCRIPT_CONFIG_DIR}/warp.json"
+# Cloudflare WARP 注册端点与客户端标识 (Android 6.10 / build 2158)
+readonly WARP_API_URL='https://api.cloudflareclient.com/v0a2158/reg'
+readonly WARP_API_CLIENT_VERSION='a-6.10-2158'
+readonly WARP_API_USER_AGENT='okhttp/3.12.1'
+# 注册响应缺 endpoint 时的兜底端点, 与官方客户端一致
+readonly WARP_ENDPOINT_FALLBACK='engage.cloudflareclient.com:2408'
+# 官方客户端同款 MTU: WARP 隧道内层取 1280 以避免分片
+readonly WARP_MTU='1280'
+
+# =============================================================================
+# 子函数名称: _warp_xray_bin
+# 功能描述: 定位本机 xray 可执行文件 (PATH 优先, 兜底代码库约定的绝对路径)。
+#           仅依赖 command -v 会在运行时 PATH 不含 /usr/local/bin 时漏掉已安装的 xray。
+# 参数: 无
+# 返回值: 0-stdout 输出路径; 1-未找到
+# =============================================================================
+function _warp_xray_bin() {
+    if cmd_exists 'xray'; then
+        command -v xray
+        return 0
+    fi
+    if [[ -x "${XRAY_BIN_PATH:-/usr/local/bin/xray}" ]]; then
+        printf '%s\n' "${XRAY_BIN_PATH:-/usr/local/bin/xray}"
+        return 0
+    fi
+    return 1
+}
+
+# =============================================================================
+# 子函数名称: _warp_key_probe
+# 功能描述: 用最小 wireguard 出站配置实测本机 xray 能否解析这对密钥。
+#           密钥的 base64 编码变体 (标准带 padding / raw 去 padding / url-safe) 各家
+#           实现不一, Xray 内部认哪一种不写死 —— 拿本机二进制试, 能解析的才用,
+#           否则会把"编码不对"的密钥写进配置, 直到 xray 加载时才炸。
+# 参数: $1 客户端私钥 $2 peer 公钥 $3 xray 路径 $4 临时文件路径
+# 返回值: 0-被接受; 非 0-被拒绝
+# =============================================================================
+function _warp_key_probe() {
+    local priv="${1:-}" pub="${2:-}" bin="${3:-}" tmp_file="${4:-}"
+    if [[ -z "${priv}" || -z "${pub}" || -z "${bin}" || -z "${tmp_file}" ]]; then
+        return 1
+    fi
+    jq -nc --arg sk "${priv}" --arg pk "${pub}" '{
+        log: {loglevel: "none"},
+        outbounds: [{
+            tag: "warp-key-probe", protocol: "wireguard",
+            settings: {
+                secretKey: $sk,
+                address: ["172.16.0.2/32"],
+                peers: [{publicKey: $pk, endpoint: "162.159.192.1:2408", allowedIPs: ["0.0.0.0/0"]}]
+            }
+        }]
+    }' >"${tmp_file}" 2>/dev/null || return 1
+    "${bin}" run -test -config "${tmp_file}" >/dev/null 2>&1
+}
+
+# =============================================================================
+# 子函数名称: _warp_gen_keypair
+# 功能描述: 生成一对 WireGuard 可用的 Curve25519 密钥。
+#           优先用 xray 自带的 `wg` 子命令 —— 它产出的编码必然能被 xray 自己解析, 无需
+#           试错; 老版本 xray 没有该子命令时退回 openssl (X25519 与 WireGuard 是同一套
+#           曲线运算, 密钥可直接互换), 此时用 _warp_key_probe 逐个试编码变体。
+# 参数: 无
+# 返回值: 0-stdout 输出 "私钥 公钥" (空格分隔); 1-失败 (原因打 stderr)
+# =============================================================================
+function _warp_gen_keypair() {
+    local bin=''
+    bin="$(_warp_xray_bin)" || {
+        print_warn "$(_i18n '.handler.warp.no_xray')"
+        return 1
+    }
+    local out='' priv='' pub=''
+    # 路径一: xray wg (自产自销, 编码天然兼容)
+    if out="$("${bin}" wg 2>/dev/null)"; then
+        priv="$(printf '%s\n' "${out}" | sed -ne '1s/.*:[[:space:]]*//p')"
+        pub="$(printf '%s\n' "${out}" | sed -ne '2s/.*:[[:space:]]*//p')"
+        if [[ -n "${priv}" && -n "${pub}" ]]; then
+            printf '%s %s\n' "${priv}" "${pub}"
+            return 0
+        fi
+    fi
+    # 路径二: openssl X25519
+    local tmp_dir=''
+    tmp_dir="${TMPFILE_DIR:-}"
+    [[ -z "${tmp_dir}" ]] && tmp_dir="${SCRIPT_CONFIG_DIR:-}"
+    if [[ ! -d "${tmp_dir}" || ! -w "${tmp_dir}" ]]; then
+        tmp_dir="${TMPDIR:-/tmp}"
+    fi
+    local key_pem='' tmp_file=''
+    key_pem="$(mktemp "${tmp_dir%/}/.${SCRIPT_NAME}-warpkey.XXXXXXXX")" || return 1
+    tmp_file="$(mktemp "${tmp_dir%/}/.${SCRIPT_NAME}-warpprobe.XXXXXXXX")" || {
+        rm -f "${key_pem}"
+        return 1
+    }
+    local openssl_err=''
+    if ! openssl_err="$(openssl genpkey -algorithm X25519 -out "${key_pem}" 2>&1)"; then
+        rm -f "${key_pem}" "${tmp_file}"
+        print_warn "$(_i18n '.handler.warp.key_failed')"
+        printf '%s\n' "${openssl_err}" >&2
+        return 1
+    fi
+    # PKCS#8 (私钥) 与 SPKI (公钥) 的 DER 编码尾部 32 字节即裸密钥
+    local priv_std='' pub_std=''
+    priv_std="$(openssl pkey -in "${key_pem}" -outform DER 2>/dev/null | tail -c 32 | base64 -w0 || true)"
+    pub_std="$(openssl pkey -in "${key_pem}" -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0 || true)"
+    rm -f "${key_pem}"
+    if [[ -z "${priv_std}" || -z "${pub_std}" ]]; then
+        rm -f "${tmp_file}"
+        print_warn "$(_i18n '.handler.warp.key_failed')"
+        return 1
+    fi
+    # 逐个编码变体试跑, 取第一个被本机 xray 接受的
+    local variant='' last_err=''
+    for variant in 'std' 'raw' 'urlsafe'; do
+        case "${variant}" in
+            std)
+                priv="${priv_std}"
+                pub="${pub_std}"
+                ;;
+            raw)
+                priv="${priv_std%=*}"
+                pub="${pub_std%=*}"
+                ;;
+            urlsafe)
+                priv="$(printf '%s' "${priv_std}" | tr '+/' '-_' | tr -d '=')"
+                pub="$(printf '%s' "${pub_std}" | tr '+/' '-_' | tr -d '=')"
+                ;;
+        esac
+        if _warp_key_probe "${priv}" "${pub}" "${bin}" "${tmp_file}"; then
+            rm -f "${tmp_file}"
+            printf '%s %s\n' "${priv}" "${pub}"
+            return 0
+        fi
+        last_err="${variant}"
+    done
+    rm -f "${tmp_file}"
+    # 三种编码都不被接受 —— 多半是 xray 过老 (无 wireguard 出站) 而非编码问题
+    print_warn "$(_i18n '.handler.warp.key_failed')"
+    printf '%s\n' "$(_i18n '.handler.warp.key_probe_failed') (${last_err})" >&2
+    return 1
+}
+
+# =============================================================================
+# 子函数名称: _warp_reserved_from_client_id
+# 功能描述: 由 WARP 账号的 client_id 解出 WireGuard 协议要求的 3 字节 reserved。
+#           官方客户端把它填进握手包首部, 部分 WARP 端点据此校验; 拿不到就退回 0 0 0。
+# 参数: $1 client_id (base64)
+# 返回值: 恒 0, stdout 输出 "b1 b2 b3" (十进制, 空格分隔)
+# =============================================================================
+function _warp_reserved_from_client_id() {
+    local cid="${1:-}"
+    if [[ -z "${cid}" ]]; then
+        printf '0 0 0'
+        return 0
+    fi
+    # 补 padding: base64 解码要求长度为 4 的倍数
+    case $((${#cid} % 4)) in
+        2) cid="${cid}==" ;;
+        3) cid="${cid}=" ;;
+    esac
+    local nums=''
+    nums="$(printf '%s' "${cid}" | tr '_-' '/+' | base64 -d 2>/dev/null | od -An -tu1 | tr -s ' \n' ' ' || true)"
+    nums="${nums# }"
+    nums="${nums% }"
+    local count=0
+    count="$(printf '%s\n' "${nums}" | wc -w)"
+    if [[ "${count}" -ge 3 ]]; then
+        printf '%s' "${nums}" | cut -d' ' -f1-3
+    else
+        printf '0 0 0'
+    fi
+}
+
+# =============================================================================
+# 子函数名称: _warp_register
+# 功能描述: 向 Cloudflare WARP 注册端点注册一个设备, 取回接口地址与 peer 信息。
+#           设备私钥由本机生成 (服务端只登记公钥), 私钥不经过网络。
+#           curl 禁用 -f: 要拿到 HTTP 状态码本身来区分"网络不通"与"被端点拒绝"。
+# 参数: $1 客户端公钥 (base64) $2 客户端私钥 (base64)
+# 返回值: 0-stdout 输出凭据 JSON; 1-失败 (原因已 print_warn, 调用方保持配置不动)
+# =============================================================================
+function _warp_register() {
+    local pub="${1:-}" priv="${2:-}"
+    if [[ -z "${pub}" || -z "${priv}" ]]; then
+        return 1
+    fi
+    if ! cmd_exists 'curl'; then
+        print_warn "$(_i18n '.handler.warp.no_curl')"
+        return 1
+    fi
+    local tos='' payload=''
+    tos="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+    payload="$(jq -nc --arg key "${pub}" --arg tos "${tos}" \
+        '{key: $key, install_id: "", fcm_token: "", tos: $tos, model: "PC", serial_number: "", locale: "en_US"}')" || return 1
+    # -w 把状态码追加到末行, 便于区分"网络不通"与"被端点拒绝(如 500)"
+    local raw='' code='' resp=''
+    raw="$(curl -sS --max-time 30 -X POST \
+        -H "User-Agent: ${WARP_API_USER_AGENT}" \
+        -H "CF-Client-Version: ${WARP_API_CLIENT_VERSION}" \
+        -H 'Content-Type: application/json; charset=UTF-8' \
+        --data "${payload}" -w '\n%{http_code}' "${WARP_API_URL}" 2>/dev/null || true)"
+    code="${raw##*$'\n'}"
+    resp="${raw%$'\n'*}"
+    if [[ "${code}" != '200' ]]; then
+        print_warn "$(_i18n_sub '.handler.warp.register_failed' '{code}' "${code:-unknown}")"
+        return 1
+    fi
+    local v4='' v6='' peer_pub='' endpoint='' client_id=''
+    v4="$(printf '%s' "${resp}" | jq -r '.config.interface.addresses.v4 // empty' 2>/dev/null || true)"
+    v6="$(printf '%s' "${resp}" | jq -r '.config.interface.addresses.v6 // empty' 2>/dev/null || true)"
+    peer_pub="$(printf '%s' "${resp}" | jq -r '.config.peers[0].public_key // empty' 2>/dev/null || true)"
+    endpoint="$(printf '%s' "${resp}" | jq -r '.config.peers[0].endpoint.host // .config.peers[0].endpoint.v4 // empty' 2>/dev/null || true)"
+    client_id="$(printf '%s' "${resp}" | jq -r '.config.client_id // empty' 2>/dev/null || true)"
+    if [[ -z "${v4}" || -z "${peer_pub}" ]]; then
+        print_warn "$(_i18n '.handler.warp.register_parse_failed')"
+        return 1
+    fi
+    [[ -n "${endpoint}" ]] || endpoint="${WARP_ENDPOINT_FALLBACK}"
+    local reserved=''
+    reserved="$(_warp_reserved_from_client_id "${client_id}")"
+    jq -nc --arg priv "${priv}" --arg pub "${pub}" --arg v4 "${v4}" --arg v6 "${v6}" \
+        --arg peer "${peer_pub}" --arg endpoint "${endpoint}" --arg reserved "${reserved}" '{
+        private_key: $priv,
+        public_key: $pub,
+        address: (["\($v4)/32"] + (if $v6 == "" then [] else ["\($v6)/128"] end)),
+        peer_public_key: $peer,
+        endpoint: $endpoint,
+        reserved: ($reserved | split(" ") | map(tonumber))
+    }'
+}
+
+# =============================================================================
+# 子函数名称: _warp_ensure_credentials
+# 功能描述: 取一份可用的 WARP WireGuard 凭据: 先复用已落盘文件 (零联网), 没有再注册,
+#           新凭据当场落盘 (600) 供后续复用。
+# 参数: 无
+# 返回值: 0-stdout 输出凭据 JSON; 1-失败 (原因已 print_warn, 调用方保持配置不动)
+# =============================================================================
+function _warp_ensure_credentials() {
+    if [[ -r "${WARP_CREDENTIALS_PATH}" ]]; then
+        local existing=''
+        existing="$(jq -c '.' "${WARP_CREDENTIALS_PATH}" 2>/dev/null || true)"
+        # 字段齐全才复用: 半截凭据会让出站构造静默生成空值, 直到 xray 加载才炸
+        if [[ -n "${existing}" ]] && printf '%s' "${existing}" | jq -e \
+            'has("private_key") and has("peer_public_key") and ((.address // []) | length > 0)' >/dev/null 2>&1; then
+            printf '%s' "${existing}"
+            return 0
+        fi
+    fi
+    local pair='' priv='' pub='' creds=''
+    pair="$(_warp_gen_keypair)" || return 1
+    priv="${pair%% *}"
+    pub="${pair##* }"
+    creds="$(_warp_register "${pub}" "${priv}")" || return 1
+    printf '%s\n' "${creds}" | _atomic_write "${WARP_CREDENTIALS_PATH}" || return 1
+    printf '%s' "${creds}"
+}
+
+# =============================================================================
+# 子函数名称: _warp_forget_credentials
+# 功能描述: 丢弃已落盘的 WARP 凭据 (重置出口时用, 下次会重新注册一台设备)。
+# 参数: 无
+# 返回值: 恒 0
+# =============================================================================
+function _warp_forget_credentials() {
+    rm -f "${WARP_CREDENTIALS_PATH}"
+}
+
+# =============================================================================
+# 子函数名称: _warp_outbound_json
+# 功能描述: 由凭据 JSON 生成 Xray 的 wireguard 出站 (tag 固定 warp, 与分流规则对应)。
+#           这里 allowedIPs 全量放行 —— 走不走 WARP 由路由规则决定, 出站不重复设限。
+# 参数: $1 凭据 JSON
+# 返回值: 0-stdout 输出出站 JSON; 1-凭据不合法
+# =============================================================================
+function _warp_outbound_json() {
+    local creds="${1:-}"
+    [[ -n "${creds}" ]] || return 1
+    printf '%s' "${creds}" | jq -c --argjson mtu "${WARP_MTU}" '{
+        tag: "warp",
+        protocol: "wireguard",
+        settings: {
+            secretKey: .private_key,
+            address: .address,
+            peers: [{
+                publicKey: .peer_public_key,
+                endpoint: .endpoint,
+                allowedIPs: ["0.0.0.0/0", "::/0"],
+                keepAlive: 25
+            }],
+            reserved: .reserved,
+            mtu: $mtu
+        }
+    }' 2>/dev/null
+}
+
+# =============================================================================
 # 子函数名称: _xray_apply_warp
-# 功能描述: 启用 WARP 时获取容器 IP 并追加 socks 出站到全局 XRAY_CONFIG。
+# 功能描述: 启用 WARP 时追加 wireguard 出站到全局 XRAY_CONFIG (先 del 再 +=, 幂等)。
+# 参数: 无 (读父函数 local 的 WARP_STATUS, 改写全局 XRAY_CONFIG)
+# 返回值: 0-成功 (含"未启用"的零操作); 1-取凭据/构造出站失败
+# 注意: 失败必须让调用方中止 —— 路由规则里引用了 warp 出站, 出站没写进去会让 xray
+#       拒绝加载整份配置, 比"这次配置更新失败"严重得多。
 # =============================================================================
 function _xray_apply_warp() {
-    if is_enabled "${WARP_STATUS}"; then
-        # 获取 WARP 容器 IP
-        local container_ip
-        container_ip="$(exec_docker '--obtain-container-ip')"
-        # 构造 WARP Socks 出站配置 JSON
-        local socks_config='[{"tag":"warp","protocol":"socks","settings":{"servers":[{"address":"'"${container_ip}"'","port":40001}]}}]'
-        # 将 WARP 出站配置添加到 Xray 配置中
-        XRAY_CONFIG=$(echo "${XRAY_CONFIG}" | jq --argjson socks_config "${socks_config}" '.outbounds += $socks_config')
-    fi
+    is_enabled "${WARP_STATUS}" || return 0
+    local creds='' outbound=''
+    creds="$(_warp_ensure_credentials)" || return 1
+    outbound="$(_warp_outbound_json "${creds}")" || return 1
+    [[ -n "${outbound}" ]] || return 1
+    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson ob "${outbound}" '
+        del(.outbounds[] | select(.tag == "warp")) | .outbounds += [$ob]')"
 }
 
 
@@ -3109,76 +3430,75 @@ function handler_docker() {
 
 # =============================================================================
 # 函数名称: handler_warp
-# 功能描述: 管理 WARP (WireGuard) 配置。
-#           1. 确保 Docker 已安装。
-#           2. 检查当前 WARP 状态。
-#           3. 如果已启用，则禁用并从 Xray 配置中移除相关规则。
-#           4. 如果未启用，则启用并添加 WARP 出站和路由规则到 Xray 配置。
-#           5. 更新脚本配置中的 WARP 状态。
+# 功能描述: 管理 WARP (原生 WireGuard 出站) 开关。
+#           1. 已启用 -> 关闭: 摘掉 wireguard 出站, 并同步清理"指向它的分流规则"。
+#              两处都要清 —— Xray 配置里, 以及 SCRIPT_CONFIG.rules。后者是规则的权威
+#              副本 (_xray_apply_rules 的 case 0 会把它整份写回配置), 只删 Xray 配置
+#              里的那份, 下次"更新配置"就会把规则写回来而出站没有 -> xray 加载失败。
+#           2. 未启用 -> 开启: 取一份 WARP 凭据 (复用 warp.json, 没有才现注册),
+#              追加 wireguard 出站, 状态位置 1。
 # 参数: 无
-# 返回值: 无 (通过调用其他函数和脚本执行操作，修改配置文件)
+# 返回值: 0-成功 (含"本次关闭"路径); 非 0-取凭据/落盘失败 (已 print_warn, 回菜单可重试)
+# 注意: 落盘顺序是"先 Xray 配置、后脚本状态位" —— persist_xray_config 复核失败会回滚
+#       已落盘配置, 此时状态位绝不能先变成"已启用", 否则状态与真实配置不一致。
 # =============================================================================
 function handler_warp() {
-    # 确保 Docker 已安装
-    handler_docker
-    # 从脚本配置中读取当前 WARP 状态
     local WARP_STATUS
     WARP_STATUS="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.warp' || true)"
-    # 从 Xray 配置文件加载配置
     XRAY_CONFIG="$(jq '.' "${XRAY_CONFIG_PATH}")"
-    # 如果 WARP 已启用 (状态为 1)
     if is_enabled "${WARP_STATUS}"; then
-        WARP_STATUS=0 # 设置状态为禁用
-        # 调用 docker.sh 禁用 WARP 容器
-        exec_docker '--disable-warp'
-        # 从 Xray 配置中删除 WARP 出站和相关路由规则
-        XRAY_CONFIG=$(echo "${XRAY_CONFIG}" | jq 'del(.outbounds[] | select(.tag == "warp")) | del(.routing.rules[] | select(.outboundTag == "warp"))')
+        WARP_STATUS=0
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq '
+            del(.outbounds[] | select(.tag == "warp"))
+            | del(.routing.rules[] | select(.outboundTag == "warp"))')"
+        SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq '
+            if (.rules | type) == "array" then .rules |= map(select(.outboundTag != "warp")) else . end')"
     else
-        WARP_STATUS=1 # 设置状态为启用
-        # 调用 docker.sh 构建并启用 WARP 容器
-        exec_docker '--build-warp'
-        local container_ip
-        container_ip="$(exec_docker '--enable-warp')" # 获取 WARP 容器 IP
-        # 构造 WARP Socks 出站配置 JSON
-        local socks_config='[{"tag":"warp","protocol":"socks","settings":{"servers":[{"address":"'"${container_ip}"'","port":40001}]}}]'
-        # 将 WARP 出站配置添加到 Xray 配置中
-        XRAY_CONFIG=$(echo "${XRAY_CONFIG}" | jq --argjson socks_config "${socks_config}" '.outbounds += $socks_config')
+        local creds='' outbound=''
+        creds="$(_warp_ensure_credentials)" || return 1
+        outbound="$(_warp_outbound_json "${creds}")" || return 1
+        [[ -n "${outbound}" ]] || return 1
+        WARP_STATUS=1
+        XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson ob "${outbound}" '
+            del(.outbounds[] | select(.tag == "warp")) | .outbounds += [$ob]')"
     fi
-    # 更新脚本配置中的 WARP 状态
-    SCRIPT_CONFIG=$(echo "${SCRIPT_CONFIG}" | jq --arg warp "${WARP_STATUS}" '.xray.warp = $warp')
-    # 将更新后的脚本配置和 Xray 配置写入文件
+    if ! persist_xray_config; then
+        return 1
+    fi
+    SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --arg warp "${WARP_STATUS}" '.xray.warp = $warp')"
     persist_script_config
-    persist_xray_config
+    if is_enabled "${WARP_STATUS}"; then
+        print_info "$(_i18n '.handler.warp.enabled')"
+    else
+        print_info "$(_i18n '.handler.warp.disabled')"
+    fi
 }
 
 # =============================================================================
 # 函数名称: handler_reset_warp
-# 功能描述: 重新构建并启动 WARP 容器。
-#           1. 确保 Docker 已安装。
-#           2. 检查当前 WARP 状态。
-#           3. 如果已启用，则执行清空容器日志，并重置 WARP 容器。
-#           4. 如果未启用，则跳过。
+# 功能描述: 重置 WARP 出口 —— 丢弃本地凭据并重新注册一台设备, 再刷新 wireguard 出站。
+#           用途: 当前出口 IP 被目标站点风控时换一个 (原实现靠重建容器达成同一目的)。
 # 参数: 无
-# 返回值: 无 (通过调用其他函数和脚本执行操作)
+# 返回值: 0-成功或未启用 (未启用直接提示返回); 非 0-重新注册/落盘失败
+# 注意: 只改配置不重启服务 —— 重启会掐断用户当前连接, 交由用户自行选时机。
 # =============================================================================
 function handler_reset_warp() {
-    # 确保 Docker 已安装
-    handler_docker
-    # 从脚本配置中读取当前 WARP 状态
     local WARP_STATUS
     WARP_STATUS="$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.warp' || true)"
-    # 从 Xray 配置文件加载配置
-    XRAY_CONFIG="$(jq '.' "${XRAY_CONFIG_PATH}")"
-    # 如果 WARP 已启用 (状态为 1)
-    if is_enabled "${WARP_STATUS}"; then
-        # 清空 WARP 容器日志数据
-        exec_docker '--clean-container-logs'
-        # 调用 docker.sh 禁用 WARP 容器
-        exec_docker '--disable-warp'
-        # 调用 docker.sh 构建并启用 WARP 容器
-        exec_docker '--build-warp'
-        exec_docker '--enable-warp'
+    if ! is_enabled "${WARP_STATUS}"; then
+        print_warn "$(_i18n '.handler.warp.reset_need_enable')"
+        return 0
     fi
+    XRAY_CONFIG="$(jq '.' "${XRAY_CONFIG_PATH}")"
+    _warp_forget_credentials
+    local creds='' outbound=''
+    creds="$(_warp_ensure_credentials)" || return 1
+    outbound="$(_warp_outbound_json "${creds}")" || return 1
+    [[ -n "${outbound}" ]] || return 1
+    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --argjson ob "${outbound}" '
+        del(.outbounds[] | select(.tag == "warp")) | .outbounds += [$ob]')"
+    persist_xray_config || return 1
+    print_info "$(_i18n '.handler.warp.reset_done')"
 }
 
 # =============================================================================

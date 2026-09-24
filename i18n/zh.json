@@ -243,7 +243,17 @@
       "refresh_failed": "配置已更新，但订阅重建失败，订阅文件仍是旧的，请到主菜单 11 手动生成。"
     },
     "warp": {
-      "status": "WARP PROXY 没有开启，无法添加 WARP 分流"
+      "status": "WARP PROXY 没有开启，无法添加 WARP 分流",
+      "no_xray": "未找到 xray 可执行文件，无法生成 WireGuard 密钥。",
+      "key_failed": "生成 WireGuard 密钥失败（需本机 openssl 支持 X25519）。",
+      "key_probe_failed": "三组密钥编码均被本机 Xray 拒绝，多半是 Xray 版本过旧（wireguard 出站需较新版本）。最后尝试的编码：",
+      "no_curl": "缺少 curl，无法注册 WARP 账号。",
+      "register_failed": "WARP 注册失败（HTTP {code}）。部分机房 IP 段会被 Cloudflare 注册端点直接拒绝，可稍后重试。",
+      "register_parse_failed": "WARP 注册响应缺少必要字段（接口地址或 peer 公钥），本次启用已放弃，配置未改动。",
+      "enabled": "WARP 已启用（原生 WireGuard 出站，不再需要 Docker）。",
+      "disabled": "WARP 已关闭，指向 WARP 的分流规则已一并移除。",
+      "reset_done": "WARP 出口已重置（已重新注册设备），重启 Xray 后生效。",
+      "reset_need_enable": "WARP 未启用，无需重置。"
     },
     "geodata": {
       "close_cron": "成功停止 geodata 自动更新任务",

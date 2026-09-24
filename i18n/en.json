@@ -243,7 +243,17 @@
       "refresh_failed": "Config updated, but the subscription could not be regenerated — the files are stale; regenerate them via menu 11."
     },
     "warp": {
-      "status": "WARP PROXY is disabled, unable to add WARP routing"
+      "status": "WARP PROXY is disabled, unable to add WARP routing",
+      "no_xray": "xray executable not found, cannot generate WireGuard keys.",
+      "key_failed": "Failed to generate WireGuard keys (the local openssl must support X25519).",
+      "key_probe_failed": "All three key encodings were rejected by the local Xray; the installed Xray is likely too old (the wireguard outbound needs a newer build). Last tried encoding:",
+      "no_curl": "curl is missing, cannot register a WARP account.",
+      "register_failed": "WARP registration failed (HTTP {code}). Some hosting IP ranges are rejected outright by the Cloudflare endpoint; retry later.",
+      "register_parse_failed": "The WARP registration response lacks required fields (interface address or peer public key); this enable attempt was aborted and the config is unchanged.",
+      "enabled": "WARP enabled (native WireGuard outbound, Docker no longer required).",
+      "disabled": "WARP disabled; the routing rules that pointed at WARP were removed as well.",
+      "reset_done": "WARP exit reset (device re-registered). Restart Xray to take effect.",
+      "reset_need_enable": "WARP is not enabled, nothing to reset."
     },
     "geodata": {
       "close_cron": "Successfully stopped geodata auto-update task",

@@ -489,6 +489,9 @@ function allow_firewall_port() {
 }
 
 # 仅放行 TCP (保留原函数名, 供既有调用点与外部沿用)
+# 注: 生产链路已不再调用它 (ensure_firewall_port_open 直接调 allow_firewall_port), 但它
+#     并非死代码 —— test/http3_test.sh 的 T9 把它当作"纯 TCP 放行"的既有契约在驱动,
+#     删掉会让该用例变红。后续审计勿据"生产无调用点"判为死代码而清理。
 function allow_firewall_tcp_port() {
     allow_firewall_port "${1:-}" "${2:-}" 'tcp'
 }
@@ -1705,11 +1708,12 @@ function _health_deps() {
         _health_item 'pass' "$(_i18n ".${CUR_FILE}.health.deps_req_label")$(_i18n ".${CUR_FILE}.health.deps_ok")"
     fi
 
-    # 可选: 缺了只影响个别功能 (stat 影响体积/新鲜度计量, ss 影响端口检查等)
+    # 可选: 缺了只影响个别功能 (stat 影响体积/新鲜度计量, ss 影响端口检查,
+    #       qrencode 影响分享链接的终端二维码展示等)
     # 注: numfmt/column 曾是 traffic.sh 的隐式依赖 —— 未登记在 install.sh 清单里,
     #     最小化系统上会静默失败; 现已改为纯 awk 实现, 故从这里移除。
     missing_opt=''
-    for tmp in dig ss sysctl lsmod stat unzip tar base64 flock; do
+    for tmp in dig ss sysctl lsmod stat unzip tar base64 flock qrencode; do
         if ! cmd_exists "${tmp}"; then missing_opt="${missing_opt} ${tmp}"; fi
     done
     missing_opt="${missing_opt# }"

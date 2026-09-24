@@ -242,4 +242,54 @@ bash ~/xray-script-personal-use-only.sh --export-config --yes
 | Cloudflare WARP | `~/.xray-script-personal-use-only/warp.json`（WireGuard 凭据）|
 | 脚本状态 | `~/.xray-script-personal-use-only/{config.json, commit}` |
 
+## 依赖清单
+
+使用 SNI 配置时，脚本可能会安装以下依赖（与英文 README 的同名章节保持同口径）：
+
+| 用途 | Debian 系 | Red Hat 系 |
+| --- | --- | --- |
+| yumdb set（把包标记为手动安装） |  | yum-utils |
+| dnf config-manager |  | dnf-plugins-core |
+| 获取 IP | iproute2 | iproute |
+| DNS 解析 | dnsutils | bind-utils |
+| wget | wget | wget |
+| curl | curl | curl |
+| wget/curl 走 https | ca-certificates | ca-certificates |
+| kill/pkill/ps/sysctl/free | procps | procps-ng |
+| epel 源 |  | epel-release |
+| epel 源 |  | epel-next-release |
+| remi 源 |  | remi-release |
+| 防火墙 | ufw | firewalld |
+| **编译基础：** |  |  |
+| 下载源码 | wget | wget |
+| 解压 tar 源码 | tar | tar |
+| 解压 tar.gz 源码 | gzip | gzip |
+| gcc | gcc | gcc |
+| g++ | g++ | gcc-c++ |
+| make | make | make |
+| **acme.sh 依赖：** | curl | curl |
+|  | openssl | openssl |
+|  | cron | crontabs |
+| **编译 OpenSSL：** | perl-base（含于 libperl-dev） | perl-IPC-Cmd |
+|  | perl-modules-5.32（含于 libperl-dev） | perl-Getopt-Long |
+|  | libperl5.32（含于 libperl-dev） | perl-Data-Dumper |
+|  |  | perl-FindBin |
+| **编译 Brotli：** | git | git |
+|  | libbrotli-dev | brotli-devel |
+| **编译 Nginx：** | libpcre2-dev | pcre2-devel |
+|  | zlib1g-dev | zlib-devel |
+| --with-http_xslt_module | libxml2-dev | libxml2-devel |
+| --with-http_xslt_module | libxslt1-dev | libxslt-devel |
+| --with-http_image_filter_module | libgd-dev | gd-devel |
+| --with-google_perftools_module | libgoogle-perftools-dev | gperftools-devel |
+| --with-http_geoip_module | libgeoip-dev | geoip-devel |
+| --with-http_perl_module |  | perl-ExtUtils-Embed |
+|  | libperl-dev | perl-devel |
+| 终端二维码（分享链接，可选） | qrencode | qrencode |
+
+两点说明：
+
+- 清单**不含 `socat`**：它只在 acme.sh 的 standalone 模式（自己监听 80 端口）下需要，而本项目的证书签发固定走 `--webroot`（见 `service/ssl.sh`），从不使用 standalone，故新机不再安装该包。
+- `qrencode` 缺失**只影响**分享链接的终端二维码展示（缺失时仅告警、不中断），因此列为可选依赖；菜单 10「一键全量体检」的依赖分区会把它纳入可选依赖检查。
+
 *此脚本仅供交流学习使用，请勿使用此脚本行违法之事。网络非法外之地，行非法之事，必将接受法律制裁。*

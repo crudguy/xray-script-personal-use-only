@@ -437,7 +437,9 @@ function check_os() {
 # 返回值: 0-所有依赖都已安装 1-有依赖缺失 (由命令检查结果决定)
 # =============================================================================
 function check_dependencies() {
-    local packages=("ca-certificates" "openssl" "curl" "wget" "git" "jq" "tzdata" "qrencode" "socat")
+    # 注: 2026-09-24 移除 socat —— 仅 acme.sh standalone 模式需要, 本项目证书固定走
+    #     `acme.sh --issue --webroot`, 从不 standalone, 故新机不再白装该包。
+    local packages=("ca-certificates" "openssl" "curl" "wget" "git" "jq" "tzdata" "qrencode")
     local missing_packages=()
 
     # 根据操作系统类型检查特定的软件包
@@ -475,7 +477,9 @@ function check_dependencies() {
 # 返回值: 无 (执行包管理器命令安装软件)
 # =============================================================================
 function install_dependencies() {
-    local packages=("ca-certificates" "openssl" "curl" "wget" "git" "jq" "tzdata" "qrencode" "socat")
+    # 注: 2026-09-24 移除 socat —— 仅 acme.sh standalone 模式需要, 本项目证书固定走
+    #     `acme.sh --issue --webroot`, 从不 standalone, 故新机不再白装该包。
+    local packages=("ca-certificates" "openssl" "curl" "wget" "git" "jq" "tzdata" "qrencode")
 
     # 根据操作系统类型添加特定的软件包并执行安装
     case "$(_os)" in

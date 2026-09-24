@@ -275,8 +275,7 @@
       "purge_refused": "已拒绝卸载：当前 Nginx 不是本项目编译版，未做任何改动。",
       "http3_stripped": "本地 Nginx 未编译 HTTP/3 模块，已从站点配置中移除 quic 监听与 Alt-Svc，避免 Nginx 因无法识别该参数而启动失败。",
       "verify_failed": "Nginx 未能进入运行状态，请检查 Nginx 日志或 80/443 端口占用。",
-    "rollback_backup_missing": "未找到可回滚的备份配置 (stream.conf 或旧域名配置)，已跳过该步恢复。若站点不可用，请检查 Nginx 的 sites-available 配置。",
-    "update_backup_skipped": "未找到旧 nginx 二进制, 已跳过备份; 升级将继续写入新二进制。"
+    "rollback_backup_missing": "未找到可回滚的备份配置 (stream.conf 或旧域名配置)，已跳过该步恢复。若站点不可用，请检查 Nginx 的 sites-available 配置。"
     },
     "custom_sites": {
       "empty": "当前没有自定义站点",
@@ -495,7 +494,6 @@
       "occupied_pass": "端口未被占用：",
       "open_check": "正在检查防火墙是否放行端口：",
       "open_pass": "防火墙已放行端口：",
-      "open_fail": "防火墙未放行端口：",
       "open_skip": "未检测到活动防火墙策略，默认视为放行：",
       "firewall_active": "检测到活动防火墙：",
       "allow_try": "正在尝试自动放行端口：",

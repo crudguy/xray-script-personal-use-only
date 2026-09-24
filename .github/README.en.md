@@ -458,6 +458,12 @@ When using SNI configuration, the script may install the following dependencies:
 | --with-http_geoip_module           | libgeoip-dev                         | geoip-devel          |
 | --with-http_perl_module            |                                      | perl-ExtUtils-Embed  |
 |                                    | libperl-dev                          | perl-devel           |
+| Terminal QR code (share link, optional) | qrencode                       | qrencode             |
+
+Two notes:
+
+- The list **does not include `socat`**: it is only needed by acme.sh's standalone mode (which listens on port 80 itself), while this project always issues certificates via `--webroot` (see `service/ssl.sh`), so new machines no longer install it.
+- A missing `qrencode` only affects the terminal QR code of share links (it warns instead of aborting), so it is listed as optional; the dependency section of menu 10's full health check covers it as an optional dependency.
 
 ## Acknowledgements
 

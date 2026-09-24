@@ -384,7 +384,10 @@ function compile_dependencies() {
     # 打印安装依赖信息
     print_info "$(_i18n '.nginx.compile.install_deps')"
     # 安装基础工具和库
-    _install ca-certificates curl wget gcc make git openssl tzdata socat
+    # 注: 2026-09-24 移除 socat —— 它是 acme.sh **standalone** 模式才需要的依赖, 而本项目
+    #     的证书签发固定走 `acme.sh --issue --webroot`(见 service/ssl.sh:273/313), 从不使用
+    #     standalone, 故每台新机都会白装一个用不上的包。若日后新增 standalone 入口需加回。
+    _install ca-certificates curl wget gcc make git openssl tzdata
     case "$(_os)" in
     centos)
         # 安装 CentOS 特定的工具和开发库

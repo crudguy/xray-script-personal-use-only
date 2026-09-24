@@ -540,11 +540,15 @@ function _kcp_fallback_id() {
 # 参数:
 #   $1: mKCP seed (config.json 的 .xray.kcp)
 # 返回值: 0-stdout 打印可嵌入 streamSettings 的 finalmask JSON
-#         1-无法判定 (xray 缺失 / 不支持 -test / 两种写法都不被接受), 由调用方回退
+#         1-无法判定 (xray 缺失 / 不支持 -test / 两种写法都不被接受), 由调用方回退;
+#           此时若拿到过 xray 的报错, 会把**最后一条**打到 stderr 供排查 (见下)
+# 注意: 诊断输出必须走 stderr —— 调用方是 `if KCP_MASK="$(get_kcp_finalmask ...)"`,
+#       stdout 被命令替换捕获, 往里写会污染返回的 JSON。
 # =============================================================================
 function get_kcp_finalmask() {
     local seed="${1:-}"
     local id='' json='' tmp_dir='' tmp_file='' xray_bin=''
+    local err='' last_err=''
     # 定位 xray: 优先 PATH, 兜底用代码库约定的绝对路径 (与 traffic.sh / check.sh 一致)。
     # 仅依赖 command -v 会在脚本运行时 PATH 不含 /usr/local/bin 时漏掉已安装的 xray,
     # 误判"未安装"而走死路回退 (写 kcpSettings.seed, 而 26.x 已移除该字段)。
@@ -578,13 +582,22 @@ function get_kcp_finalmask() {
             }],
             outbounds: [{protocol: "freedom"}]
         }' >"${tmp_file}" 2>/dev/null || continue
-        if "${xray_bin}" run -test -config "${tmp_file}" >/dev/null 2>&1; then
+        # 捕获 xray 的 stdout+stderr: 成功时丢弃, 失败时留作诊断 (仅最后一个候选的报错保留)
+        if err="$("${xray_bin}" run -test -config "${tmp_file}" 2>&1)"; then
             rm -f "${tmp_file}"
             printf '%s' "${json}"
             return 0
         fi
+        last_err="${err}"
     done
     rm -f "${tmp_file}"
+    # 两种写法都不被接受: 把本机 xray 的最后一条报错打到 stderr。
+    # 此前这里静默 return 1, 调用方只能打印笼统的"未安装或不支持 -test"提示 —— 而真实原因
+    # 往往是"本机 xray 报某个我们没预期的错"(版本不在候选内 / 结构又改了), 静默会把它藏住。
+    if [[ -n "${last_err}" ]]; then
+        print_warn "$(_i18n '.handler.xray.kcp_mask_probe_error')"
+        printf '%s\n' "${last_err}" >&2
+    fi
     return 1
 }
 

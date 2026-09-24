@@ -3272,9 +3272,10 @@ function handler_bbr() {
 # --- 输出助手 ---
 # _warn / _info / _pass 已下沉到 _common.sh (print_warn / print_info / print_pass 的短名别名)。
 # 原先此处的注释写"与 check.sh / backup.sh 里的同名函数格式完全一致" —— 与事实不符:
-# backup.sh 确为逐字相同, 但 check.sh 的 _info 刻意为**黄色**且只取首参 (体检语境用颜色把
-# "信息"与"通过"在视觉上分开), 本文件的 _info 是绿色。该差异是刻意保留、非疏漏,
-# 现由 test/output_helper_sink_test.sh 显式守护。
+# backup.sh 确为逐字相同, 但 check.sh 的报告语汇刻意为**黄色**且只取首参 (体检语境用颜色把
+# "信息"与"通过"在视觉上分开)。现 check.sh 已改用 _check_info/_check_pass/_check_fail
+# 前缀彻底消歧义, 本文件的 _info 仍是 _common.sh 的绿色别名。该安排由
+# test/output_helper_sink_test.sh 显式守护。
 
 # =============================================================================
 # 函数名称: _net_norm
@@ -3311,7 +3312,7 @@ function _unit_exists() {
 # =============================================================================
 # 函数名称: handler_net_status
 # 功能描述: 转发到 check.sh 的只读网络体检, 并在有结论后写审计日志。
-#           体检本体放 check.sh —— 那里有现成的 _info/_pass/_fail 报告语汇,
+#           体检本体放 check.sh —— 那里有现成的 _check_info/_check_pass/_check_fail 报告语汇,
 #           且 check.sh 已被本项目当作"只读检查器"使用, 语义一致。
 # 参数: 无
 # 返回值: 恒为 0。原因: 本函数经 exec_handler 调用, 而 exec_handler 把非 0

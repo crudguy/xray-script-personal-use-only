@@ -47,45 +47,49 @@ readonly UUID_REGEX='^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-f
 # 注: EMAIL_REGEX 已迁至 core/_common.sh 作为单一来源 (与 service/ssl.sh 共用), 此处不再重复定义。
 
 # =============================================================================
-# 函数名称: _info
+# 函数名称: _check_info
 # 功能描述: 打印信息级别的提示消息。
 # 参数:
 #   $1: 消息内容 (msg)
 # 返回值: 无 (直接打印到标准错误输出 >&2)
-# 注: 本函数**刻意遮蔽** _common.sh 里的同名短名别名 (那版是绿色 + 取 $*) ——
-#     体检输出中"信息"(黄) 与"通过"(绿) 必须一眼可分, 故此处用黄色且只取首参。
-#     本定义位于 source _common.sh 之后, 遮蔽生效; 该刻意差异由
-#     test/output_helper_sink_test.sh 守护 (有人误删本地定义即变红)。
+# 注: 命名带 _check_ 前缀, 是为与本脚本 source 的 core/_common.sh 短名别名彻底分开 ——
+#     不重名就不存在"同名不同行为"的遮蔽陷阱 (读者不会误以为二者是同一函数)。
+# 注: 与 _common.sh 的 _info (绿色 + 取 $*) **行为刻意不同** —— 体检输出中"信息"(黄)
+#     与"通过"(绿) 必须一眼可分, 故此处用黄色且只取首参。该刻意差异由
+#     test/output_helper_sink_test.sh 守护 (有人误删本地定义或改回绿色即变红)。
 # =============================================================================
-function _info() {
+function _check_info() {
     # 从 i18n 数据中读取 "信息" 标题，然后用黄色打印消息
     printf "${YELLOW}[%s]${NC} %s\n" "$(_i18n '.title.info')" "${1:-}" >&2
 }
 
 # =============================================================================
-# 函数名称: _pass
+# 函数名称: _check_pass
 # 功能描述: 打印成功/通过级别的提示消息。
 # 参数:
 #   $1: 消息内容 (msg)
 # 返回值: 无 (直接打印到标准错误输出 >&2)
+# 注: 同 _check_info —— 用 _check_ 前缀避开 _common.sh 的 _pass 同名遮蔽 (那版取 $*),
+#     本函数只取首参, 与体检报告的单行语义一致。
 # =============================================================================
-function _pass() {
+function _check_pass() {
     # 从 i18n 数据中读取 "通过" 标题，然后用绿色打印消息
     printf "${GREEN}[%s]${NC} %s\n" "$(_i18n '.title.pass')" "${1:-}" >&2
 }
 
 # =============================================================================
-# 函数名称: _fail
+# 函数名称: _check_fail
 # 功能描述: 打印失败/错误级别的提示消息。
 # 参数:
 #   $1: 消息内容 (msg)
 # 返回值: 无 (直接打印到标准错误输出 >&2)
-# 注: 本函数与 tool/backup.sh 的同名函数**语义不同** —— backup.sh 的 _fail 会 exit 1,
-#     本函数只打印不退出 (体检流程需跑完全部检查项后再汇总), 故二者都未并入共享库。
+# 注: 本函数与 tool/backup.sh 的 _fail **语义不同** —— backup.sh 的它会 exit 1,
+#     本函数 (_check_fail) 只打印不退出 (体检流程需跑完全部检查项后再汇总), 故二者都未并入共享库。
+#     (backup.sh 的 _fail 与 _common.sh 无重名, 属孤例; 本脚本用 _check_ 前缀后全仓不再有同名歧义。)
 #     若有人给本函数加上 exit, 体检会在第一个失败项就中断 —— 见
 #     test/error_hint_test.sh T2 与 test/output_helper_sink_test.sh 的双重守护。
 # =============================================================================
-function _fail() {
+function _check_fail() {
     # $1=失败消息; $2=可选的可执行建议 (非空时以 [建议] 追加一行到 stderr)
     # 注意: 本函数仅打印, 不退出 —— 体检流程需跑完全部检查项后再汇总。
     local msg="${1:-}" hint="${2:-}"
@@ -136,17 +140,17 @@ function check_domain_format() {
 
     # 域名为空视为无效 (移除证书必须显式指定域名)
     if [[ -z "${domain}" ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.domain.empty")"
+        _check_fail "$(_i18n ".${CUR_FILE}.domain.empty")"
         return 1
     fi
 
     # 仅校验格式
     if ! valid_domain "$domain"; then
-        _fail "$(_i18n ".${CUR_FILE}.domain.format_error")${domain}"
+        _check_fail "$(_i18n ".${CUR_FILE}.domain.format_error")${domain}"
         return 1
     fi
 
-    _pass "$(_i18n ".${CUR_FILE}.domain.format_ok")${domain}"
+    _check_pass "$(_i18n ".${CUR_FILE}.domain.format_ok")${domain}"
     return 0
 }
 
@@ -259,7 +263,7 @@ function _rule_first_invalid() {
 #           供 core/handler.sh 的 exec_read 在**写盘前**调用, 使非法值"当场提示重输",
 #           而不是先写进配置、再由 xray 语法校验失败回滚 (回滚虽安全, 但用户看到的是
 #           一串报错 + 退出码 1, 体验差且掩盖了"其实就是值写错了")。
-#           校验通过时**静默返回 0** (不打印 _pass): 这是交互输入的写前闸门,
+#           校验通过时**静默返回 0** (不打印 _check_pass): 这是交互输入的写前闸门,
 #           不是体检报告, 成功路径保持安静更清爽。
 #           空输入视为"取消", 直接放行 (告警与 no-op 由 add_rule 的 value_empty 守卫统一负责)。
 # 参数: $1=原始输入
@@ -269,7 +273,7 @@ function check_rule_ip() {
     local bad=''
     bad="$(_rule_first_invalid 'ip' "${1:-}")"
     if [[ -n "${bad}" ]]; then
-        _fail "$(_i18n_sub ".${CUR_FILE}.rule.invalid_ip" '${value}' "${bad}")"
+        _check_fail "$(_i18n_sub ".${CUR_FILE}.rule.invalid_ip" '${value}' "${bad}")"
         return 1
     fi
     return 0
@@ -279,7 +283,7 @@ function check_rule_domain() {
     local bad=''
     bad="$(_rule_first_invalid 'domain' "${1:-}")"
     if [[ -n "${bad}" ]]; then
-        _fail "$(_i18n_sub ".${CUR_FILE}.rule.invalid_domain" '${value}' "${bad}")"
+        _check_fail "$(_i18n_sub ".${CUR_FILE}.rule.invalid_domain" '${value}' "${bad}")"
         return 1
     fi
     return 0
@@ -526,18 +530,18 @@ function ensure_firewall_port_open() {
     check_firewall_port_open "${port}" "${proto}"
     firewall_check_rc=$?
     if [[ ${firewall_check_rc} -eq 0 ]]; then
-        _pass "$(_i18n ".${CUR_FILE}.sni_ports.open_pass")${tag}"
+        _check_pass "$(_i18n ".${CUR_FILE}.sni_ports.open_pass")${tag}"
         return 0
     fi
 
     active_firewalls_raw="$(detect_active_firewalls)"
     if [[ -z "${active_firewalls_raw}" ]]; then
-        _info "$(_i18n ".${CUR_FILE}.sni_ports.open_skip")${tag}"
+        _check_info "$(_i18n ".${CUR_FILE}.sni_ports.open_skip")${tag}"
         return 0
     fi
     read -r -a active_firewalls <<<"${active_firewalls_raw}"
 
-    _info "$(_i18n ".${CUR_FILE}.sni_ports.firewall_active")${active_firewalls_raw}"
+    _check_info "$(_i18n ".${CUR_FILE}.sni_ports.firewall_active")${active_firewalls_raw}"
     _test "$(_i18n ".${CUR_FILE}.sni_ports.allow_try")${tag}"
     for firewall in "${active_firewalls[@]}"; do
         if ! allow_firewall_port "${firewall}" "${port}" "${proto}"; then
@@ -548,12 +552,12 @@ function ensure_firewall_port_open() {
     check_firewall_port_open "${port}" "${proto}"
     firewall_check_rc=$?
     if [[ ${allow_failed} -eq 0 && ${firewall_check_rc} -eq 0 ]]; then
-        _pass "$(_i18n ".${CUR_FILE}.sni_ports.allow_pass")${tag}"
+        _check_pass "$(_i18n ".${CUR_FILE}.sni_ports.allow_pass")${tag}"
         return 0
     fi
 
-    _fail "$(_i18n ".${CUR_FILE}.sni_ports.allow_fail")${tag}"
-    _info "$(_i18n ".${CUR_FILE}.sni_ports.manual_allow")${tag}"
+    _check_fail "$(_i18n ".${CUR_FILE}.sni_ports.allow_fail")${tag}"
+    _check_info "$(_i18n ".${CUR_FILE}.sni_ports.manual_allow")${tag}"
     return 1
 }
 
@@ -571,16 +575,16 @@ function check_sni_ports() {
     local port=''
     local occupied_by=''
 
-    _info "$(_i18n ".${CUR_FILE}.sni_ports.start")"
+    _check_info "$(_i18n ".${CUR_FILE}.sni_ports.start")"
 
     for port in "${required_ports[@]}"; do
         _test "$(_i18n ".${CUR_FILE}.sni_ports.occupied_check")${port}"
         occupied_by="$(get_listening_process_by_port "${port}")"
         if [[ -n "${occupied_by}" ]]; then
-            _fail "$(_i18n ".${CUR_FILE}.sni_ports.occupied_fail")${port} (${occupied_by})" "$(_i18n ".${CUR_FILE}.sni_ports.occupied_fail_hint")"
+            _check_fail "$(_i18n ".${CUR_FILE}.sni_ports.occupied_fail")${port} (${occupied_by})" "$(_i18n ".${CUR_FILE}.sni_ports.occupied_fail_hint")"
             return 1
         fi
-        _pass "$(_i18n ".${CUR_FILE}.sni_ports.occupied_pass")${port}"
+        _check_pass "$(_i18n ".${CUR_FILE}.sni_ports.occupied_pass")${port}"
 
         if ! ensure_firewall_tcp_port_open "${port}"; then
             return 1
@@ -596,10 +600,10 @@ function check_sni_ports() {
             return 1
         fi
     else
-        _info "$(_i18n ".${CUR_FILE}.sni_ports.http3_skip")"
+        _check_info "$(_i18n ".${CUR_FILE}.sni_ports.http3_skip")"
     fi
 
-    _pass "$(_i18n ".${CUR_FILE}.sni_ports.all_pass")"
+    _check_pass "$(_i18n ".${CUR_FILE}.sni_ports.all_pass")"
     return 0
 }
 
@@ -618,10 +622,10 @@ function ensure_http3_udp_ready() {
     _test "$(_i18n ".${CUR_FILE}.sni_ports.udp_occupied_check")${port}/UDP"
     occupied_by="$(get_listening_process_by_udp_port "${port}")"
     if [[ -n "${occupied_by}" ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.sni_ports.udp_occupied_fail")${port}/UDP (${occupied_by})" "$(_i18n ".${CUR_FILE}.sni_ports.udp_occupied_fail_hint")"
+        _check_fail "$(_i18n ".${CUR_FILE}.sni_ports.udp_occupied_fail")${port}/UDP (${occupied_by})" "$(_i18n ".${CUR_FILE}.sni_ports.udp_occupied_fail_hint")"
         return 1
     fi
-    _pass "$(_i18n ".${CUR_FILE}.sni_ports.udp_occupied_pass")${port}/UDP"
+    _check_pass "$(_i18n ".${CUR_FILE}.sni_ports.udp_occupied_pass")${port}/UDP"
 
     ensure_firewall_port_open "${port}" 'udp'
 }
@@ -670,19 +674,19 @@ function check_ip() {
     local ip="${1:-}" # 获取 IP 地址参数
 
     # 打印正在检查的信息
-    _info "$(_i18n ".${CUR_FILE}.ip.check")${ip}"
+    _check_info "$(_i18n ".${CUR_FILE}.ip.check")${ip}"
 
     # 使用正则表达式检查 IPv4 格式
     if [[ "$ip" =~ $IPV4_REGEX ]]; then
-        _pass "$(_i18n ".${CUR_FILE}.ip.ipv4_valid")$ip"
+        _check_pass "$(_i18n ".${CUR_FILE}.ip.ipv4_valid")$ip"
         return 0
     # 使用正则表达式检查 IPv6 格式
     elif [[ "$ip" =~ $IPV6_REGEX ]]; then
-        _pass "$(_i18n ".${CUR_FILE}.ip.ipv6_valid")$ip"
+        _check_pass "$(_i18n ".${CUR_FILE}.ip.ipv6_valid")$ip"
         return 0
     else
         # 如果都不匹配，则为无效 IP
-        _fail "$(_i18n ".${CUR_FILE}.ip.invalid")$ip"
+        _check_fail "$(_i18n ".${CUR_FILE}.ip.invalid")$ip"
         return 1
     fi
 }
@@ -698,11 +702,11 @@ function check_port() {
     local port="${1:-}" # 获取端口号参数
 
     # 打印正在检查的信息
-    _info "$(_i18n ".${CUR_FILE}.port.check")${port}"
+    _check_info "$(_i18n ".${CUR_FILE}.port.check")${port}"
 
     # 如果端口为空，则认为是有效的（可能表示使用默认值）
     if [[ -z "${port}" ]]; then
-        _pass "$(_i18n ".${CUR_FILE}.port.empty")"
+        _check_pass "$(_i18n ".${CUR_FILE}.port.empty")"
     # 检查端口号是否在 1-65535 范围内
     # 注: 必须写 10#${port} 强制十进制 —— bash 的算术上下文会把带前导 0 的
     #     字面量当八进制, 于是用户敲 "08" / "080" 这类补零写法时, 不是被正常
@@ -710,10 +714,10 @@ function check_port() {
     #     `((: 08: value too great for base (error token is "08"))`
     #     再被当成非法端口, 用户完全看不懂自己错在哪。
     elif [[ "${port}" =~ ^[0-9]+$ ]] && ((10#${port} >= 1 && 10#${port} <= 65535)); then
-        _pass "$(_i18n ".${CUR_FILE}.port.valid")$port"
+        _check_pass "$(_i18n ".${CUR_FILE}.port.valid")$port"
     else
         # 如果超出范围，则为无效
-        _fail "$(_i18n ".${CUR_FILE}.port.range_error")$port"
+        _check_fail "$(_i18n ".${CUR_FILE}.port.range_error")$port"
         return 1
     fi
     return 0
@@ -738,17 +742,17 @@ function check_uuid() {
     # 打印正在检查的信息
     # 注: UUID 属于**节点标识**而非口令, 且随后会以分享链接/二维码形式完整展示给用户,
     #     用户需要据此核对自己输入的是哪一份, 因此这里保留回显(与其它口令类字段不同)。
-    _info "$(_i18n ".${CUR_FILE}.uuid.check")${uuid}"
+    _check_info "$(_i18n ".${CUR_FILE}.uuid.check")${uuid}"
 
     # 如果 UUID 为空，则认为是有效的（表示自动生成）
     if [[ -z "${uuid}" ]]; then
-        _pass "$(_i18n ".${CUR_FILE}.uuid.empty")"
+        _check_pass "$(_i18n ".${CUR_FILE}.uuid.empty")"
     # 如果 UUID 不符合标准格式，则认为是有效的字符串（可能表示使用普通字符串）
     elif ! [[ "$uuid" =~ $UUID_REGEX ]]; then
-        _pass "$(_i18n ".${CUR_FILE}.uuid.string")$uuid"
+        _check_pass "$(_i18n ".${CUR_FILE}.uuid.string")$uuid"
     else
         # 如果符合标准格式，则为有效 UUID
-        _pass "$(_i18n ".${CUR_FILE}.uuid.valid")$uuid"
+        _check_pass "$(_i18n ".${CUR_FILE}.uuid.valid")$uuid"
     fi
     return 0
 }
@@ -757,11 +761,11 @@ function check_uuid() {
 # 函数名称: check_password
 # 功能描述: 验证密码是否符合基本安全要求（无空格、长度>=8）。
 #   空值是**合法输入**: 表示"不指定, 由上层自动生成" (见 i18n: password.empty),
-#   故走 _pass + return 0。此前注释写的"空则无效"与实现相反, 属注释错误, 已订正。
+#   故走 _check_pass + return 0。此前注释写的"空则无效"与实现相反, 属注释错误, 已订正。
 # 参数:
 #   $1: 待检查的密码 (password)。同时用于 Trojan 密码与 mKCP seed —— 均为真实凭据。
 # 返回值: 0-有效 1-无效 (并打印相应的提示信息到 >&2)
-# 注: 本函数**不得回显明文**。此前的实现在 _info/_pass/_fail 四处把密码原样打到
+# 注: 本函数**不得回显明文**。此前的实现在 _check_info/_check_pass/_check_fail 四处把密码原样打到
 #     stderr, 而 stderr 不随管道消失 —— 终端回滚、screen/tmux 日志、运维录屏、
 #     `2>log` 重定向都会永久留存 Trojan 密码与 mKCP seed。现统一改为掩码+长度。
 # =============================================================================
@@ -772,11 +776,11 @@ function check_password() {
     [[ -n "${password}" ]] && masked="****(${#password} 字符)"
 
     # 打印正在检查的信息
-    _info "$(_i18n ".${CUR_FILE}.password.check")${masked}"
+    _check_info "$(_i18n ".${CUR_FILE}.password.check")${masked}"
 
     # 如果密码为空，则视为"交由上层自动生成"，合法
     if [[ -z "${password}" ]]; then
-        _pass "$(_i18n ".${CUR_FILE}.password.empty")"
+        _check_pass "$(_i18n ".${CUR_FILE}.password.empty")"
         return 0
     fi
 
@@ -784,18 +788,18 @@ function check_password() {
     # 注: 原写法 `=~ *\ *` 是非法 ERE, bash 会报 "invalid regular expression"
     #     且 [[ ]] 返回 2, 在 if 中恒为假 => 该校验此前从未生效 (SC2049)。
     if [[ "${password}" =~ [[:space:]] ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.password.space_error")${masked}"
+        _check_fail "$(_i18n ".${CUR_FILE}.password.space_error")${masked}"
         return 1
     fi
 
     # 检查密码长度是否小于 8
     if ((${#password} < 8)); then
-        _fail "$(_i18n ".${CUR_FILE}.password.length_error")${masked}"
+        _check_fail "$(_i18n ".${CUR_FILE}.password.length_error")${masked}"
         return 1
     fi
 
     # 如果所有检查都通过，则密码有效
-    _pass "$(_i18n ".${CUR_FILE}.password.valid")${masked}"
+    _check_pass "$(_i18n ".${CUR_FILE}.password.valid")${masked}"
     return 0
 }
 
@@ -810,40 +814,40 @@ function check_path() {
     local path="${1:-}" # 获取路径参数
 
     # 打印正在检查的信息
-    _info "$(_i18n ".${CUR_FILE}.path.check")${path}"
+    _check_info "$(_i18n ".${CUR_FILE}.path.check")${path}"
 
     # 如果路径为空，则认为是有效的（可能表示使用根路径）
     if [[ -z "${path}" ]]; then
-        _pass "$(_i18n ".${CUR_FILE}.path.empty")"
+        _check_pass "$(_i18n ".${CUR_FILE}.path.empty")"
         return 0
     fi
 
     # 检查路径中是否包含空格 (同上: 原 `=~ *\ *` 非法 ERE, 校验恒未生效)。
     if [[ "${path}" =~ [[:space:]] ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.path.space_error")$path"
+        _check_fail "$(_i18n ".${CUR_FILE}.path.space_error")$path"
         return 1
     fi
 
     # 检查路径长度是否超过 128
     if ((${#path} > 128)); then
-        _fail "$(_i18n ".${CUR_FILE}.path.length_error")$path"
+        _check_fail "$(_i18n ".${CUR_FILE}.path.length_error")$path"
         return 1
     fi
 
     # 检查路径是否包含不允许的字符（只允许字母、数字、下划线、斜杠、点、连字符）
     if [[ "${path}" =~ [^a-zA-Z0-9_/.\-] ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.path.char_error")$path"
+        _check_fail "$(_i18n ".${CUR_FILE}.path.char_error")$path"
         return 1
     fi
 
     # 检查路径是否包含连续的斜杠
     if [[ "${path}" =~ // ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.path.double_slash_error")$path"
+        _check_fail "$(_i18n ".${CUR_FILE}.path.double_slash_error")$path"
         return 1
     fi
 
     # 如果所有检查都通过，则路径有效
-    _pass "$(_i18n ".${CUR_FILE}.path.valid")$path"
+    _check_pass "$(_i18n ".${CUR_FILE}.path.valid")$path"
     return 0
 }
 
@@ -858,34 +862,34 @@ function check_short_id() {
     local short_id="${1:-}" # 获取 Short ID 参数
 
     # 打印正在检查的信息
-    _info "$(_i18n ".${CUR_FILE}.short.check")${short_id}"
+    _check_info "$(_i18n ".${CUR_FILE}.short.check")${short_id}"
 
     # 如果 Short ID 为空，则认为是有效的
     if [[ -z "${short_id}" ]]; then
-        _pass "$(_i18n ".${CUR_FILE}.short.empty")"
+        _check_pass "$(_i18n ".${CUR_FILE}.short.empty")"
         return 0
     fi
 
     # 如果 Short ID 是 0-8 的单个数字，则认为是有效的（表示生成指定长度的 ID）
     if [[ ${short_id} =~ ^[0-8]$ ]]; then
-        _pass "$(_i18n ".${CUR_FILE}.short.digit")$short_id"
+        _check_pass "$(_i18n ".${CUR_FILE}.short.digit")$short_id"
         return 0
     fi
 
     # 检查 Short ID 的长度是否为奇数或超过 16
     if ((${#short_id} % 2 != 0 || ${#short_id} > 16)); then
-        _fail "$(_i18n ".${CUR_FILE}.short.length_error")$short_id"
+        _check_fail "$(_i18n ".${CUR_FILE}.short.length_error")$short_id"
         return 1
     fi
 
     # 检查 Short ID 是否为有效的十六进制字符串
     if ! [[ "${short_id}" =~ $HEX_REGEX ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.short.hex_error")$short_id"
+        _check_fail "$(_i18n ".${CUR_FILE}.short.hex_error")$short_id"
         return 1
     fi
 
     # 如果所有检查都通过，则 Short ID 有效
-    _pass "$(_i18n ".${CUR_FILE}.short.valid")$short_id"
+    _check_pass "$(_i18n ".${CUR_FILE}.short.valid")$short_id"
     return 0
 }
 
@@ -900,31 +904,31 @@ function check_domain_security() {
     local domain="${1:-}" # 获取域名参数
 
     # 打印正在检查的信息
-    _info "$(_i18n ".${CUR_FILE}.domain.security_check")${domain}"
+    _check_info "$(_i18n ".${CUR_FILE}.domain.security_check")${domain}"
 
     # 如果域名为空，则认为是有效的（可能表示不使用域名）
     if [[ -z "${domain}" ]]; then
-        _pass "$(_i18n ".${CUR_FILE}.domain.empty")"
+        _check_pass "$(_i18n ".${CUR_FILE}.domain.empty")"
         return 0
     fi
 
     # 检查域名格式是否有效
     if ! valid_domain "$domain"; then
-        _fail "$(_i18n ".${CUR_FILE}.domain.format_error")$domain"
+        _check_fail "$(_i18n ".${CUR_FILE}.domain.format_error")$domain"
         return 1
     fi
 
     # 测试域名解析
     _test "$(_i18n ".${CUR_FILE}.domain.resolve")${domain}"
     if ! resolve_domain "$domain"; then
-        _fail "$(_i18n ".${CUR_FILE}.domain.resolve_fail")$domain" "$(_i18n ".${CUR_FILE}.domain.resolve_fail_hint")"
+        _check_fail "$(_i18n ".${CUR_FILE}.domain.resolve_fail")$domain" "$(_i18n ".${CUR_FILE}.domain.resolve_fail_hint")"
         return 1
     fi
 
     # 测试到域名 443 端口的 TCP 连接
     _test "$(_i18n ".${CUR_FILE}.tcp.connect_check"): ${domain}:443"
     if ! test_tcp_connection "$domain" 443; then
-        _fail "$(_i18n_sub ".${CUR_FILE}.tcp.connect_fail" '${domain}' "${domain}")"
+        _check_fail "$(_i18n_sub ".${CUR_FILE}.tcp.connect_fail" '${domain}' "${domain}")"
         return 1
     fi
 
@@ -933,28 +937,28 @@ function check_domain_security() {
     local tls_info=''
     # 注: 必须 `|| true` —— 在 set -Eeuo pipefail 下, openssl 连接失败(或上面 timeout
     #   杀掉它)会让整条管道返回非 0, 赋值语句随即触发 ERR trap 中断整个体检,
-    #   下面"取不到 TLS 信息就 _fail 提示"的分支**永远走不到**。
-    #   接住后, 失败表现为 tls_info 为空串, 正常落到下方的 _fail, 给出可读提示。
+    #   下面"取不到 TLS 信息就 _check_fail 提示"的分支**永远走不到**。
+    #   接住后, 失败表现为 tls_info 为空串, 正常落到下方的 _check_fail, 给出可读提示。
     tls_info=$(get_tls_info "$domain" || true)
 
     # 检查是否支持 TLS 1.3
     if ! echo "$tls_info" | grep -q "TLSv1.3"; then
-        _fail "$(_i18n ".${CUR_FILE}.tls.error")"
+        _check_fail "$(_i18n ".${CUR_FILE}.tls.error")"
         return 1
     else
-        _pass "$(_i18n ".${CUR_FILE}.tls.pass")"
+        _check_pass "$(_i18n ".${CUR_FILE}.tls.pass")"
     fi
 
     # 检查是否使用 X25519 密钥交换算法
     if echo "$tls_info" | grep -q "X25519"; then
-        _pass "$(_i18n ".${CUR_FILE}.tls.key_exchange_pass")"
+        _check_pass "$(_i18n ".${CUR_FILE}.tls.key_exchange_pass")"
     else
-        _fail "$(_i18n ".${CUR_FILE}.tls.key_exchange_warn")$domain"
+        _check_fail "$(_i18n ".${CUR_FILE}.tls.key_exchange_warn")$domain"
         return 1
     fi
 
     # 如果所有检查都通过，则域名安全检查通过
-    _pass "$(_i18n_sub ".${CUR_FILE}.domain.security_pass" '${domain}' "${domain}")"
+    _check_pass "$(_i18n_sub ".${CUR_FILE}.domain.security_pass" '${domain}' "${domain}")"
     return 0
 }
 
@@ -969,23 +973,23 @@ function check_dns_resolution() {
     local domain="${1:-}" # 获取域名参数
 
     # 打印正在检查的信息
-    _info "$(_i18n ".${CUR_FILE}.dns.check_start")${domain}"
+    _check_info "$(_i18n ".${CUR_FILE}.dns.check_start")${domain}"
 
     # 检查域名格式是否有效
     if ! valid_domain "$domain"; then
-        _fail "$(_i18n ".${CUR_FILE}.domain.format_error")$domain"
+        _check_fail "$(_i18n ".${CUR_FILE}.domain.format_error")$domain"
         return 1
     fi
 
     # 测试域名解析
     _test "$(_i18n ".${CUR_FILE}.domain.resolve"): ${domain}"
     if ! dns_resolution "$domain"; then
-        _fail "$(_i18n ".${CUR_FILE}.dns.resolution_fail")$domain" "$(_i18n ".${CUR_FILE}.dns.resolution_fail_hint")"
+        _check_fail "$(_i18n ".${CUR_FILE}.dns.resolution_fail")$domain" "$(_i18n ".${CUR_FILE}.dns.resolution_fail_hint")"
         return 1
     fi
 
     # 如果解析正确，则检查通过
-    _pass "$(_i18n_sub ".${CUR_FILE}.dns.check_pass" '${domain}' "${domain}")"
+    _check_pass "$(_i18n_sub ".${CUR_FILE}.dns.check_pass" '${domain}' "${domain}")"
     return 0
 }
 
@@ -1002,14 +1006,14 @@ function check_xray_config_exists() {
     local CONFIG_FILE="${CONFIG_XRAY_DIR}/${SCRIPT_FILE}.json"
 
     # 打印正在检查的信息
-    _info "$(_i18n ".${CUR_FILE}.config.check")${CONFIG_FILE}"
+    _check_info "$(_i18n ".${CUR_FILE}.config.check")${CONFIG_FILE}"
 
     # 检查文件是否存在
     if [[ -f "${CONFIG_FILE}" ]]; then
-        _pass "$(_i18n ".${CUR_FILE}.config.exist")${CONFIG_FILE}"
+        _check_pass "$(_i18n ".${CUR_FILE}.config.exist")${CONFIG_FILE}"
         return 0
     else
-        _fail "$(_i18n ".${CUR_FILE}.config.not_exist")${CONFIG_FILE}" "$(_i18n ".${CUR_FILE}.config.not_exist_hint")"
+        _check_fail "$(_i18n ".${CUR_FILE}.config.not_exist")${CONFIG_FILE}" "$(_i18n ".${CUR_FILE}.config.not_exist_hint")"
         return 1
     fi
 }
@@ -1025,7 +1029,7 @@ function check_xray_version_exists() {
     local version="${1:-}" # 获取版本号参数
 
     # 打印正在检查的信息
-    _info "$(_i18n ".${CUR_FILE}.version.check")v${version}"
+    _check_info "$(_i18n ".${CUR_FILE}.version.check")v${version}"
 
     # 构造 GitHub Releases 页面的 URL
     # 注: 必须经 _gh_url —— handler.sh 里取版本号的同类请求都走它, 而这里曾是裸域名。
@@ -1041,16 +1045,16 @@ function check_xray_version_exists() {
     # 网络不可达要单独识别: curl 连不上时 -w 打出的是 000, 与"版本真的不存在"(404)
     # 是两回事。混为一谈会把网络故障误报成"你填的版本号不对", 让用户白改一通配置。
     if [[ "$status_code" == "000" || -z "$status_code" ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.version.network_error")"
+        _check_fail "$(_i18n ".${CUR_FILE}.version.network_error")"
         return 1
     fi
 
     # 检查状态码是否为 200 (OK)
     if [[ "$status_code" == "200" ]]; then
-        _pass "$(_i18n ".${CUR_FILE}.version.exist")${version}"
+        _check_pass "$(_i18n ".${CUR_FILE}.version.exist")${version}"
         return 0
     else
-        _fail "$(_i18n ".${CUR_FILE}.version.not_exist")${version}"
+        _check_fail "$(_i18n ".${CUR_FILE}.version.not_exist")${version}"
         return 1
     fi
 }
@@ -1066,20 +1070,20 @@ function validate_email() {
     local email="${1:-}" # 获取邮箱地址参数
 
     # 打印正在检查的信息
-    _info "$(_i18n ".${CUR_FILE}.email.check")${email}"
+    _check_info "$(_i18n ".${CUR_FILE}.email.check")${email}"
 
     # 如果邮箱地址为空，则认为无效
     if [[ -z "${email}" ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.email.empty")"
+        _check_fail "$(_i18n ".${CUR_FILE}.email.empty")"
         return 1
     fi
 
     # 使用正则表达式检查邮箱格式
     if [[ "$email" =~ $EMAIL_REGEX ]]; then
-        _pass "$(_i18n ".${CUR_FILE}.email.valid")$email"
+        _check_pass "$(_i18n ".${CUR_FILE}.email.valid")$email"
         return 0
     else
-        _fail "$(_i18n ".${CUR_FILE}.email.format_error")$email"
+        _check_fail "$(_i18n ".${CUR_FILE}.email.format_error")$email"
         return 1
     fi
 }
@@ -1100,59 +1104,59 @@ function check_proxy_target() {
     local host=''
     local port=''
 
-    _info "$(_i18n ".${CUR_FILE}.proxy_target.check")${raw_target}"
+    _check_info "$(_i18n ".${CUR_FILE}.proxy_target.check")${raw_target}"
 
     if [[ -z "${raw_target}" ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.proxy_target.empty")"
+        _check_fail "$(_i18n ".${CUR_FILE}.proxy_target.empty")"
         return 1
     fi
 
     if [[ "${raw_target}" =~ ^[0-9]+$ ]]; then
         normalized_target="http://127.0.0.1:${raw_target}"
-        _info "$(_i18n ".${CUR_FILE}.proxy_target.normalized")${normalized_target}"
+        _check_info "$(_i18n ".${CUR_FILE}.proxy_target.normalized")${normalized_target}"
     fi
 
     if [[ "${normalized_target}" =~ [[:space:]] ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.proxy_target.format_error")${normalized_target}"
+        _check_fail "$(_i18n ".${CUR_FILE}.proxy_target.format_error")${normalized_target}"
         return 1
     fi
 
     if [[ "${normalized_target}" == *'?'* || "${normalized_target}" == *'#'* ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.proxy_target.path_error")${normalized_target}"
+        _check_fail "$(_i18n ".${CUR_FILE}.proxy_target.path_error")${normalized_target}"
         return 1
     fi
 
     if [[ "${normalized_target}" =~ ^https?://[^/]+/ ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.proxy_target.path_error")${normalized_target}"
+        _check_fail "$(_i18n ".${CUR_FILE}.proxy_target.path_error")${normalized_target}"
         return 1
     fi
 
     if ! [[ "${normalized_target}" =~ ^(https?)://([^/]+)$ ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.proxy_target.format_error")${normalized_target}"
+        _check_fail "$(_i18n ".${CUR_FILE}.proxy_target.format_error")${normalized_target}"
         return 1
     fi
     scheme="${BASH_REMATCH[1]}"
     authority="${BASH_REMATCH[2]}"
 
     if [[ "${scheme}" != 'http' && "${scheme}" != 'https' ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.proxy_target.scheme_error")${normalized_target}"
+        _check_fail "$(_i18n ".${CUR_FILE}.proxy_target.scheme_error")${normalized_target}"
         return 1
     fi
 
     if ! [[ "${authority}" =~ ^([^:]+):([0-9]+)$ ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.proxy_target.format_error")${normalized_target}"
+        _check_fail "$(_i18n ".${CUR_FILE}.proxy_target.format_error")${normalized_target}"
         return 1
     fi
     host="${BASH_REMATCH[1]}"
     port="${BASH_REMATCH[2]}"
 
     if [[ "${host}" != 'localhost' ]] && ! [[ "${host}" =~ ${IPV4_REGEX} ]] && ! valid_domain "${host}"; then
-        _fail "$(_i18n ".${CUR_FILE}.proxy_target.host_error")${host}"
+        _check_fail "$(_i18n ".${CUR_FILE}.proxy_target.host_error")${host}"
         return 1
     fi
 
     check_port "${port}" || return 1
-    _pass "$(_i18n ".${CUR_FILE}.proxy_target.valid")${normalized_target}"
+    _check_pass "$(_i18n ".${CUR_FILE}.proxy_target.valid")${normalized_target}"
     echo "${normalized_target}"
     return 0
 }
@@ -1171,10 +1175,10 @@ function check_custom_site_domain() {
     local primary_domain=''
     local cdn_domain=''
 
-    _info "$(_i18n ".${CUR_FILE}.custom_domain.check")${domain}"
+    _check_info "$(_i18n ".${CUR_FILE}.custom_domain.check")${domain}"
 
     if [[ -z "${domain}" ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.custom_domain.empty")"
+        _check_fail "$(_i18n ".${CUR_FILE}.custom_domain.empty")"
         return 1
     fi
 
@@ -1184,21 +1188,21 @@ function check_custom_site_domain() {
     cdn_domain="$(jq -r '.nginx.cdn' "${SCRIPT_CONFIG_PATH}")"
 
     if [[ -n "${primary_domain}" && "${primary_domain}" != 'null' && "${domain}" == "${primary_domain}" && "${domain}" != "${ignore_domain}" ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.custom_domain.duplicate_domain")${domain}"
+        _check_fail "$(_i18n ".${CUR_FILE}.custom_domain.duplicate_domain")${domain}"
         return 1
     fi
 
     if [[ -n "${cdn_domain}" && "${cdn_domain}" != 'null' && "${domain}" == "${cdn_domain}" && "${domain}" != "${ignore_domain}" ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.custom_domain.duplicate_cdn")${domain}"
+        _check_fail "$(_i18n ".${CUR_FILE}.custom_domain.duplicate_cdn")${domain}"
         return 1
     fi
 
     if jq -e --arg domain "${domain}" --arg ignore "${ignore_domain}" '.nginx.custom_sites // [] | any(.domain == $domain and .domain != $ignore)' "${SCRIPT_CONFIG_PATH}" >/dev/null; then
-        _fail "$(_i18n ".${CUR_FILE}.custom_domain.duplicate_custom")${domain}"
+        _check_fail "$(_i18n ".${CUR_FILE}.custom_domain.duplicate_custom")${domain}"
         return 1
     fi
 
-    _pass "$(_i18n ".${CUR_FILE}.custom_domain.valid")${domain}"
+    _check_pass "$(_i18n ".${CUR_FILE}.custom_domain.valid")${domain}"
     return 0
 }
 
@@ -1214,24 +1218,24 @@ function check_list_index() {
     local index="${1:-}"
     local total="${2:-0}"
 
-    _info "$(_i18n ".${CUR_FILE}.list_index.check")${index}"
+    _check_info "$(_i18n ".${CUR_FILE}.list_index.check")${index}"
 
     if ! [[ "${total}" =~ ^[0-9]+$ ]] || ((total < 1)); then
-        _fail "$(_i18n ".${CUR_FILE}.list_index.empty_list")"
+        _check_fail "$(_i18n ".${CUR_FILE}.list_index.empty_list")"
         return 1
     fi
 
     if ! [[ "${index}" =~ ^[0-9]+$ ]]; then
-        _fail "$(_i18n ".${CUR_FILE}.list_index.format_error")${index}"
+        _check_fail "$(_i18n ".${CUR_FILE}.list_index.format_error")${index}"
         return 1
     fi
 
     if ((index < 1 || index > total)); then
-        _fail "$(_i18n_sub ".${CUR_FILE}.list_index.range_error" '${total}' "${total}")${index}"
+        _check_fail "$(_i18n_sub ".${CUR_FILE}.list_index.range_error" '${total}' "${total}")${index}"
         return 1
     fi
 
-    _pass "$(_i18n ".${CUR_FILE}.list_index.valid")${index}"
+    _check_pass "$(_i18n ".${CUR_FILE}.list_index.valid")${index}"
     return 0
 }
 

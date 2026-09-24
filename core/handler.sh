@@ -643,10 +643,15 @@ function persist_xray_config() {
     printf '%s\n' "${XRAY_CONFIG}" | _atomic_write "${XRAY_CONFIG_PATH}" || _error "$(_i18n '.handler.persist.write_failed')"
     # 写后语义复核: 用 xray 自身解析一遍, 不通过则回滚到备份并终止
     if ! _verify_xray_config "${XRAY_CONFIG_PATH}"; then
+        # 写后复核未通过且已回滚到备份 —— 配置处于安全状态。这里**不再 _error 退出**:
+        # _error 会一路冒泡成 install.sh trampoline 的"脚本在第 N 行意外失败", 并直接杀掉整个
+        # 交互脚本, 用户被迫重进菜单。改为 print_warn + 以非 0 返回, 交由 exec_handler 软失败
+        # (回到菜单, 可重试), 行为对齐仓库既有的"预期内不可用 → print_warn + 回菜单"惯例。
         if [[ -f "${backup_path}" ]]; then
             cp -f "${backup_path}" "${XRAY_CONFIG_PATH}" 2>/dev/null || true
         fi
-        _error "$(_i18n '.handler.persist.verify_failed')"
+        print_warn "$(_i18n '.handler.persist.verify_failed')"
+        return 1
     fi
     # 配置已落盘且复核通过 -> 订阅 (写死了入站参数的派生快照) 需要重建; 只置脏, 见收口说明
     SUB_REFRESH_DIRTY=1

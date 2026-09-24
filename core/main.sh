@@ -98,7 +98,12 @@ function exec_handler() {
     local exit_code=0
     bash "${HANDLER_PATH}" "$@" || exit_code=$?
     if [[ ${exit_code} -ne 0 ]]; then
-        _error "$(_i18n ".${CUR_FILE}.handler_failed")"
+        # 软失败而非 _error: handler 返回非 0 属可预期情况 (如配置复查未通过且已回滚)。
+        # 若 _error 会退出整个交互脚本, 用户被迫重进菜单; 这里只警告并 return 0 吸收非 0,
+        # 让调用方 (菜单循环) 自然回到菜单 —— 因 main.sh 启用 set -e, 必须返回 0 才不会被
+        # 当成脚本崩溃。真正致命的错 (依赖缺失等) 由 handler 内部 _error 直接退出, 不经此路。
+        print_warn "$(_i18n ".${CUR_FILE}.handler_failed")"
+        return 0
     fi
 }
 
@@ -648,7 +653,9 @@ function processes_backup() {
 function processes_index() {
     # 主循环 (P1-2): 操作完成后回到主菜单, 支持连续配置而无需重敲命令/重渲染 banner+status。
     #   - 顶层 `* / EOF` 仍 exit 0 (get_choose 在 EOF 归一为 0, 见 menu.sh, 不会空转);
-    #   - exec_handler 失败会 _error 退出整个脚本 (真实错误, 预期行为), 不回菜单。
+    #   - exec_handler 失败**不再** _error 退出整个脚本: 改为 print_warn + 软失败回菜单
+    #     (配置复查未通过等可恢复错误可重试), 见 exec_handler 注释。真正致命的错由 handler
+    #     内部 _error 直接退出, 不经 exec_handler 这一层。
     while true; do
         # 显示 Banner + 状态信息 + 主菜单, 并读取用户选择。
         # 注: 原实现为 banner / status / index 各 fork 一次 menu.sh —— 3 个子进程、

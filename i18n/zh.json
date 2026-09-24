@@ -14,7 +14,7 @@
   },
   "main": {
     "not_support": "当前脚本配置类型不是 SNI ，无法使用该功能",
-    "handler_failed": "操作执行失败，已安全退出以避免污染配置或环境",
+    "handler_failed": "操作执行失败，配置已回滚，已返回菜单（可重试）",
     "lock_busy": "检测到已有 xray-script-personal-use-only 实例正在运行，为避免并发修改配置已退出。请等待其结束再重试；如确认无其它实例，可删除 ~/.xray-script-personal-use-only/.xray-script-personal-use-only.lock 或设置 XRAY_SCRIPT_NO_LOCK=1。",
     "backup_input_path": "备份归档路径(e.g. /root/.xray-script-personal-use-only/backup/xxx.tar.gz): ",
     "backup_ipath_required": "未指定备份归档路径，已取消导入",

@@ -14,7 +14,7 @@
   },
   "main": {
     "not_support": "Current script configuration type is not SNI, this feature is not available",
-    "handler_failed": "Operation failed; exited safely to avoid configuration or environment contamination",
+    "handler_failed": "Operation failed; configuration rolled back; returned to menu (retryable)",
     "lock_busy": "Another xray-script-personal-use-only instance is already running; exited to avoid concurrent configuration changes. Wait for it to finish and retry. If you are sure no other instance exists, remove ~/.xray-script-personal-use-only/.xray-script-personal-use-only.lock or set XRAY_SCRIPT_NO_LOCK=1.",
     "backup_input_path": "Backup archive path (e.g. /root/.xray-script-personal-use-only/backup/xxx.tar.gz): ",
     "backup_ipath_required": "No backup archive path given; import cancelled",

@@ -22,8 +22,24 @@ FAIL=0
 ok() { PASS=$((PASS + 1)); }
 bad() { FAIL=$((FAIL + 1)); echo "  [FAIL] $1"; }
 # 断言基于"去注释后的代码", 避免命中注释里提到的反面示例 (如注释里的 `sysctl --system`)
-has() { if printf '%s' "$FUNC_CODE" | grep -qF -- "$1"; then ok; else bad "$2 (缺: $1)"; fi; }
-hasnt() { if printf '%s' "$FUNC_CODE" | grep -qF -- "$1"; then bad "$2 (不应出现: $1)"; else ok; fi; }
+#
+# 注: 这里刻意**不用** `printf '%s' "$FUNC_CODE" | grep -q` —— FUNC_CODE 有 4KB+ (handler_net_tune
+#     函数体 4109 字节), 而 bash 的 printf 在 4096 字节处 flush, 也就是要发两次 write。
+#     `grep -q` 命中首行(第一块)就退出, 第二次 write 撞上已关闭的管道 -> printf 收 SIGPIPE,
+#     管道在 pipefail 下返回 141, 于是"命中"被判定成"未命中" —— 判定随机翻红 (2026-09-24 在
+#     CI 里实测偶发一次, 载荷只越过 4KB 边界 13 字节, 所以极难稳定复现)。
+#     改用 `[[ == ]]` 变量匹配: 无子进程、无管道、无缓冲边界, 判定确定。
+has() { if [[ "${FUNC_CODE}" == *"$1"* ]]; then ok; else bad "$2 (缺: $1)"; fi; }
+hasnt() { if [[ "${FUNC_CODE}" != *"$1"* ]]; then ok; else bad "$2 (不应出现: $1)"; fi; }
+
+# ---- T0 自我守卫: 代码里不得出现"printf 管道 + grep -q"的判定写法 ----
+# 扫描前先剥掉整行注释 —— 否则本文件解释这件事的注释自己就会把守卫判红 (自匹配是这类
+# 守卫最常见的假红来源)。模式拆成两段在不同行上拼接, 并要求 printf 与 grep -q 在**同一行**。
+_p1='printf[^|]*'
+_p2='\|[[:space:]]*grep -q'
+if grep -vE '^[[:space:]]*#' "$0" | grep -qE "${_p1}${_p2}"; then
+    bad "T0: 仍存在 printf 管道加 grep -q 的判定 (4KB 缓冲边界处会随机翻红)"
+else ok; fi
 
 # --- 抽取函数体 (不加载整个 handler.sh, 避免顶层副作用) ---
 FUNC_SRC="$(awk '/^function handler_net_tune\(\) \{/{f=1} f{print} f&&/^}/{exit}' core/handler.sh)"

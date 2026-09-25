@@ -9,6 +9,8 @@
 #      handler.sh / backup.sh 各一份 _info/_warn。改一处忘一处即漂移 —— handler.sh 的
 #      注释就写着"与 check.sh / backup.sh 里的同名函数格式完全一致", 而实际 check.sh
 #      的 _info 是**黄色** (体检语境用它把"信息"与"通过"分开), 与事实不符。
+#      (以上为发现时的状态; 现 handler.sh 该注释已自我更正, check.sh 的三个本地助手
+#       也已改名为 _check_info/_check_pass/_check_fail —— 本测试即这道更名的守卫。)
 #   2) 更要命的是一处**真实缺陷**: core/share.sh 由 `bash "${CUR_DIR}/share.sh"` 子进程
 #      执行 (main.sh:156/245), 不继承父进程函数; 其 cache_json_data 在"Xray 未安装"分支
 #      调用 _error —— 而全仓无定义, 用户实际看到的是

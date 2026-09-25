@@ -3,7 +3,8 @@
 # 测试名称: handler_misc_arms_test.sh
 # 测试目标: handler.sh 里四条**长期零覆盖**的分派臂的行为回归。
 #
-# 为什么需要本测试: 全仓审计发现 handler.sh 的 48 个分派臂中约 2/3 在测试里从未出现。
+# 为什么需要本测试: 全仓审计发现 handler.sh 的分派臂中约 2/3 在测试里从未出现
+#   (2026-09-24 审计时的比例; 此后陆续补测, 比例在下降, 故不再写死臂数绝对数)。
 #   其中这四条风险与可测性都靠前, 却一条断言都没有 ——
 #     handler_remove_certificate   移除证书 -> 站点 HTTPS 立即失效 (有二次确认, 取消路径必须一次不写)
 #     handler_reset_script_config  重置脚本配置 -> 字段保留清单写错即丢数据 (version/warp/rules 等)

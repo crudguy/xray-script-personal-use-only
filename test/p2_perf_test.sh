@@ -2,7 +2,7 @@
 # P2-1 性能项回归守卫 (纯 bash, 不依赖 jq / 真实菜单).
 # 锁定两项低成本性能修复:
 #   (1) print_banner 不再 fork `bash generate.sh --random` 子进程, 改用内置 $RANDOM;
-#   (2) load_i18n 加"已加载则跳过"守卫, 主循环每轮不再重展平 683 键 JSON.
+#   (2) load_i18n 加"已加载则跳过"守卫, 主循环每轮不再重展平整份 i18n JSON.
 set -u
 PASS=0; FAIL=0
 ok(){ PASS=$((PASS+1)); printf '  [PASS] %s\n' "$1"; }

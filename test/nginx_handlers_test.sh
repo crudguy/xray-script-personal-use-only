@@ -3,7 +3,7 @@
 # 测试名称: nginx_handlers_test.sh
 # 测试目标: Nginx「三件套」(install / update / purge) 的行为回归。
 #
-# 为什么需要本测试: 全仓审计显示 core/handler.sh 的 35 个分派臂里 22 个在测试中从未
+# 为什么需要本测试: 全仓审计显示 core/handler.sh 的分派臂里有相当数量在测试中从未
 # 出现, Nginx 三件套是其中**唯一会写系统目录**的一组 —— 编译安装落 /usr/local/nginx,
 # 卸载会 rm -rf 安装目录并删 /usr/sbin/nginx 与 systemd 单元。误删发行版 Nginx 会让
 # 机器上其它站点一起失去 Web 服务, 而静态检查 (bash -n / shellcheck) 对此完全无感。

@@ -3,7 +3,9 @@
 # 测试名称: handler_purge_nofile_test.sh
 # 测试目标: handler.sh 里**两条最不可逆的路径**的行为回归。
 #
-# 为什么需要本测试: 全仓审计发现 handler.sh 的 35 个分派臂中 22 个在测试里从未出现,
+# 为什么需要本测试: 全仓审计发现 handler.sh 的分派臂中相当一部分在测试里从未出现
+#   (2026-09-24 审计时约占 2/3; 此后臂数与覆盖数都在变, 故此处不再写死数字 ——
+#    要查当前值用: awk 抽 handler.sh 的 main() 后 grep -c 看臂数)。
 # 其中风险最高的两个恰恰零覆盖 ——
 #   handler_purge        卸载 Xray (不可逆), 且会清本项目写进 cron / Nginx 的痕迹
 #   handler_nofile_limit 改 /etc/security/limits.d + /etc/systemd/*.conf.d 三个文件,

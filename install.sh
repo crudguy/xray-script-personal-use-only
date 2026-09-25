@@ -379,7 +379,8 @@ function _error() {
 # 函数名称: check_os
 # 功能描述: 检查操作系统是否受支持 (脚本运行的【通用基线】)。
 #
-# 注意: 这是 install.sh 单文件自包含副本, 与 service/nginx.sh 的 check_os 同名但
+# 注意: 这是 install.sh 单文件自包含副本, 与 service/nginx.sh 的 check_os_nginx_build
+#       同名而不同义 (那边 2026-09 由 check_os 改名而来, 并提高了版本门槛), 两边阈值也不同:
 #       基线**不同**是刻意的 —— 那边是"编译 Nginx"的专项要求 (Ubuntu>=20/Debian>=10,
 #       受构建依赖的库版本约束), 这里是"本脚本能否运行"的通用要求。两者不要互相
 #       对齐: 一旦把通用基线抬到 20, Ubuntu 18 用户将连脚本都装不上; 反之若把编译
@@ -1007,7 +1008,12 @@ function main() {
             PROJECT_ROOT="${1:-}"
             ;;
         # 无交互直达参数 (与 core/main.sh 的 case 一一对应)
-        --health | --net-status | --bbr | --net-tune | --nofile-limit | --export-config | --import-config | --subscription | --start | --stop | --restart | --share)
+        #   新增 core 侧直达参数时**必须同步这里** —— 漏登记的会落到下面的 `*)`, 在未出现
+        #   直达参数时不收集, 于是 core/main.sh 收到空参数列表 -> 落回交互菜单。`--ipv6-*`
+        #   四个参数就曾整组漏登记 (ea03a53 新增), 症状是"加了参数却像没加"。行数不多就用
+        #   穷举而非前缀匹配: 一键安装类 (--vision/--xhttp/--fallback) 刻意不在此列, 它们
+        #   需要走到安装确认流程, 不该被当成"跑完就退出"的直达项。
+        --health | --net-status | --bbr | --net-tune | --nofile-limit | --export-config | --import-config | --subscription | --start | --stop | --restart | --share | --ipv6-status | --ipv6-enable | --ipv6-disable | --ipv6-disable-hard)
             DIRECT_CALL="${1:-}"
             DIRECT_ARGS+=("${1:-}")
             ;;

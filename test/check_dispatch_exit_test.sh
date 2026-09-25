@@ -57,7 +57,9 @@ dispatch_block() {
 }
 # $1 = check.sh 路径; 输出: 每个缺 `|| exit $?` 的分派臂 (一行一条)
 missing_guard_arms() {
-    dispatch_block "$1" | grep -E '^    --[a-z-]+\)' | grep -vF '|| exit $? ;;' || true
+    # 字符集必须带 0-9: `--ipv6-status` 这类含数字的臂若被正则漏掉, 它写没写 `|| exit $?`
+    # 就再没人管 —— 本测试自己失去意义却照样绿 (09-25 修的就是这个)。
+    dispatch_block "$1" | grep -E '^    --[a-z0-9-]+\)' | grep -vF '|| exit $? ;;' || true
 }
 
 # ---------------------------------------------------------------------------
@@ -165,7 +167,8 @@ case "${NEG_MISSING}" in
 *'--ip)'*) ok ;;
 *) bad "T4: 摘掉守卫后静态判据未变红 —— T1 形同虚设 (missing=[${NEG_MISSING}])" ;;
 esac
-# 只该红这一个臂: 其余 19 个守卫仍在 (证明判据是逐臂的, 不是"整体有就行")
+# 只该红这一个臂: 其余 20 个守卫仍在 (证明判据是逐臂的, 不是"整体有就行")
+#   数得出来的前提: 扫描正则的字符集带 0-9, `--ipv6-status` 这类含数字的臂不会被漏掉
 NEG_MISSING_N="$(printf '%s\n' "${NEG_MISSING}" | grep -c . || true)"
 [[ "${NEG_MISSING_N}" -eq 1 ]] && ok ||
     bad "T4: 期望恰好 1 个臂缺守卫, 实测 ${NEG_MISSING_N} 个"

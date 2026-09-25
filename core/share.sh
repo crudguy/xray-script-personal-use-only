@@ -41,7 +41,9 @@ fi
 source "${_XRAY_SCRIPT_DIR}/_common.sh"
 
 # 定义配置文件和相关目录的路径
-readonly GENERATE_PATH="${CUR_DIR}/generate.sh"                # 项目中的 generate.sh 脚本路径
+# 注: 此处曾声明 GENERATE_PATH (generate.sh), 仅为"从 serverNames/shortIds 里随机挑一项"
+#   而 fork 一次子进程 —— 已改用 bash 内建 $RANDOM, 声明随之删除 (留着会触发 SC2034)。
+#   真正需要 generate.sh 的地方 (UUID / 密钥生成) 在 handler.sh 侧, 它有自己的声明。
 readonly XRAY_CONFIG_PATH="/usr/local/etc/xray/config.json"    # Xray 服务端配置文件路径
 
 # --- 全局变量声明 ---
@@ -209,48 +211,80 @@ function cache_json_data() {
 function get_common_config() {
     local inbound_index=$1 # 获取 inbound 索引参数
 
-    # 统一探测公网地址 (双栈, 绕过代理, 结果缓存); 非 CDN 模式用其作为远程主机
+    # 统一探测公网地址 (双栈, 绕过代理, 结果缓存 —— 含跨进程落盘缓存, 见
+    # _common.sh:_public_ip_cache_read); 非 CDN 模式用其作为远程主机
     # (v4 优先, 仅 v6 主机回退 [v6], 见 _common.sh:_preferred_remote_host)。
     # 探测必须"直调"以回写缓存: 订阅会按 inbound 逐个调本函数, 直调后同进程只探测
     # 一次; 若写成 remote_host="$(_resolve_public_ips ...)" 则子 shell 丢缓存。
     _resolve_public_ips >/dev/null
     CLIENT_CONFIG[remote_host]="$(_preferred_remote_host)"
-    # 从脚本配置中获取端口号
-    CLIENT_CONFIG[port]="$(echo "${SCRIPT_CONFIG}" | jq -r ".xray.port")"
-    # 从脚本配置中获取 Reality 公钥
-    CLIENT_CONFIG[public_key]="$(echo "${SCRIPT_CONFIG}" | jq -r ".xray.publicKey")"
-    # 从脚本配置中获取配置标签 (tag)
-    CLIENT_CONFIG[tag]="$(echo "${SCRIPT_CONFIG}" | jq -r ".xray.tag")"
 
-    # 从 Xray 配置中获取协议类型 (如 vless, trojan)
-    CLIENT_CONFIG[protocol]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].protocol? | if . == null then empty else . end')"
-    # 从 Xray 配置中获取客户端 UUID (VLESS) 或密码 (Trojan)
-    CLIENT_CONFIG[uuid]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].settings.clients[0].id? | if . == null then empty else . end')"
-    # 从 Xray 配置中获取客户端密码 (Trojan)
-    CLIENT_CONFIG[password]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].settings.clients[0].password? | if . == null then empty else . end')"
-    # 从 Xray 配置中获取 mKCP 的种子 (seed)
-    # Xray 26.x 起 seed 迁进 finalmask, 且类型 id 改过名 —— mkcp-legacy 用 settings.value,
-    # mkcp-aes128gcm 用 settings.password, 两种都要认; 更老的配置还可能留 kcpSettings.seed。
-    # 取首个命中项 (finalmask.udp 理论上可有多条), 并容忍残留的 camelCase finalMask 键。
-    CLIENT_CONFIG[seed]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '
-        .inbounds[$i].streamSettings as $ss
-        | ( [ ($ss.finalmask // $ss.finalMask).udp[]?
-              | select(.type == "mkcp-legacy" or .type == "mkcp-aes128gcm")
-              | (.settings.value // .settings.password) ][0]
-            // $ss.kcpSettings.seed
-            // "" )')"
-    # 从 Xray 配置中获取网络传输类型 (如 tcp, kcp, xhttp)
-    CLIENT_CONFIG[type]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.network? | if . == null then empty else . end')"
-    # 从 Xray 配置中获取 Flow 控制参数 (如 xtls-rprx-vision)
-    CLIENT_CONFIG[flow]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].settings.clients[0].flow? | if . == null then empty else . end')"
-    # 从 Xray 配置中获取安全传输类型 (如 none, tls, reality)
-    CLIENT_CONFIG[security]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.security? | if . == null then empty else . end')"
-    # 从 Xray 配置中获取 XHTTP 的路径 (path)
-    CLIENT_CONFIG[path]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.xhttpSettings.path? | if . == null then empty else . end')"
-    # 从 Xray 配置中随机获取一个 Reality 的服务器名称 (serverNames)
-    CLIENT_CONFIG[server_name]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" --argjson random "$(bash "${GENERATE_PATH}" '--random')" '.inbounds[$i].streamSettings.realitySettings.serverNames? | if . == null then empty else .[$random % length] end')"
-    # 从 Xray 配置中随机获取一个 Reality 的 Short ID (shortIds)
-    CLIENT_CONFIG[short_id]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" --argjson random "$(bash "${GENERATE_PATH}" '--random')" '.inbounds[$i].streamSettings.realitySettings.shortIds? | if . == null then empty else .[$random % length] end')"
+    # --- 一次 jq 取完脚本配置的三个字段 (port / publicKey / tag) ---
+    # 为什么要合并: 原实现每条字段一次 `echo "$CFG" | jq`, 单入站订阅就要 fork 65 次
+    #   jq; 订阅按入站逐个调本函数, 5 节点的 SNI 配置 fork 数翻倍 —— 这几百毫秒
+    #   在低配 VPS 上会被放大成"点一下卡一下"。合并后每个入站只剩 2 次 jq。
+    # 分隔符用 \x1f (Unit Separator) 而非制表符: tab 属于 IFS 的空白字符, read 会把
+    #   连续 tab 合并、空字段直接丢失 (端口空缺这类场景会串位); \x1f 不是空白, 空字段保留。
+    local srow='' s_port='' s_public_key='' s_tag=''
+    srow="$(printf '%s' "${SCRIPT_CONFIG}" | jq -r '[ (.xray.port // ""), (.xray.publicKey // ""), (.xray.tag // "") ] | map(tostring) | join("\u001f")')"
+    IFS=$'\x1f' read -r s_port s_public_key s_tag <<<"${srow}"
+    CLIENT_CONFIG[port]="${s_port}"
+    CLIENT_CONFIG[public_key]="${s_public_key}"
+    CLIENT_CONFIG[tag]="${s_tag}"
+
+    # --- 一次 jq 取完 Xray 配置的全部入站字段 ---
+    # 随机索引用 bash 内建 $RANDOM: 这里只是"从 serverNames/shortIds 数组里随机挑一项",
+    #   不是密钥生成, 无需 /dev/urandom 级别的不可预测性; 原实现为拿随机数 fork 一次
+    #   `bash generate.sh --random` (要重新 source _common.sh), 每个入站 2 次、纯属浪费。
+    #   真正的密钥/UUID 生成仍走 generate.sh, 不受影响。
+    local r1=$((RANDOM)) r2=$((RANDOM))
+    local row='' f_protocol='' f_uuid='' f_password='' f_seed='' f_type='' f_flow='' f_security='' f_path='' f_server_name='' f_short_id='' f_inbound_tag=''
+    row="$(printf '%s' "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" --argjson r1 "${r1}" --argjson r2 "${r2}" '
+        .inbounds[$i] as $in
+        | ($in.streamSettings // {}) as $ss
+        | ($ss.realitySettings // {}) as $rs
+        | [
+            # 协议类型 (vless / trojan / ...)
+            ($in.protocol? // ""),
+            # 客户端 UUID (VLESS) 与密码 (Trojan)
+            ($in.settings.clients[0].id? // ""),
+            ($in.settings.clients[0].password? // ""),
+            # mKCP 种子: Xray 26.x 起迁进 finalmask, 且类型 id 改过名 ——
+            # mkcp-legacy 用 settings.value, mkcp-aes128gcm 用 settings.password,
+            # 两种都要认; 更老的配置还可能留 kcpSettings.seed。取首个命中项
+            # (finalmask.udp 理论上可有多条), 并容忍残留的 camelCase finalMask 键。
+            ( [ ($ss.finalmask // $ss.finalMask).udp[]?
+                | select(.type == "mkcp-legacy" or .type == "mkcp-aes128gcm")
+                | (.settings.value // .settings.password) ][0]
+              // $ss.kcpSettings.seed
+              // "" ),
+            # 网络传输类型 (tcp / kcp / xhttp)
+            ($ss.network? // ""),
+            # Flow 控制 (xtls-rprx-vision) 与安全类型 (none / tls / reality)
+            ($in.settings.clients[0].flow? // ""),
+            ($ss.security? // ""),
+            # XHTTP 路径
+            ($ss.xhttpSettings.path? // ""),
+            # Reality serverNames / shortIds 各随机取一项; 数组为空或缺失 -> 空串
+            # (原写法 `.[$r % length]` 在空数组上是除零, 会让整条 jq 以非 0 退出)
+            ( (($rs.serverNames?) // []) as $sn | if ($sn | length) == 0 then "" else $sn[$r1 % ($sn | length)] end ),
+            ( (($rs.shortIds?) // []) as $si | if ($si | length) == 0 then "" else $si[$r2 % ($si | length)] end ),
+            # 入站自身 tag (订阅模式用作节点名, 省掉外面再 fork 一次 jq)
+            ($in.tag? // "")
+          ] | map(tostring) | join("\u001f")')"
+    IFS=$'\x1f' read -r f_protocol f_uuid f_password f_seed f_type f_flow f_security f_path f_server_name f_short_id f_inbound_tag <<<"${row}"
+
+    CLIENT_CONFIG[protocol]="${f_protocol}"
+    CLIENT_CONFIG[uuid]="${f_uuid}"
+    CLIENT_CONFIG[password]="${f_password}"
+    CLIENT_CONFIG[seed]="${f_seed}"
+    CLIENT_CONFIG[type]="${f_type}"
+    CLIENT_CONFIG[flow]="${f_flow}"
+    CLIENT_CONFIG[security]="${f_security}"
+    CLIENT_CONFIG[path]="${f_path}"
+    CLIENT_CONFIG[server_name]="${f_server_name}"
+    CLIENT_CONFIG[short_id]="${f_short_id}"
+    CLIENT_CONFIG[inbound_tag]="${f_inbound_tag}"
 }
 
 # =============================================================================
@@ -322,7 +356,9 @@ function get_reality_down_json() {
     sni_path="$(echo "${SCRIPT_CONFIG}" | jq -r ".xray.path")"
     # 从 Xray 配置中随机获取一个 Reality 的 Short ID
     local short_id
-    short_id="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" --argjson random "$(bash "${GENERATE_PATH}" '--random')" '.inbounds[$i].streamSettings.realitySettings.shortIds | .[$random % length?]')"
+    # 随机索引用 bash 内建 $RANDOM: 这里只是从数组里挑一项, 不是密钥生成;
+    #   原实现为此 fork 一次 `bash generate.sh --random` (要重新 source _common.sh)。
+    short_id="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" --argjson random "$((RANDOM))" '.inbounds[$i].streamSettings.realitySettings.shortIds | .[$random % length?]')"
 
     # 使用 Here Document 构造 Reality 下行设置的 JSON 字符串
     XHTTP_EXTRA=$(
@@ -484,9 +520,13 @@ function get_fallback_xhttp_share_link() {
     # 从 Xray 配置中重新读取 fallback inbound 的安全类型
     CLIENT_CONFIG[security]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.security? | if . == null then empty else . end')"
     # 从 Xray 配置中重新随机读取 fallback inbound 的服务器名称
-    CLIENT_CONFIG[server_name]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" --argjson random "$(bash "${GENERATE_PATH}" '--random')" '.inbounds[$i].streamSettings.realitySettings.serverNames | .[$random % length?]')"
+    # 随机索引用 bash 内建 $RANDOM: 这里只是从数组里挑一项, 不是密钥生成;
+    #   原实现为此 fork 一次 `bash generate.sh --random` (要重新 source _common.sh)。
+    CLIENT_CONFIG[server_name]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" --argjson random "$((RANDOM))" '.inbounds[$i].streamSettings.realitySettings.serverNames | .[$random % length?]')"
     # 从 Xray 配置中重新随机读取 fallback inbound 的 Short ID
-    CLIENT_CONFIG[short_id]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" --argjson random "$(bash "${GENERATE_PATH}" '--random')" '.inbounds[$i].streamSettings.realitySettings.shortIds | .[$random % length?]')"
+    # 随机索引用 bash 内建 $RANDOM: 这里只是从数组里挑一项, 不是密钥生成;
+    #   原实现为此 fork 一次 `bash generate.sh --random` (要重新 source _common.sh)。
+    CLIENT_CONFIG[short_id]="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" --argjson random "$((RANDOM))" '.inbounds[$i].streamSettings.realitySettings.shortIds | .[$random % length?]')"
 
     # 调用通用的 XHTTP 链接生成函数
     get_xhttp_share_link
@@ -741,21 +781,13 @@ function _collect_node() {
 function clash_build_proxy() {
     local n="$1"
     local nl=$'\n'
-    local name scheme user host port type security sni pbk sid fp flow path seed
-    name="$(jq -r '.tag' <<<"${n}")"
-    scheme="$(jq -r '.scheme' <<<"${n}")"
-    user="$(jq -r '.user' <<<"${n}")"
-    host="$(jq -r '.host' <<<"${n}")"
-    port="$(jq -r '.port' <<<"${n}")"
-    type="$(jq -r '.type' <<<"${n}")"
-    security="$(jq -r '.security' <<<"${n}")"
-    sni="$(jq -r '.sni' <<<"${n}")"
-    pbk="$(jq -r '.pbk' <<<"${n}")"
-    sid="$(jq -r '.sid' <<<"${n}")"
-    fp="$(jq -r '.fp' <<<"${n}")"
-    flow="$(jq -r '.flow' <<<"${n}")"
-    path="$(jq -r '.path' <<<"${n}")"
-    seed="$(jq -r '.seed' <<<"${n}")"
+    # 一次 jq 取完 13 个字段 (原为 13 次 `jq -r '.x' <<<"$n"`): 订阅按节点逐个调本函数,
+    # 5 节点就是 65 次 fork, 在低配 VPS 上是可感知的卡顿。分隔与读取方式同 get_common_config
+    # (\x1f 而非 tab: tab 属 IFS 空白, 空字段会被 read 合并掉导致后续字段串位)。
+    local row=''
+    row="$(jq -r '[ .tag, .scheme, .user, .host, .port, .type, .security, .sni, .pbk, .sid, .fp, .flow, .path, .seed ] | map(. // "" | tostring) | join("\u001f")' <<<"${n}")"
+    local name='' scheme='' user='' host='' port='' type='' security='' sni='' pbk='' sid='' fp='' flow='' path='' seed=''
+    IFS=$'\x1f' read -r name scheme user host port type security sni pbk sid fp flow path seed <<<"${row}"
 
     # 注: 双引号串里的 "\n" 是字面反斜杠-n, 必须用 ANSI-C 引号 $'\n' 才表示真实换行,
     #      否则整段 proxy 会被压成一行含字面 \n 的文本, Clash YAML 直接拒读。
@@ -822,10 +854,12 @@ function clash_build_proxy() {
 # =============================================================================
 function singbox_build_outbound() {
     local n="$1"
-    local scheme type security
-    scheme="$(jq -r '.scheme' <<<"${n}")"
-    type="$(jq -r '.type' <<<"${n}")"
-    security="$(jq -r '.security' <<<"${n}")"
+    # 一次 jq 取完 13 个字段 (原为 4 次 + 构造时内嵌 9 次命令替换 = 13 次 fork, 且这部分
+    # 每节点都要跑一遍)。分隔/读取方式同 get_common_config (\x1f 而非 tab)。
+    local row=''
+    row="$(jq -r '[ .scheme, .type, .security, (.port // ""), .tag, .host, .user, .sni, .fp, .flow, .pbk, .sid, .path ] | map(. // "" | tostring) | join("\u001f")' <<<"${n}")"
+    local scheme='' type='' security='' nport='' ntag='' nhost='' nuser='' nsni='' nfp='' nflow='' npbk='' nsid='' npath=''
+    IFS=$'\x1f' read -r scheme type security nport ntag nhost nuser nsni nfp nflow npbk nsid npath <<<"${row}"
 
     # sing-box 无 mKCP 传输, 跳过并计数
     if [[ "${type}" == "kcp" ]]; then
@@ -836,23 +870,21 @@ function singbox_build_outbound() {
     # 端口守卫 (与 _collect_node 同源问题): 节点 JSON 里的 port 可能是空串或非数字,
     # 直接喂给 --argjson 会让 jq 解析失败并中断整个 sing-box 订阅生成。
     # 注: 值为 null 时 jq -r 输出字面 null, --argjson 能接受; 但空串不行, 故统一守卫。
-    local nport
-    nport="$(jq -r '.port // empty' <<<"${n}")"
     [[ "${nport}" =~ ^[0-9]+$ ]] || nport=443
 
     local obj
     obj="$(jq -nc \
         --arg scheme "${scheme}" \
-        --arg tag "$(jq -r '.tag' <<<"${n}")" \
-        --arg host "$(jq -r '.host' <<<"${n}")" \
+        --arg tag "${ntag}" \
+        --arg host "${nhost}" \
         --argjson port "${nport}" \
-        --arg user "$(jq -r '.user' <<<"${n}")" \
-        --arg sni "$(jq -r '.sni' <<<"${n}")" \
-        --arg fp "$(jq -r '.fp' <<<"${n}")" \
-        --arg flow "$(jq -r '.flow' <<<"${n}")" \
-        --arg pbk "$(jq -r '.pbk' <<<"${n}")" \
-        --arg sid "$(jq -r '.sid' <<<"${n}")" \
-        --arg path "$(jq -r '.path' <<<"${n}")" \
+        --arg user "${nuser}" \
+        --arg sni "${nsni}" \
+        --arg fp "${nfp}" \
+        --arg flow "${nflow}" \
+        --arg pbk "${npbk}" \
+        --arg sid "${nsid}" \
+        --arg path "${npath}" \
         --arg type "${type}" \
         --arg security "${security}" \
         '
@@ -1050,8 +1082,9 @@ function _subscription_collect_all_inbounds() {
             vless | trojan) ;;
             *) continue ;;
         esac
-        # 节点名: 优先用入站自身 tag, 否则回退 ${modeTag}-${i} 保证唯一 (避免多入站重名)
-        tag="$(echo "${XRAY_CONFIG}" | jq -r --argjson i "$i" '.inbounds[$i].tag? // empty')"
+        # 节点名: 优先用入站自身 tag, 否则回退 ${modeTag}-${i} 保证唯一 (避免多入站重名)。
+        # tag 已由 get_common_config 一并取出 (CLIENT_CONFIG[inbound_tag]), 这里不再单独 fork jq
+        tag="${CLIENT_CONFIG[inbound_tag]:-}"
         [[ -z "${tag}" ]] && tag="${CLIENT_CONFIG[tag]}-$((i + 1))"
         CLIENT_CONFIG[tag]="${tag}"
         _build_subscription_link

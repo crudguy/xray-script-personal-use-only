@@ -281,15 +281,29 @@ assert_eq "T5n: 只留小写 finalmask, 值为本次注入的 seed" \
 # ---------------------------------------------------------------------------
 # T6 share.sh 反读: 抽出真实 jq 表达式, 喂三种写法的配置
 # ---------------------------------------------------------------------------
-seed_block="$(sed -n '/^    CLIENT_CONFIG\[seed\]=/,/^            \/\/ "" )/p' core/share.sh)"
-seed_jq="$(printf '%s\n' "$seed_block" | sed -e "1s/^[^']*'//" -e '$s/'"'"')"$//')"
-assert_ne "T6: 抽到 share.sh 的 seed 反读 jq 表达式" "$seed_jq" ""
-assert_contains "T6b: 反读认得 mkcp-legacy" "$seed_jq" 'mkcp-legacy'
-assert_contains "T6c: 反读认得 mkcp-aes128gcm" "$seed_jq" 'mkcp-aes128gcm'
-assert_contains "T6d: 反读保留对老配置 kcpSettings.seed 的兼容" "$seed_jq" 'kcpSettings.seed'
+# 抽取范围按"合并后"的结构调整: 原先 seed 是独立的一条 `echo | jq`, 起点行是
+#   `    CLIENT_CONFIG[seed]=`; 为省 fork 合并成"一次 jq 取完全部入站字段"之后,
+#   seed 变成那条 jq 里的第 4 个字段。故起点改成 `--argjson r2` 那一行 (合并后唯一的),
+#   终点改成 `map(tostring)` 那一行 —— 断言仍打在**真实源码**上, 不是重抄一份表达式,
+#   源码一改这里照样会红 (见 T6b/c/d)。
+row_block="$(awk '/--argjson r2/ {g=1} g {print} g && /map\(tostring\)/ {exit}' core/share.sh)"
+# 首行整行丢掉 (不能按"第一个单引号"切 —— 那会切在 printf '%s' 上, 把半条 bash 语句
+#   当成 jq 程序喂进去, 报的是 jq 语法错而非断言失败, 方向会被带偏); 结尾去掉 ')"
+# 结尾标记用变量持有, 不内联进 ${...}: 在 ${} 里写 ${x%')\"} 这种"转义过的双引号"
+#   会破坏 bash 的引号配对 (整段被当成未闭合字符串, 报错行号还会指到很远的地方)。
+row_tail="')\""
+row_jq="${row_block#*$'\n'}"
+row_jq="${row_jq%"${row_tail}"}"
+assert_ne "T6: 抽到 share.sh 的入站字段 jq 表达式" "$row_jq" ""
+assert_contains "T6b: 反读认得 mkcp-legacy" "$row_jq" 'mkcp-legacy'
+assert_contains "T6c: 反读认得 mkcp-aes128gcm" "$row_jq" 'mkcp-aes128gcm'
+assert_contains "T6d: 反读保留对老配置 kcpSettings.seed 的兼容" "$row_jq" 'kcpSettings.seed'
 
-read_back() { # $1=配置 JSON
-    printf '%s' "$1" | jq -r --argjson i 1 "$seed_jq"
+read_back() { # $1=配置 JSON -> seed (合并输出里的第 4 个字段, 分隔符 \x1f)
+    # r1/r2 是随机下标, 这里固定传 0 —— 本组用例只关心 seed, 取哪一项都不影响它
+    printf '%s' "$1" |
+        jq -r --argjson i 1 --argjson r1 0 --argjson r2 0 "$row_jq" |
+        cut -d$'\x1f' -f4
 }
 assert_eq "T6e: finalmask(mkcp-legacy) -> 反读出 seed" "$(read_back "$cfg_legacy")" "$SEED"
 assert_eq "T6f: finalmask(mkcp-aes128gcm) -> 反读出 seed" "$(read_back "$cfg_aes")" "$SEED"

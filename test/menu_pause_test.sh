@@ -11,7 +11,14 @@
 # 锁定:
 #   1. main.sh 定义 _pause_after_action, 含 TTY 门控 / XRAY_MENU_PAUSE 三档 / q 退出;
 #   2. 该函数恒返回 0 (不得污染调用方返回值), 唯一非 0 出口是 exit 0;
-#   3. 只挂在输出型分支 7/8/10/11; 动作型 (1-6/9) 不得挂;
+#   3. 只挂在输出型分支 7/8/10/11 **以及** 4/5/6 (启停重启); 其余动作型 (1/2/3/9) 不得挂;
+#      为什么 4/5/6 从"动作型"改判为"输出型": 它们原实现全程 `systemctl -q` 静默, 成功
+#      一个字都不打印, 用户选完看着像没执行 —— 这不是"输出少", 而是"看起来没干活"。
+#      现已在 handler_start/stop/restart 补齐"正在做 / 早已如此 / 做成了 / 没做成"四类
+#      反馈 (见 xray_service_feedback_test.sh), 但摘要同样只有一两行, 33 行重绘照样把它
+#      顶出一屏之外 —— 与菜单 7/8/10/11 是同一个坑, 故一并纳入挂载范围。
+#      注意分层: 挂的只是**交互菜单**这条路; `bash script.sh --start` 这类 CLI 入口保持
+#      不挂 (要能进 cron / 被外层脚本嵌套), 详见 xray_service_feedback_test.sh 的 D 组。
 #   4. 行为: 回车回菜单 / q 与 Q 退出 / EOF 不触发 ERR trap / never 与非 TTY 的
 #      auto 立即返回且不打印提示;
 #   5. i18n: .main.pause_hint 在 zh / en 均存在且非空;
@@ -87,11 +94,11 @@ assert_eq "T1h: 无 return 非 0 (不污染调用方返回值)" "$bad_ret" ""
 awk '/^function processes_index\(\) \{/,/^\}/' "$MAIN" > "$SB/index.fn"
 assert_ne "T2: 抽到 processes_index 函数体" "$(cat "$SB/index.fn")" ""
 
-for n in 7 8 10 11; do
+for n in 4 5 6 7 8 10 11; do
     line="$(grep -E "^[[:space:]]*${n}\)" "$SB/index.fn" || true)"
     assert_contains "T2a: 输出型分支 ${n}) 挂 _pause_after_action" "$line" '_pause_after_action'
 done
-for n in 1 2 3 4 5 6 9; do
+for n in 1 2 3 9; do
     line="$(grep -E "^[[:space:]]*${n}\)" "$SB/index.fn" || true)"
     assert_not_contains "T2b: 动作型分支 ${n}) 不挂暂停" "$line" '_pause_after_action'
 done
@@ -104,6 +111,14 @@ awk '/^function processes_index\(\) \{/,/^\}/' "$SB/main_broken.sh" > "$SB/index
 line_broken="$(grep -E '^[[:space:]]*7\)' "$SB/index_broken.fn" || true)"
 assert_ne "T3(NEG): 破损副本的 7) 分支抽到了内容" "$line_broken" ""
 assert_not_contains "T3(NEG): 去掉 7) 暂停后守卫捕获到缺失" "$line_broken" '_pause_after_action'
+
+# T3b (NEG): 同上, 针对 4) (启停反馈类)。T3 只证明"输出型"那套判据有效, 而 4/5/6 是
+#   后来才并入挂载范围的 —— 必须单独自证, 否则将来漏挂暂停时守卫会静默放行。
+sed '/^ *4) exec_handler/ s/; _pause_after_action//' "$MAIN" > "$SB/main_broken4.sh"
+awk '/^function processes_index\(\) \{/,/^\}/' "$SB/main_broken4.sh" > "$SB/index_broken4.fn"
+line_broken4="$(grep -E '^[[:space:]]*4\)' "$SB/index_broken4.fn" || true)"
+assert_ne "T3b(NEG): 破损副本的 4) 分支抽到了内容" "$line_broken4" ""
+assert_not_contains "T3b(NEG): 去掉 4) 暂停后守卫捕获到缺失" "$line_broken4" '_pause_after_action'
 
 # ---------------------------------------------------------------------------
 # T4 行为: 用真实函数体 + 桩 _i18n 驱动 (set -Eeuo pipefail + ERR trap 与生产一致)

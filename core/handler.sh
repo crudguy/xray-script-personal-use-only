@@ -2667,7 +2667,15 @@ function handler_sni_config() {
         # 为域名和 CDN 配置 Nginx 和 SSL
         handler_change_domain 'domain' 'n'
         handler_change_domain 'cdn' 'n'
-        if (( $(echo "${SCRIPT_CONFIG}" | jq -r '.nginx.custom_sites // [] | length') > 0 )); then
+        # 注: jq 失败时 stdout 为空, `((  > 0 ))` 就退化成 bash 语法错误 (rc 1) 并在
+        #     set -e 下直接带崩整个装配流程, 而真正的原因 (配置不是合法 JSON) 被彻底
+        #     掩盖 —— 与 `jq --argjson` 收到空值是同一类坑。计数一律"取回 + 数字兜底"。
+        #     另: `// []` 只兜 null/false, 挡不住 custom_sites 被写成字符串 (此时 length
+        #     是字符数, 会拿垃圾去 sync), 故这里按 type 判定而非只看非空。
+        local custom_sites_count
+        custom_sites_count="$(echo "${SCRIPT_CONFIG}" | jq -r '.nginx.custom_sites | if type == "array" then length else 0 end' || echo 0)"
+        [[ "${custom_sites_count}" =~ ^[0-9]+$ ]] || custom_sites_count=0
+        if ((custom_sites_count > 0)); then
             echo -e "${GREEN}[$(_i18n '.title.info')]${NC} $(_i18n ".${CUR_FILE}.custom_sites.syncing")" >&2
             sync_custom_sites_config "${SCRIPT_CONFIG}" || _error "failed to sync custom sites"
             rebuild_stream_config "${SCRIPT_CONFIG}"
@@ -4192,7 +4200,10 @@ function handler_nginx_cron() {
     local NGINX_STATUS
     NGINX_STATUS="$(echo "${SCRIPT_CONFIG}" | jq -r '.nginx.version' || true)"
     # 如果 Nginx 已安装
-    if [[ -n "${NGINX_STATUS}" ]]; then
+    # 注: 字段缺失时 jq -r 输出的是**字面量** "null" (不是空串), 只判 -n 会把"没装过
+    #     nginx"当成"已安装", 于是给一个不存在的 nginx.sh 挂 cron / chmod。与
+    #     handler_ssl_install 的 `[[ -z ... || ... == 'null' ]]` 口径保持一致。
+    if [[ -n "${NGINX_STATUS}" && "${NGINX_STATUS}" != 'null' ]]; then
         # 检查是否存在 Nginx 更新的 Cron 任务
         if crontab -l | grep -q "${NGINX_PATH}"; then
             # 移除现有的 Nginx Cron 任务

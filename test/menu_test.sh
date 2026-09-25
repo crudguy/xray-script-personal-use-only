@@ -50,8 +50,11 @@ menu_nums() { printf '%s\n' "$(menu_block "$1")" | grep -oE '\$\{GREEN\}[0-9]+\.
 # ---------------------------------------------------------------------------
 # T1: 每个 menu_* 的显示编号必须严格连续 1..N (无空档 / 无重复)
 # ---------------------------------------------------------------------------
+# 函数名字符集必须含数字: 曾写作 [a-z_]+, 于是 menu_ipv6 被截断成不存在的
+# "menu_ipv", 抽到空函数体 -> 报"未解析到任何选项编号"。这个失败信息指向的是
+# 菜单有问题, 实际却是抽取正则的问题 —— 排查成本白花在错方向上。
 echo "[T1] 各菜单显示编号连续"
-for fn in $(grep -oE '^function menu_[a-z_]+' core/menu.sh | awk '{print $2}' | sort -u); do
+for fn in $(grep -oE '^function menu_[a-z0-9_]+' core/menu.sh | awk '{print $2}' | sort -u); do
     nums="$(menu_nums "$fn" | seq_of || true)"
     n=0; for _v in $nums; do n=$((n+1)); done
     if [[ "$n" -eq 0 ]]; then
@@ -63,10 +66,16 @@ done
 
 # ---------------------------------------------------------------------------
 # T2: 曾出现空档的两个菜单 —— 显示编号 == case 分支编号 == i18n 键编号
+#     (BBR 与 IPv6 一并纳入: 它们同样是"菜单打印 / case 分派 / i18n 键"三层,
+#      且 BBR 刚扩到 6 项、IPv6 是新加的, 正是最容易改漏的组合)
+#     注: json_block 取的是第一个 `"key": {` —— menu 段在 handler/check 段之前,
+#     所以 "bbr" / "ipv6" 稳定命中 menu 段那一份。
 # ---------------------------------------------------------------------------
-echo "[T2] 管理配置 / SNI 配置 三层编号一致"
+echo "[T2] 管理配置 / SNI 配置 / BBR / IPv6 三层编号一致"
 for pair in "menu_config processes_config config_management" \
-            "menu_sni_config processes_sni_config sni_config"; do
+            "menu_sni_config processes_sni_config sni_config" \
+            "menu_bbr processes_bbr bbr" \
+            "menu_ipv6 processes_ipv6 ipv6"; do
     set -- $pair
     mfn="$1"; pfn="$2"; jblk="$3"
     mnums="$(menu_nums "$mfn" | seq_of || true)"
@@ -82,7 +91,8 @@ done
 # T3: 说明行编号不得越界 (说明指向不存在的选项 = 用户困惑)
 # ---------------------------------------------------------------------------
 echo "[T3] 说明行编号不越界"
-for pair in "menu_config config_management" "menu_sni_config sni_config"; do
+for pair in "menu_config config_management" "menu_sni_config sni_config" \
+            "menu_bbr bbr" "menu_ipv6 ipv6"; do
     set -- $pair
     mfn="$1"
     n=0; for _v in $(menu_nums "$mfn" | seq_of || true); do n=$((n+1)); done

@@ -236,10 +236,17 @@ fi
 # ---------------------------------------------------------------------------
 # 5. 静态守卫: 消费点必须是"直调", 不能被改回 $( ) / <( )
 # ---------------------------------------------------------------------------
+# 断言的是"存在直调消费点", 而不是"恰好一处": 直调点会随功能增加 (IPv6 检测就
+# 新增了一处), 用 ==1 会把合理的新增判成回归。真正要禁的是 $( ) / <( ) 形式 ——
+# 那是下面这条独立守卫的职责。两者合起来才完整: 有直调 + 无子 shell 形式。
 ck "T9 share.sh 消费点为直调" '1' \
     "$(grep -c '_resolve_public_ips >/dev/null' "${REPO}/core/share.sh" | tr -d '[:space:]')"
-ck "T9 check.sh 消费点为直调" '1' \
-    "$(grep -c '_resolve_public_ips >/dev/null' "${REPO}/core/check.sh" | tr -d '[:space:]')"
+n_check="$(grep -c '_resolve_public_ips >/dev/null' "${REPO}/core/check.sh" | tr -d '[:space:]' || true)"
+if [[ "${n_check:-0}" -ge 1 ]]; then
+    ok "T9 check.sh 消费点为直调 (${n_check} 处, 只需 >=1)"
+else
+    bad "T9 check.sh 无直调消费点 (改成 \$( ) 会丢缓存)"
+fi
 # 注意: 源码注释里会写 $(_resolve_public_ips) 作反例, 先剔除注释行再判, 避免误报
 if grep -E '\$\([^)]*_resolve_public_ips|<\(_resolve_public_ips' \
     "${REPO}/core/share.sh" "${REPO}/core/check.sh" | grep -vE ':[[:space:]]*#' >/dev/null; then

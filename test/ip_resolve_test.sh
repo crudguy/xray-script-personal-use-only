@@ -63,9 +63,20 @@ extract_fn() { # extract_fn <文件> <函数名>
 }
 
 {
+    # 常量桩: 被抽出的函数会引用 SCRIPT_NAME / SCRIPT_CONFIG_DIR, 而本用例只 source
+    # 抽取片段 (不 source 整个 _common.sh), 须在此补齐, 否则 set -u 下直接崩。
+    # SCRIPT_CONFIG_DIR 指向沙箱 —— 跨进程缓存就落在那里, 便于断言。
+    printf 'SCRIPT_NAME="%s"\n' 'xray-script-personal-use-only'
+    printf 'SCRIPT_CONFIG_DIR="%s"\n' "${SB}/cfg"
     grep -E '^_PUBLIC_IP(V4|V6|_PROBED)=""$' "${REPO}/core/_common.sh"
+    extract_fn "${REPO}/core/_common.sh" _public_ip_cache_read
+    extract_fn "${REPO}/core/_common.sh" _public_ip_cache_write
+    extract_fn "${REPO}/core/_common.sh" _public_ip_has_v6_route
+    extract_fn "${REPO}/core/_common.sh" _public_ip_probe_one
     extract_fn "${REPO}/core/_common.sh" _resolve_public_ips
     extract_fn "${REPO}/core/_common.sh" _preferred_remote_host
+    extract_fn "${REPO}/core/_common.sh" cmd_exists
+    extract_fn "${REPO}/core/_common.sh" _atomic_write
     extract_fn "${REPO}/core/check.sh" dns_resolution
 } >"${SB}/lib_ip.sh"
 
@@ -75,7 +86,8 @@ extract_fn() { # extract_fn <文件> <函数名>
     printf '\n结果: 失败\n'
     exit 1
 }
-for _fn in _resolve_public_ips _preferred_remote_host dns_resolution; do
+for _fn in _public_ip_cache_read _public_ip_cache_write _public_ip_has_v6_route \
+    _public_ip_probe_one _resolve_public_ips _preferred_remote_host dns_resolution; do
     grep -q "function ${_fn}()" "${SB}/lib_ip.sh" || {
         bad "未能抽出 ${_fn}"
         printf '\n结果: 失败\n'
@@ -103,15 +115,33 @@ set -Eeuo pipefail
 . "${_S_LIB}"
 _S_IV4="${_S_IV4:-}"
 _S_IV6="${_S_IV6:-}"
+# 由用例置位: 模拟"用户要求立刻拿实时值"的逃生口
+[[ "${_S_NOCACHE:-0}" == '1' ]] && export XRAY_SKIP_IP_CACHE=1
 
-# 桩: 按请求的栈返回地址, 并记录一次"外网请求"
+# 桩: 按请求的栈返回地址, 并记录一次"外网请求" (带栈标记, 便于断言"v6 到底问没问")
 curl() {
     case "$*" in
-    *ipv4.icanhazip.com*) printf '%s' "${_S_IV4}" ;;
-    *ipv6.icanhazip.com*) printf '%s' "${_S_IV6}" ;;
+    *ipv4.icanhazip.com*)
+        printf '%s' "${_S_IV4}"
+        printf 'call ipv4\n' >>"${_S_CALLS}"
+        ;;
+    *ipv6.icanhazip.com*)
+        printf '%s' "${_S_IV6}"
+        printf 'call ipv6\n' >>"${_S_CALLS}"
+        ;;
     esac
-    printf 'call\n' >>"${_S_CALLS}"
 }
+
+# 桩: IPv6 默认路由是否存在 (决定"值不值得问 ipv6"), 由 _S_V6ROUTE 控制
+ip() {
+    if [[ "${_S_V6ROUTE:-1}" == '1' ]]; then
+        printf 'default via fe80::1 dev eth0 proto ra metric 1024\n'
+    fi
+    return 0
+}
+# 覆盖抽取来的 cmd_exists: 保证 _public_ip_has_v6_route 一定走上面的 ip 桩,
+# 而不是去问宿主机上真实的 ip (沙箱里结果不可控, 会让"跳过 v6"的断言时绿时红)。
+cmd_exists() { return 0; }
 
 hosts=()
 case "${_S_MODE}" in
@@ -151,9 +181,20 @@ parse() { # parse <多行输出> <键> -> 取 "键=值" 的值
 }
 
 run_probe() { # run_probe <mode> <iv4> <iv6>
-    : >"${SB}/calls.txt"
-    _S_LIB="${SB}/lib_ip.sh" _S_CALLS="${SB}/calls.txt" _S_MODE="$1" \
-        _S_IV4="$2" _S_IV6="$3" bash "${SB}/probe.sh"
+    # 环境变量开关 (跨进程缓存让"每次调用是否复用"变成被测项, 需由用例显式控制):
+    #   RP_KEEP_CACHE=1 不清空缓存目录 (跨进程用例用)
+    #   RP_KEEP_CALLS=1 不清空外网请求计数 (累计断言用)
+    #   RP_NOCACHE=1    置 XRAY_SKIP_IP_CACHE=1 (强制刷新)
+    #   RP_V6=0/1       桩 ip 是否报出 IPv6 默认路由
+    #   RP_LIB=<文件>   用另一份 lib (NEG 用)
+    [[ "${RP_KEEP_CALLS:-0}" == '1' ]] || : >"${SB}/calls.txt"
+    if [[ "${RP_KEEP_CACHE:-0}" != '1' ]]; then
+        rm -rf "${SB}/cfg"
+    fi
+    mkdir -p "${SB}/cfg"
+    _S_LIB="${RP_LIB:-${SB}/lib_ip.sh}" _S_CALLS="${SB}/calls.txt" _S_MODE="$1" \
+        _S_IV4="$2" _S_IV6="$3" _S_NOCACHE="${RP_NOCACHE:-0}" _S_V6ROUTE="${RP_V6:-1}" \
+        bash "${SB}/probe.sh"
 }
 
 # ---------------------------------------------------------------------------
@@ -163,10 +204,7 @@ out="$(run_probe direct 203.0.113.10 '2001:db8::1')"
 ck "T1 直调两次仅探测 2 次 (缓存生效)" '2' "$(parse "${out}" CALLS)"
 ck "T1 缓存哨兵已置位" '1' "$(parse "${out}" PROBED)"
 
-out="$(run_probe replace 203.0.113.10 '2001:db8::1')"
-ck "T2 反例: 探测放进 \$( ) 两次共 4 次 (子 shell 丢缓存)" '4' "$(parse "${out}" CALLS)"
-ck "T2 反例: 地址仍能取到, 但外网请求翻倍" '203.0.113.10' "$(parse "${out}" H1)"
-ck "T2 反例: 缓存哨兵未置位" '' "$(parse "${out}" PROBED)"
+# (T2 反例见 T6 之后 —— 它必须在禁用跨进程缓存的条件下跑, 理由见那里)
 
 out="$(run_probe direct 203.0.113.10 '2001:db8::1')"
 ck "T3 双栈取 IPv4" '203.0.113.10' "$(parse "${out}" H1)"
@@ -180,6 +218,81 @@ ck "T5 双栈均失败取空串" '' "$(parse "${out}" H1)"
 # T6: curl 返回带 \r\n (Windows 源/异常响应), 需清洗
 out="$(run_probe direct $'203.0.113.10\r' $'2001:db8::1\r\n')"
 ck "T6 CR/LF 被清洗" '203.0.113.10' "$(parse "${out}" H1)"
+
+# T2 必须在"禁用缓存"下跑: 加了跨进程缓存后, 子 shell 也会命中落盘缓存 (0 次请求),
+# 于是这条反例会退化成 2 次 —— 它要证明的是"进程内缓存被子 shell 丢弃"这一层,
+# 故用 XRAY_SKIP_IP_CACHE=1 把跨进程那层关掉, 只留进程内语义。
+out="$(RP_NOCACHE=1 run_probe replace 203.0.113.10 '2001:db8::1')"
+ck "T2 反例: 探测放进 \$( ) 两次共 4 次 (子 shell 丢缓存)" '4' "$(parse "${out}" CALLS)"
+ck "T2 反例: 地址仍能取到, 但外网请求翻倍" '203.0.113.10' "$(parse "${out}" H1)"
+ck "T2 反例: 缓存哨兵未置位" '' "$(parse "${out}" PROBED)"
+
+# ---------------------------------------------------------------------------
+# 3b. 跨进程缓存 (菜单每点一次都是新进程, 这层缓存才是"生成分享不再慢"的关键)
+# ---------------------------------------------------------------------------
+fresh_cache() { # 重置缓存目录与计数
+    rm -rf "${SB}/cfg"
+    mkdir -p "${SB}/cfg"
+    : >"${SB}/calls.txt"
+}
+
+fresh_cache
+o1="$(RP_KEEP_CACHE=1 run_probe direct 203.0.113.10 '')"
+ck "T10 冷启动: 首个进程探测 2 次" '2' "$(parse "${o1}" CALLS)"
+o2="$(RP_KEEP_CACHE=1 RP_KEEP_CALLS=1 run_probe direct 203.0.113.10 '')"
+ck "T10 第二个进程命中落盘缓存 -> 累计仍是 2 次 (零外网请求)" '2' "$(parse "${o2}" CALLS)"
+ck "T10 命中缓存后取值不变" '203.0.113.10' "$(parse "${o2}" H1)"
+
+# T11 TTL 过期 -> 必须重新探测 (缓存不能变成改不了的值)
+touch -d '2 hours ago' "${SB}/cfg/.public-ip.cache"
+o3="$(RP_KEEP_CACHE=1 RP_KEEP_CALLS=1 run_probe direct 203.0.113.10 '')"
+ck "T11 缓存过期后重新探测 (累计 4 次)" '4' "$(parse "${o3}" CALLS)"
+
+# T12 XRAY_SKIP_IP_CACHE=1 是逃生口: 强制刷新, 不看缓存
+o4="$(RP_KEEP_CACHE=1 RP_KEEP_CALLS=1 RP_NOCACHE=1 run_probe direct 203.0.113.10 '')"
+ck "T12 XRAY_SKIP_IP_CACHE=1 强制刷新 (累计 6 次)" '6' "$(parse "${o4}" CALLS)"
+
+# T13 探测结果全空时不落缓存: 否则一次网络抖动会让分享链接长时间拿不到地址
+fresh_cache
+o5="$(RP_KEEP_CACHE=1 run_probe direct '' '')"
+ck "T13 空结果首次仍探测 2 次" '2' "$(parse "${o5}" CALLS)"
+o6="$(RP_KEEP_CACHE=1 RP_KEEP_CALLS=1 run_probe direct '' '')"
+ck "T13 空结果不写缓存 -> 第二个进程重新探测 (累计 4 次)" '4' "$(parse "${o6}" CALLS)"
+
+# T14 无 IPv6 默认路由时跳过 v6 探测 (这段原先必然等满超时, 是"慢"的最大头)
+fresh_cache
+o7="$(RP_KEEP_CACHE=1 RP_V6=0 run_probe direct 203.0.113.10 '')"
+ck "T14 无 IPv6 路由 -> 只问 ipv4 (1 次)" '1' "$(parse "${o7}" CALLS)"
+ck "T14 确实问了 ipv4" '1' "$(grep -c 'call ipv4' "${SB}/calls.txt")"
+ck "T14 未问 ipv6" '0' "$(grep -c 'call ipv6' "${SB}/calls.txt")"
+fresh_cache
+o8="$(RP_KEEP_CACHE=1 RP_V6=1 run_probe direct 203.0.113.10 '2001:db8::1')"
+ck "T14b 有 IPv6 路由 -> 两栈都问 (2 次)" '2' "$(parse "${o8}" CALLS)"
+
+ck "T15 缓存文件权限 0600 (含公网地址, 不应对同机其它用户可读)" '600' \
+    "$(stat -c %a "${SB}/cfg/.public-ip.cache" 2>/dev/null)"
+
+# T16 (NEG) 守卫自证: 让 _public_ip_cache_read 恒 miss, T10 的"命中"必须消失。
+#   否则"第二个进程零请求"可能来自别的原因 (例如压根没调探测), 断言形同虚设。
+python3 - "${SB}/lib_ip.sh" "${SB}/lib_neg.sh" <<'PY'
+import pathlib
+import sys
+
+src = pathlib.Path(sys.argv[1]).read_text()
+start = src.index('function _public_ip_cache_read() {')
+end = src.index('\n}\n', start) + 3
+body = src[start:end]
+assert 'return 1' in body, '抽取异常'
+neg = src[:end] + '\n# NEG: 恒 miss\n' + src[end:]
+# 在函数体首行后插入短路 return
+head, rest = src[:start], src[start:]
+first_nl = rest.index('\n') + 1
+pathlib.Path(sys.argv[2]).write_text(head + rest[:first_nl] + '    return 1\n' + rest[first_nl:])
+PY
+fresh_cache
+RP_LIB="${SB}/lib_neg.sh" RP_KEEP_CACHE=1 run_probe direct 203.0.113.10 '' >/dev/null
+n2="$(RP_LIB="${SB}/lib_neg.sh" RP_KEEP_CACHE=1 RP_KEEP_CALLS=1 run_probe direct 203.0.113.10 '' || true)"
+ck "T16(NEG) 缓存恒 miss 时第二个进程会重新探测 (累计 4 次, 不是 2 次)" '4' "$(parse "${n2}" CALLS)"
 
 # ---------------------------------------------------------------------------
 # 4. DNS 匹配判据用例 (桩 dig)
@@ -196,6 +309,10 @@ curl() {
     esac
     printf 'call\n' >>"${_S_CALLS}"
 }
+# 桩: 保证双栈都会被探测。新增的"无 IPv6 默认路由就跳过 v6"优化会让沙箱 (无 v6) 只探
+#   v4, 于是 T7/T8 里"IPv6 那条匹配"的断言必然失败 —— 那不是本段要测的东西, 故钉住。
+ip() { printf 'default via fe80::1 dev eth0 proto ra metric 1024\n'; }
+cmd_exists() { return 0; }
 dig() {
     case "$*" in
     *AAAA*) printf '%s\n' "${_S_DIGV6:-}" ;;
@@ -210,6 +327,10 @@ DNS
 run_dns() { # run_dns <iv4> <iv6> <digv4> <digv6> <domain>  -> stdout, stderr 落文件
     : >"${SB}/calls.txt"
     : >"${SB}/dns.err"
+    # 必须清掉跨进程缓存: 否则上一段用例落盘的公网 IP 会被本段命中, 于是"本机 IP"变成
+    # 上一段的值 —— dig 桩喂的 IP 对不上, T7/T8 集体假红 (实测踩到)。
+    rm -rf "${SB}/cfg"
+    mkdir -p "${SB}/cfg"
     _S_LIB="${SB}/lib_ip.sh" _S_CALLS="${SB}/calls.txt" _S_DOMAIN="$5" \
         _S_IV4="$1" _S_IV6="$2" _S_DIGV4="$3" _S_DIGV6="$4" \
         bash "${SB}/dns.sh" 2>"${SB}/dns.err"

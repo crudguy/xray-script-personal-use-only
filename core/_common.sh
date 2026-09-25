@@ -430,14 +430,102 @@ function _gh_url() {
 }
 
 # =============================================================================
+# 函数名称: _public_ip_cache_read
+# 功能描述: 读取公网 IP 的**跨进程**缓存。命中则 stdout 输出两行 (v4\nv6)。
+#
+# 为什么需要跨进程缓存 (性能问题的根因):
+#   进程内的文件级缓存只在**单次调用**里有效。而菜单 7(分享链接)/11(订阅) 每次点击
+#   都是 `bash handler.sh --share` 起的**新进程** —— 于是"每点一次就打两次外网",
+#   网络差时十几秒, 用户体感就是"生成分享链接很慢"。落盘缓存把它变成"只第一次付费"。
+#
+# 设计取舍:
+#   - 落 ${SCRIPT_CONFIG_DIR} (已收紧 700), 产物走 _atomic_write 落 0600;
+#   - 默认 TTL 600 秒 (XRAY_PUBLIC_IP_TTL 覆盖; 0 = 永不复用); XRAY_SKIP_IP_CACHE=1
+#     强制刷新 —— 保留"我要立刻拿实时值"的逃生口, 缓存绝不能变成改不了的值;
+#   - **只缓存"至少拿到一个地址"的结果**: 网络抖一下就缓存 10 分钟空值, 会让分享
+#     链接长时间生成不出地址 (`vless://uuid@:443`), 那比慢更糟。
+# 参数: 无
+# 返回值: 0=命中 (stdout 两行); 非 0=未命中/已禁用/已过期 (不输出)
+# =============================================================================
+function _public_ip_cache_read() {
+    local dir="${SCRIPT_CONFIG_DIR:-}"
+    [[ -n "${dir}" ]] || return 1
+    [[ "${XRAY_SKIP_IP_CACHE:-0}" != '1' ]] || return 1
+    local ttl="${XRAY_PUBLIC_IP_TTL:-600}"
+    [[ "${ttl}" =~ ^[0-9]+$ ]] || ttl=600
+    [[ "${ttl}" -gt 0 ]] || return 1
+    local cache="${dir}/.public-ip.cache"
+    [[ -f "${cache}" ]] || return 1
+    local now='' mtime='' age=0
+    now="$(date +%s)"
+    mtime="$(stat -c %Y "${cache}" 2>/dev/null || printf '0')"
+    age=$((now - mtime))
+    # 时钟回拨 (age < 0) 也按未命中处理, 免得一个未来时间戳把缓存永久钉住
+    ((age >= 0 && age < ttl)) || return 1
+    local v4='' v6=''
+    { read -r v4 || true; read -r v6 || true; } <"${cache}"
+    [[ -n "${v4}${v6}" ]] || return 1
+    printf '%s\n%s\n' "${v4}" "${v6}"
+}
+
+# =============================================================================
+# 函数名称: _public_ip_cache_write
+# 功能描述: 把本次探测结果写入跨进程缓存。失败静默 —— 缓存只是加速手段,
+#           写不进去不该影响分享/体检主流程。
+# 参数: 无 (读全局 _PUBLIC_IPV4 / _PUBLIC_IPV6)
+# 返回值: 恒 0
+# =============================================================================
+function _public_ip_cache_write() {
+    local dir="${SCRIPT_CONFIG_DIR:-}"
+    [[ -n "${dir}" ]] || return 0
+    # 空结果不落盘 (理由见 _public_ip_cache_read)
+    [[ -n "${_PUBLIC_IPV4}${_PUBLIC_IPV6}" ]] || return 0
+    printf '%s\n%s\n' "${_PUBLIC_IPV4}" "${_PUBLIC_IPV6}" |
+        _atomic_write "${dir}/.public-ip.cache" 2>/dev/null || true
+    return 0
+}
+
+# =============================================================================
+# 函数名称: _public_ip_has_v6_route
+# 功能描述: 判断本机是否存在 IPv6 默认路由, 用于决定"值不值得探测 IPv6 公网地址"。
+#           没有 v6 出口的主机去问 ipv6.icanhazip.com, 必然等满超时才空手而归 ——
+#           这是"生成分享链接很慢"里最贵的一段 (串行等待, 且带重试)。
+# 参数: 无
+# 返回值: 0=有 v6 出口(值得探测); 非 0=没有
+# 注: 拿不到判据 (缺 ip 命令) 时**保守返回 0** (照旧探测), 宁可多花一次请求,
+#     也不能让仅 IPv6 的主机被误判成"没有 v6"而生成不出地址。
+# =============================================================================
+function _public_ip_has_v6_route() {
+    cmd_exists 'ip' || return 0
+    ip -6 route show default 2>/dev/null | grep -q .
+}
+
+# =============================================================================
+# 函数名称: _public_ip_probe_one
+# 功能描述: 探测单个栈的公网地址 (供 _resolve_public_ips 并行调用)。
+# 参数:
+#   $1: 探测主机名 (ipv4/ipv6.icanhazip.com)
+# 返回值: 恒 0 (stdout 提供结果, 失败为空串)
+# =============================================================================
+function _public_ip_probe_one() {
+    # --noproxy '*': 绕过任何出站代理, 拿真实公网出口而非代理回源地址。
+    # 超时口径 (原为 --connect-timeout 5 --max-time 15 --retry 2): 最坏情况要等满
+    #   ~30 秒 (两栈串行), 而分享链接只是想拿个地址。收窄为 connect 3s / 整体 5s /
+    #   只重试 1 次 —— 常规网络下仍是亚秒级, 异常时最多 5 秒就放手。
+    curl -fsSL --noproxy '*' --connect-timeout 3 --max-time 5 --retry 1 "$1" 2>/dev/null || true
+}
+
+# =============================================================================
 # 函数名称: _resolve_public_ips
 # 功能描述: 探测服务器公网 IPv4 / IPv6 地址, stdout 依次输出两行 (v4\nv6),
 #           并缓存结果避免重复外网请求。分享链接、健康检查等消费方共用,
 #           消除原先各自 curl、代理污染、空值静默、双栈判断不一致的问题。
 # 设计要点:
 #   - --noproxy '*' 绕过 http_proxy/https_proxy, 取到真实公网出口而非经代理回源;
-#   - 结果缓存到文件级变量 _PUBLIC_IPV4/_PUBLIC_IPV6, 已探测则直接复用
-#     (原 get_common_config 每个 inbound 都 curl, 慢且易被限流);
+#   - 三级缓存: 进程内 (文件级变量) → 跨进程 (落盘, TTL 600s) → 才发起外网;
+#     仅菜单这种"每次点击都是新进程"的用法能吃到第二级;
+#   - 两个栈**并行**探测, 总耗时取慢的那个而非两者之和;
+#   - 本机没有 IPv6 默认路由时跳过 v6 探测 (省掉必然超时的一段);
 #   - 单项失败 (超时 / 主机无对应栈) 仅置空, 不中断调用方;
 #   - 不做 IPv6 方括号包裹, 由调用方按场景决定 (分享链接需 [v6]:port)。
 # 副作用: 写入 _PUBLIC_IPV4 / _PUBLIC_IPV6 / _PUBLIC_IP_PROBED (文件级)
@@ -448,19 +536,64 @@ _PUBLIC_IPV6=""
 _PUBLIC_IP_PROBED=""
 
 function _resolve_public_ips() {
-    # 已探测过则直接回放缓存, 不再发起外网请求
+    # 一级: 已探测过则直接回放进程内缓存, 不再发起外网请求
     if [[ -n "${_PUBLIC_IP_PROBED}" ]]; then
         printf '%s\n%s\n' "${_PUBLIC_IPV4}" "${_PUBLIC_IPV6}"
         return 0
     fi
     _PUBLIC_IP_PROBED=1
 
-    # --noproxy '*' 确保绕过任何出站代理, 拿真实公网地址
-    _PUBLIC_IPV4="$(curl -fsSL --noproxy '*' --connect-timeout 5 --max-time 15 --retry 2 ipv4.icanhazip.com 2>/dev/null || true)"
-    _PUBLIC_IPV6="$(curl -fsSL --noproxy '*' --connect-timeout 5 --max-time 15 --retry 2 ipv6.icanhazip.com 2>/dev/null || true)"
+    # 二级: 跨进程缓存命中 -> 零外网请求
+    local cached=''
+    if cached="$(_public_ip_cache_read)"; then
+        { read -r _PUBLIC_IPV4 || true; read -r _PUBLIC_IPV6 || true; } <<<"${cached}"
+        printf '%s\n%s\n' "${_PUBLIC_IPV4}" "${_PUBLIC_IPV6}"
+        return 0
+    fi
+
+    # 三级: 真的去探测。无 v6 出口就不问 v6 (省掉必然超时的一段)
+    local need_v6=1
+    _public_ip_has_v6_route || need_v6=0
+
+    _PUBLIC_IPV4=""
+    _PUBLIC_IPV6=""
+    local f4='' f6='' pid4='' pid6=''
+    f4="$(mktemp "${TMPDIR:-/tmp}/.${SCRIPT_NAME}-ipv4.XXXXXX" 2>/dev/null || true)"
+    if [[ -n "${f4}" ]]; then
+        # 并行: 两个请求同时飞, 总耗时 = 慢的那个, 而不是两者相加
+        (_public_ip_probe_one 'ipv4.icanhazip.com' >"${f4}") &
+        pid4=$!
+        if [[ "${need_v6}" -eq 1 ]]; then
+            f6="$(mktemp "${TMPDIR:-/tmp}/.${SCRIPT_NAME}-ipv6.XXXXXX" 2>/dev/null || true)"
+        fi
+        if [[ -n "${f6}" ]]; then
+            (_public_ip_probe_one 'ipv6.icanhazip.com' >"${f6}") &
+            pid6=$!
+        fi
+        # wait 的退出码是后台任务的状态; 后台任务失败(网络不通)不该带崩本函数
+        wait "${pid4}" 2>/dev/null || true
+        if [[ -n "${pid6}" ]]; then
+            wait "${pid6}" 2>/dev/null || true
+        fi
+        [[ -f "${f4}" ]] && _PUBLIC_IPV4="$(cat "${f4}")"
+        if [[ -n "${f6}" && -f "${f6}" ]]; then
+            _PUBLIC_IPV6="$(cat "${f6}")"
+        fi
+        rm -f "${f4}" "${f6}"
+    else
+        # mktemp 不可用 (极端环境): 退化为串行直取, 保证功能不丢
+        _PUBLIC_IPV4="$(_public_ip_probe_one 'ipv4.icanhazip.com')"
+        if [[ "${need_v6}" -eq 1 ]]; then
+            _PUBLIC_IPV6="$(_public_ip_probe_one 'ipv6.icanhazip.com')"
+        fi
+    fi
+
     # 去除可能的回车/空白, 防止污染分享链接或比较
     _PUBLIC_IPV4="$(printf '%s' "${_PUBLIC_IPV4}" | tr -d '[:space:]')"
     _PUBLIC_IPV6="$(printf '%s' "${_PUBLIC_IPV6}" | tr -d '[:space:]')"
+
+    # 回写跨进程缓存 (仅非空结果)
+    _public_ip_cache_write
 
     printf '%s\n%s\n' "${_PUBLIC_IPV4}" "${_PUBLIC_IPV6}"
 }

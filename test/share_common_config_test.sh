@@ -46,9 +46,12 @@ PASS=0
 FAIL=0
 ok() { PASS=$((PASS + 1)); }
 bad() { FAIL=$((FAIL + 1)); echo "  [FAIL] $1"; }
-# 调用约定: assert_eq <标签> <期望值> <实际值>  —— 失败信息里的顺序必须与之对应,
-#   写反了会让排查的人按错误的方向找根因 (此处踩过)。
-assert_eq() { if [[ "$2" == "$3" ]]; then ok; else bad "$1 (期望 [$2] 实际 [$3])"; fi; }
+# 调用约定与全仓一致: assert_eq <标签> <实际> <期望> ($2=got $3=expected)。
+#   反着写也能跑, 但与其余 18 个用例的约定相反, 跨文件复制断言时必踩;
+#   且失败信息的"期望/实际"标注必须与之对应, 标反了排查方向会被带偏 (此处踩过)。
+assert_eq() { # $1=msg $2=got $3=expected
+    if [[ "$2" == "$3" ]]; then ok; else bad "$1 (期望 [$3] 实际 [$2])"; fi
+}
 assert_contains() { if [[ "$2" == *"$3"* ]]; then ok; else bad "$1 (未包含 [$3]，实际 [$2])"; fi; }
 # stderr 必须干净: jq 的 parse error 不写 stdout、也不改退出码, 只看断言会漏掉
 # (见 DEFAULT_SCRIPT_CONFIG 处的踩坑记录)。
@@ -135,38 +138,38 @@ echo "=== share.sh get_common_config 字段抽取测试 ==="
 full='{"inbounds":[{"tag":"in-0","protocol":"vless","settings":{"clients":[{"id":"uuid-1","flow":"xtls-rprx-vision"}]},"streamSettings":{"network":"tcp","security":"reality","xhttpSettings":{"path":"/vp"},"realitySettings":{"serverNames":["www.microsoft.com"],"shortIds":["0a"]}}}]}'
 out="$(printf '%s' "$full" | run_gcc 0 2>"$SB/err")"
 assert_err_clean "T1"
-assert_eq "T1 protocol" "vless" "$(field "$out" protocol)"
-assert_eq "T1 uuid" "uuid-1" "$(field "$out" uuid)"
-assert_eq "T1 flow" "xtls-rprx-vision" "$(field "$out" flow)"
-assert_eq "T1 type" "tcp" "$(field "$out" type)"
-assert_eq "T1 security" "reality" "$(field "$out" security)"
-assert_eq "T1 path" "/vp" "$(field "$out" path)"
-assert_eq "T1 server_name" "www.microsoft.com" "$(field "$out" server_name)"
-assert_eq "T1 short_id" "0a" "$(field "$out" short_id)"
-assert_eq "T1 inbound_tag" "in-0" "$(field "$out" inbound_tag)"
-assert_eq "T1 port (数字字段经 tostring)" "443" "$(field "$out" port)"
-assert_eq "T1 public_key" "pk" "$(field "$out" public_key)"
+assert_eq "T1 protocol" "$(field "$out" protocol)" "vless"
+assert_eq "T1 uuid" "$(field "$out" uuid)" "uuid-1"
+assert_eq "T1 flow" "$(field "$out" flow)" "xtls-rprx-vision"
+assert_eq "T1 type" "$(field "$out" type)" "tcp"
+assert_eq "T1 security" "$(field "$out" security)" "reality"
+assert_eq "T1 path" "$(field "$out" path)" "/vp"
+assert_eq "T1 server_name" "$(field "$out" server_name)" "www.microsoft.com"
+assert_eq "T1 short_id" "$(field "$out" short_id)" "0a"
+assert_eq "T1 inbound_tag" "$(field "$out" inbound_tag)" "in-0"
+assert_eq "T1 port (数字字段经 tostring)" "$(field "$out" port)" "443"
+assert_eq "T1 public_key" "$(field "$out" public_key)" "pk"
 
 # --- T2 缺 realitySettings: 空字段不得让后面的字段串位 ---
 noreality='{"inbounds":[{"tag":"in-1","protocol":"vless","settings":{"clients":[{"id":"uuid-2","flow":"xtls-rprx-vision"}]},"streamSettings":{"network":"tcp","security":"tls","xhttpSettings":{"path":"/vp2"}}}]}'
 out="$(printf '%s' "$noreality" | run_gcc 0 2>"$SB/err")"
 assert_err_clean "T2"
-assert_eq "T2 server_name 为空" "" "$(field "$out" server_name)"
-assert_eq "T2 short_id 为空" "" "$(field "$out" short_id)"
-assert_eq "T2 path 未串位" "/vp2" "$(field "$out" path)"
-assert_eq "T2 inbound_tag 未串位" "in-1" "$(field "$out" inbound_tag)"
-assert_eq "T2 uuid 未串位" "uuid-2" "$(field "$out" uuid)"
+assert_eq "T2 server_name 为空" "$(field "$out" server_name)" ""
+assert_eq "T2 short_id 为空" "$(field "$out" short_id)" ""
+assert_eq "T2 path 未串位" "$(field "$out" path)" "/vp2"
+assert_eq "T2 inbound_tag 未串位" "$(field "$out" inbound_tag)" "in-1"
+assert_eq "T2 uuid 未串位" "$(field "$out" uuid)" "uuid-2"
 
 # --- T3 缺 clients: 中间三个字段为空, 其余不动 ---
 noclient='{"inbounds":[{"tag":"in-2","protocol":"trojan","streamSettings":{"network":"tcp","security":"tls","xhttpSettings":{"path":"/tj"}}}]}'
 out="$(printf '%s' "$noclient" | run_gcc 0 2>"$SB/err")"
 assert_err_clean "T3"
-assert_eq "T3 uuid 为空" "" "$(field "$out" uuid)"
-assert_eq "T3 password 为空" "" "$(field "$out" password)"
-assert_eq "T3 flow 为空" "" "$(field "$out" flow)"
-assert_eq "T3 protocol 未串位" "trojan" "$(field "$out" protocol)"
-assert_eq "T3 path 未串位" "/tj" "$(field "$out" path)"
-assert_eq "T3 inbound_tag 未串位" "in-2" "$(field "$out" inbound_tag)"
+assert_eq "T3 uuid 为空" "$(field "$out" uuid)" ""
+assert_eq "T3 password 为空" "$(field "$out" password)" ""
+assert_eq "T3 flow 为空" "$(field "$out" flow)" ""
+assert_eq "T3 protocol 未串位" "$(field "$out" protocol)" "trojan"
+assert_eq "T3 path 未串位" "$(field "$out" path)" "/tj"
+assert_eq "T3 inbound_tag 未串位" "$(field "$out" inbound_tag)" "in-2"
 
 # --- T4 mKCP seed 的三种历史写法 ---
 # 三段配置直接写全 (不再用嵌套 jq 拼): 拼装一旦出问题, 报的是 jq 解析错而非断言失败,
@@ -183,29 +186,29 @@ for spec in 'aes:pw-aes' 'legacy:val-legacy' 'old:seed-old'; do
     want="${spec#*:}"
     out="$(printf '%s' "${T4_CFG[${var}]}" | run_gcc 0 2>"$SB/err")"
     assert_err_clean "T4(${var})"
-    assert_eq "T4 mKCP seed (${var})" "${want}" "$(field "$out" seed)"
+    assert_eq "T4 mKCP seed (${var})" "$(field "$out" seed)" "${want}"
 done
 
 # --- T5 port 为其它数字 / 脚本配置缺字段 ---
 cfg5='{"xray":{"port":8443,"publicKey":"","tag":"sni"}}'
 out="$(printf '%s' "$full" | GCC_SCRIPT_CONFIG="$cfg5" run_gcc 0 2>"$SB/err")"
 assert_err_clean "T5"
-assert_eq "T5 port 8443" "8443" "$(field "$out" port)"
-assert_eq "T5 public_key 空" "" "$(field "$out" public_key)"
-assert_eq "T5 tag 仍取到" "sni" "$(field "$out" tag)"
+assert_eq "T5 port 8443" "$(field "$out" port)" "8443"
+assert_eq "T5 public_key 空" "$(field "$out" public_key)" ""
+assert_eq "T5 tag 仍取到" "$(field "$out" tag)" "sni"
 
 # --- T6 Reality 数组为空: 不得崩 (原写法 % 0 会让 jq 非 0 退出) ---
 emptyrv='{"inbounds":[{"tag":"in-3","protocol":"vless","settings":{"clients":[{"id":"uuid-3"}]},"streamSettings":{"network":"tcp","security":"reality","realitySettings":{"serverNames":[],"shortIds":[]}}}]}'
 out="$(printf '%s' "$emptyrv" | run_gcc 0 2>"$SB/err")"
 assert_err_clean "T6"
-assert_eq "T6 空数组 -> server_name 空串且不崩" "" "$(field "$out" server_name)"
-assert_eq "T6 空数组 -> short_id 空串且不崩" "" "$(field "$out" short_id)"
-assert_eq "T6 后续字段仍正确" "in-3" "$(field "$out" inbound_tag)"
+assert_eq "T6 空数组 -> server_name 空串且不崩" "$(field "$out" server_name)" ""
+assert_eq "T6 空数组 -> short_id 空串且不崩" "$(field "$out" short_id)" ""
+assert_eq "T6 后续字段仍正确" "$(field "$out" inbound_tag)" "in-3"
 
 # --- T7 fork 成本: 一次调用只 fork 2 次 jq ---
 : >"$SB/jq.log"
 PATH="$PWD/$SB/bin:$PATH" run_gcc 0 >/dev/null <<<"$full"
-assert_eq "T7 单次调用 jq fork 数 (原为 15)" "2" "$(grep -c 'jq' "$SB/jq.log" || true)"
+assert_eq "T7 单次调用 jq fork 数 (原为 15)" "$(grep -c 'jq' "$SB/jq.log" || true)" "2"
 
 # --- T8 (NEG) 分隔符换回 tab: 空字段串位, 上面断言必须变红 ---
 if [[ -z "${SKIP_NEG:-}" ]]; then

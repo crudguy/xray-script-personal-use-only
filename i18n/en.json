@@ -403,7 +403,25 @@
       "unavailable": "check.sh not found; cannot run the full health check."
     },
     "input_unavailable": "Cannot read interactive input: stdin is closed or no terminal is available (common with cron, pipes, or < /dev/null). Operation aborted.",
-    "input_retry_exhausted": "Too many consecutive invalid inputs; operation aborted. Please check the expected format and run again."
+    "input_retry_exhausted": "Too many consecutive invalid inputs; operation aborted. Please check the expected format and run again.",
+    "svc": {
+      "starting": "Starting Xray service…",
+      "stopping": "Stopping Xray service…",
+      "restarting": "Restarting Xray service…",
+      "start_already": "Xray already running; only re-checking the boot autostart flag",
+      "stop_already": "Xray is not running; nothing to stop",
+      "restart_to_start": "Xray is not running; starting it directly",
+      "start_done": "Xray started · autostart on boot: ${autostart}",
+      "stop_done": "Xray stopped · autostart on boot: ${autostart}",
+      "restart_done": "Xray restarted · autostart on boot: ${autostart}",
+      "autostart_yes": "enabled",
+      "autostart_no": "disabled",
+      "no_unit": "xray.service not found (Xray may not be installed) — install Xray first",
+      "fail_hint": "Run journalctl -u xray -n 50 to see why it failed"
+    },
+    "stop": {
+      "verify_failed": "Xray failed to stop — some of its processes may still be alive."
+    }
   },
   "backup": {
     "usage": "Usage: backup.sh --export [output file] | --import <archive> [--yes]",

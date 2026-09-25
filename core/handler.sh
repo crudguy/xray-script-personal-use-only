@@ -4055,17 +4055,58 @@ function handler_purge() {
 }
 
 # =============================================================================
+# 函数名称: _xray_unit_exists
+# 功能描述: 判断 systemd 是否已存在 xray.service 单元。
+#           理由: systemd 对"unit 不存在"与"unit 存在但启动失败"一视同仁地返回非 0,
+#           若不在启停前拦截, Xray 压根没装时用户只会看到"未能进入运行状态"这句泛化
+#           错误, 猜不到真实原因 (详见 handler_start 的前置检查注释)。
+# 参数: 无
+# 返回值: 0=单元存在; 非 0=不存在 / 无 systemd
+# =============================================================================
+function _xray_unit_exists() {
+    systemctl cat xray.service >/dev/null 2>&1
+}
+
+# =============================================================================
+# 函数名称: _xray_autostart_text
+# 功能描述: 把 xray.service 的开机自启状态翻译成人类可读文案 ("已启用"/"未启用")。
+#           用于启停/重启成功后那一行结果摘要 —— 让用户一眼看出"下次开机还会不会起来"。
+# 参数: 无
+# 返回值: stdout 输出文案; rc 恒 0 (查不到即按"未启用"处理, 不让 set -e 中断输出)
+# =============================================================================
+function _xray_autostart_text() {
+    if systemctl -q is-enabled xray 2>/dev/null; then
+        printf '%s' "$(_i18n '.handler.svc.autostart_yes')"
+    else
+        printf '%s' "$(_i18n '.handler.svc.autostart_no')"
+    fi
+}
+
+# =============================================================================
 # 函数名称: handler_start
 # 功能描述: 启动 Xray 服务。
-#           1. 检查 Xray 服务是否已在运行。
-#           2. 如果未运行则启动服务。
-#           3. 检查 Xray 服务是否已设置开机自启。
-#           4. 如果未设置则启用开机自启。
+#           1. 前置检查 xray.service 是否存在 (不存在则直接报错, 而非笼统的"启动失败")。
+#           2. 检查 Xray 服务是否已在运行: 已在运行则仅补开机自启, 不重复 start。
+#           3. 未运行时启动服务, 并轮询复查是否真的进入 active (最多约 5 秒)。
+#           4. 检查 Xray 服务是否已设置开机自启, 未设置则启用。
+#           5. 以上全部静默完成(-q), 由本函数统一打印一条结果摘要 —— 交互场景下
+#              用户选了菜单项必须看到"发生了什么", 否则下一帧菜单重绘会把一切吞掉。
 # 参数: 无
-# 返回值: 无 (通过 systemctl 命令执行操作)
+# 返回值: 无 (systemctl 失败已由下方复查与 _error 兜底)
 # =============================================================================
 function handler_start() {
     _ensure_xray_runtime_dirs
+    # 单元缺失时尽早报错 (见 _xray_unit_exists 注释): 否则用户会先白等 5 秒轮询
+    _xray_unit_exists || _error "$(_i18n '.handler.svc.no_unit')"
+    local was_active='n'
+    systemctl -q is-active xray && was_active='y' || true
+    # 已在运行: 幂等短路 —— 不重复 start, 只补齐开机自启, 并明确告知用户"早已在运行"
+    # (旧实现到此完全静默, 用户点了菜单毫无反馈, 会以为脚本卡了或没生效)
+    if [[ "${was_active}" == 'y' ]]; then
+        print_info "$(_i18n '.handler.svc.start_already')"
+    else
+        print_info "$(_i18n '.handler.svc.starting')"
+    fi
     # 检查 Xray 服务是否活跃，如果不活跃则启动 (失败交由下方复查统一处理)
     systemctl -q is-active xray || systemctl -q start xray || true
     # 检查 Xray 服务是否已启用，如果未启用则启用
@@ -4077,13 +4118,16 @@ function handler_start() {
         systemctl -q is-active xray && break
         sleep 0.5
     done
-    # 复查未通过: 留痕(失败)并终止, 与 handler_restart 的兜底保持一致
+    # 复查未通过: 留痕(失败)并终止, 与 handler_restart 的兜底保持一致。
+    # 第二参为可执行建议: systemctl start 的失败原因被 -q 吞掉了, 补一句让用户有地方查。
     if ! systemctl -q is-active xray; then
         _audit_log 'start.failed' 'xray'
-        _error "$(_i18n '.handler.start.verify_failed')"
+        _error "$(_i18n '.handler.start.verify_failed')" "$(_i18n '.handler.svc.fail_hint')"
     fi
     # 审计留痕
     _audit_log 'start' 'xray'
+    # 结果摘要: 运行状态 + 开机自启 (后者决定"下次开机会不会自己起来", 是最常被问的)
+    print_pass "$(_i18n_sub '.handler.svc.start_done' '${autostart}' "$(_xray_autostart_text)")"
 }
 
 # =============================================================================
@@ -4097,14 +4141,38 @@ function handler_start() {
 # 返回值: 无 (通过 systemctl 命令执行操作)
 # =============================================================================
 function handler_stop() {
+    # 单元缺失时尽早报错: "停止一个不存在的服务"在无 -q 输出时会表现为静默无反应,
+    # 用户会误以为已经停掉 (尤其从别的机器迁移配置后)。
+    _xray_unit_exists || _error "$(_i18n '.handler.svc.no_unit')"
+    local was_active='n'
+    systemctl -q is-active xray && was_active='y' || true
+    # 已停止: 明确告知"无需停止", 而不是静默什么都不做
+    if [[ "${was_active}" == 'y' ]]; then
+        print_info "$(_i18n '.handler.svc.stopping')"
+    else
+        print_info "$(_i18n '.handler.svc.stop_already')"
+    fi
     # 检查 Xray 服务是否活跃，如果活跃则停止
     # 注: `A && B` 作函数末句时, A 为假 (Xray 未运行) 会让函数返回非 0,
     #     裸调用处被 set -e 传播而中断 (连点两次"停止服务"即触发); 末尾补 || true 兜底。
     systemctl -q is-active xray && systemctl -q stop xray || true
     # 检查 Xray 服务是否已启用，如果启用则禁用
     systemctl -q is-enabled xray && systemctl -q disable xray || true
+    # 停止后复查: 轮询等待服务退出 active 状态 (最多约 5 秒), 与 start/restart 两臂对称。
+    # 旧实现没有这一步 —— stop 失败 (如进程僵住) 会照常打印"完成", 误报从此而来。
+    local wait_i=0
+    for ((wait_i = 0; wait_i < 10; wait_i++)); do
+        systemctl -q is-active xray || break
+        sleep 0.5
+    done
+    if systemctl -q is-active xray; then
+        _audit_log 'stop.failed' 'xray'
+        _error "$(_i18n '.handler.stop.verify_failed')" "$(_i18n '.handler.svc.fail_hint')"
+    fi
     # 审计留痕
     _audit_log 'stop' 'xray'
+    # 结果摘要: 已停止 + 开机自启已禁用 (顺带提醒"下次开机也不会自己起来")
+    print_pass "$(_i18n_sub '.handler.svc.stop_done' '${autostart}' "$(_xray_autostart_text)")"
 }
 
 # =============================================================================
@@ -4125,6 +4193,17 @@ function handler_restart() {
         _error "$(_i18n '.handler.persist.invalid_json')"
     fi
     _ensure_xray_runtime_dirs
+    # 单元缺失时尽早报错 (同上两臂): 安装流程中途被打断时最容易踩到,
+    # 此时 xray 根本没装, 却会白等 5 秒轮询再报"未能进入运行状态"。
+    _xray_unit_exists || _error "$(_i18n '.handler.svc.no_unit')"
+    local was_active='n'
+    systemctl -q is-active xray && was_active='y' || true
+    # 未运行时 restart 会退化成 start, 文案要说清实际走了哪条路 (旧实现同样全程静默)
+    if [[ "${was_active}" == 'y' ]]; then
+        print_info "$(_i18n '.handler.svc.restarting')"
+    else
+        print_info "$(_i18n '.handler.svc.restart_to_start')"
+    fi
     # 检查 Xray 服务是否活跃，如果活跃则重启，否则启动 (失败交由下方复查统一处理)
     systemctl -q is-active xray && systemctl -q restart xray || systemctl -q start xray || true
     # 检查 Xray 服务是否已启用，如果未启用则启用
@@ -4138,10 +4217,12 @@ function handler_restart() {
     # 复查未通过: 留痕(失败)并终止, 避免界面误报"已完成"而 443 实际不通
     if ! systemctl -q is-active xray; then
         _audit_log 'restart.failed' 'xray'
-        _error "$(_i18n '.handler.restart.verify_failed')"
+        _error "$(_i18n '.handler.restart.verify_failed')" "$(_i18n '.handler.svc.fail_hint')"
     fi
     # 审计留痕 (仅在确认服务已运行后才记为成功)
     _audit_log 'restart' 'xray'
+    # 结果摘要: 已运行 + 开机自启状态 (与 start/stop 两臂同一口径)
+    print_pass "$(_i18n_sub '.handler.svc.restart_done' '${autostart}' "$(_xray_autostart_text)")"
 }
 
 # =============================================================================

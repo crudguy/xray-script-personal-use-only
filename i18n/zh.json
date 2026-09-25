@@ -403,7 +403,25 @@
       "unavailable": "缺少 check.sh, 无法执行一键全量体检。"
     },
     "input_unavailable": "无法读取交互输入: 标准输入已关闭或无可用终端 (常见于 cron、管道、重定向 < /dev/null), 已中止本次操作。",
-    "input_retry_exhausted": "输入连续无效已达重试上限, 已中止本次操作。请确认输入格式后重新运行。"
+    "input_retry_exhausted": "输入连续无效已达重试上限, 已中止本次操作。请确认输入格式后重新运行。",
+    "svc": {
+      "starting": "正在启动 Xray 服务…",
+      "stopping": "正在停止 Xray 服务…",
+      "restarting": "正在重启 Xray 服务…",
+      "start_already": "Xray 已在运行，本次只复核开机自启",
+      "stop_already": "Xray 当前未运行，无需停止",
+      "restart_to_start": "Xray 当前未运行，改为直接启动",
+      "start_done": "Xray 已启动 · 开机自启: ${autostart}",
+      "stop_done": "Xray 已停止 · 开机自启: ${autostart}",
+      "restart_done": "Xray 已重启 · 开机自启: ${autostart}",
+      "autostart_yes": "已启用",
+      "autostart_no": "未启用",
+      "no_unit": "未检测到 xray.service（Xray 可能尚未安装），请先安装 Xray",
+      "fail_hint": "可用 journalctl -u xray -n 50 查看具体失败原因"
+    },
+    "stop": {
+      "verify_failed": "Xray 未能停止，请检查是否有进程未退出。"
+    }
   },
   "backup": {
     "usage": "用法: backup.sh --export [输出文件] | --import <归档文件> [--yes]",

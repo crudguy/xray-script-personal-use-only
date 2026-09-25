@@ -11,7 +11,7 @@
 #       只会在某个深夜收到"证书已过期"时才发现问题。它的回滚循环是唯一的兜底。
 #     - handler_update_ocsp_config 直接用 sed -i 改写**正在运行的 nginx.conf**。LE 不支持
 #       OCSP stapling, 不注释掉就 `nginx -t` 直接红; 反过来从 LE 切回 ZeroSSL 不取消
-#       注释 = 白丢一层 stapling。两侧刅成 literary "只刅一半" 都是业务损失。
+#       注释 = 白丢一层 stapling。两侧只要做成"只改一半"就都是业务损失。
 #   此前两条全仓零覆盖。
 #
 # 锁定不变量:

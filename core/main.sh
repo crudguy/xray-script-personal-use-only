@@ -370,8 +370,14 @@ function _require_warp_enabled() {
 #       TTY 门控同时保证既有测试不受影响: menu_submenu_loop_test / menu_guard_soft_fail_test
 #       用管道按序喂输入, 若无条件 read 会多吃一项导致断言错位 —— 门控下自动跳过。
 #
-#       只挂"输出型"命令, 动作型 (启停 / 重启 / 改配置) 不挂: 后者的输出只有一两行,
-#       且用户常连续操作多次, 每步都强加一次回车反而变成负担。
+#       菜单项 4/5/6 (启动/停止/重启) **也**挂一次暂停: 这三个动作此前全程静默
+#       (systemctl -q, 成功不打印), 用户点完看不到任何反馈直接被重绘的菜单吞掉;
+#       现已在 handler 侧补齐结果摘要, 但摘要同样只有一两行 —— 33 行重绘照样把它顶出
+#       一屏之外, 与菜单 7/8/10/11 是同一个坑, 故一并暂停。保留 `_cmd` 层的 CLI 入口
+#       (bash script.sh --start 等) **不**挂暂停: 那要能放进 cron /嵌套脚本里跑。
+#
+#       其余动作型分支 (改配置 / 安装) 不挂: 它们自身是长输出或多步追问, 且多数以
+#       print_warn + 回菜单收尾, 每步再强加一次回车反而变成负担。
 # =============================================================================
 
 function _pause_after_action() {
@@ -705,9 +711,9 @@ function processes_index() {
         1) processes_full_installation ;; # 选择 1：进入一键安装流程
         2) processes_xray ;;              # 选择 2：进入 Xray 安装流程
         3) processes_uninstall ;;         # 选择 3：卸载
-        4) exec_handler '--start' ;;      # 选择 4：启动服务
-        5) exec_handler '--stop' ;;       # 选择 5：停止服务
-        6) exec_handler '--restart' ;;    # 选择 6：重启服务
+        4) exec_handler '--start'; _pause_after_action ;;   # 选择 4：启动服务 (动作型但结果摘要需读完)
+        5) exec_handler '--stop'; _pause_after_action ;;    # 选择 5：停止服务
+        6) exec_handler '--restart'; _pause_after_action ;; # 选择 6：重启服务
         7) exec_handler '--share'; _pause_after_action ;;   # 选择 7：显示分享链接 (输出型: 暂停)
         8) exec_handler '--traffic'; _pause_after_action ;; # 选择 8：显示流量统计 (输出型: 暂停)
         9) processes_config ;;            # 选择 9：进入配置管理流程

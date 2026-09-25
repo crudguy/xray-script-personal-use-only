@@ -1881,7 +1881,11 @@ function _file_mtime() {
 #   3. Xray 服务 —— 单元/进程/二进制/配置四件套, 任一缺失都不是"能跑"的状态;
 #   4. Nginx 服务 —— 仅 SNI 场景存在, 故用 skip 语义而非硬判失败;
 #   5. 端口归属 —— SNI 下 443 归 nginx、直连下归 xray, 归属错了会"看着在跑但连不上";
-#   6. TLS 证书 —— 到期是最典型的"某天突然不能用", 必须提前看剩余天数;
+#   6. TLS 证书 —— 到期是最典型的"某天突然不能用", 除剩余天数外还看两件"到期之前就该
+#      发现"的事: 自动续期定时任务在不在 (acme.sh 会把 cron 安装失败吞成同一个退出码,
+#      见 service/ssl.sh 的 _ssl_renew_cron_present), 以及证书有没有跌进 acme.sh 的
+#      续期窗口却仍未被续掉 (由此反推"cron 里那次续签跑挂了" —— 那次的输出被上游
+#      丢进 /dev/null, 不会留下任何痕迹, 只能靠天数反推);"某天突然不能用", 必须提前看剩余天数;
 #   7. 内核网络 —— 判据与 check_net_status 同源 (但本函数自行 sysctl 取值, 不调用它,
 #      以免重印整段报告); 2026-09-25 起 IPv6 检测 (_ipv6_collect) 也并入本分区,
 #      含"IPv6 socket 不可用但 nginx 仍配了 listen [::]"这一联动告警。
@@ -1893,6 +1897,10 @@ function _file_mtime() {
 #   WARN = 需要留意但不等于坏: 可选命令缺失 / 443 无监听 / 端口归属与模式不符 /
 #          证书 7 天内到期 / BBR 未开 / 持久化文件缺失 / 磁盘内存偏紧 / 日志偏大 /
 #          订阅产物早于配置修改时间。
+#      2026-09-26 起本分区新增两类同为 WARN 的结论: 自动续期定时任务缺失 (证书此刻
+#      仍有效, 坏的是"未来不会自动续"), 与剩余天数跌进续期窗口 (自动续期疑似未生效)。
+#      两者都不判 FAIL —— 判 FAIL 会让"证书现在能用"的状态被渲染成已坏, 与上面的
+#      口径冲突。
 #
 # 设计取舍: 全程只读, 且刻意不做外网探测 (DNS/TCP/HTTPS 连通性)。原因是连通性
 #   探测耗时且受对端影响, 会让"体检"变成一个不确定要等多久的操作; 该类检查已有
@@ -1916,6 +1924,13 @@ function check_health_report() {
     local disk_warn_kb=1048576    # 根分区可用 < 1GB 告警
     local mem_warn_kb=65536       # 可用内存 < 64MB 告警
     local cert_warn_days=7        # 证书剩余 < 7 天告警
+    # 剩余 < 21 天 = "自动续期疑似没跑成功"。阈值由来: acme.sh 默认在剩余 30 天内
+    # 续期 (--cron 每天跑一次), 所以只要续期链路是通的, 剩余天数**永远**不会跌破
+    # 30 —— 跌到 21 以下只可能是"该续没续上"。取 21 而非 30 是留出排错余量, 免得
+    # 把"刚进续期窗口、明后天就会被续掉"的正常状态也判成异常。
+    # 这一项补的是此前**完全静默**的一类故障: cron 里那次 `acme.sh --cron` 的输出被
+    # 上游丢弃 (> /dev/null), 续签跑挂了不会有任何痕迹, 只能靠证书天数反推。
+    local cert_renew_window_days=21
     local log_warn_bytes=104857600 # 单个日志 > 100MB 告警
 
     # ---------- 采集变量 (全部显式初始化, 兼容 set -u) ----------
@@ -2307,6 +2322,36 @@ function _health_ports() {
 function _health_certs() {
     _health_section "$(_i18n ".${CUR_FILE}.health.sec_cert")"
 
+    # ---- 自动续期定时任务 ----
+    # 单独成项, 不并入下面逐域名的结论: 它管的是"未来会不会自动续", 与"当前证书还剩
+    # 几天"是两件事 —— 定时任务缺失时证书可能还剩 80 天, 逐域名结论全绿, 而 90 天后
+    # 会一次性全红。
+    # 判据与 service/ssl.sh 的 _ssl_renew_cron_present 同源, 这里刻意**不** source
+    # ssl.sh: 本函数是只读巡检, 而 ssl.sh 带安装器依赖、EXIT trap 与写操作, 加载它会
+    # 把"看看状态"变成"可能改东西"。代价是判据有两份, 两侧各有测试守着
+    # (service 侧: test/ssl_cron_guard_test.sh; check 侧: test/health_cert_renew_test.sh)。
+    if [[ ! -x "${HOME}/.acme.sh/acme.sh" ]]; then
+        # 没装 acme.sh 说明证书不是它管的 (自签 / 别的工具), 本项不适用
+        _health_item 'skip' "$(_i18n ".${CUR_FILE}.health.cert_cron_label")$(_i18n ".${CUR_FILE}.health.cert_cron_na")"
+    elif ! cmd_exists 'crontab'; then
+        _health_item 'skip' "$(_i18n ".${CUR_FILE}.health.cert_cron_label")$(_i18n ".${CUR_FILE}.health.cert_cron_nocrontab")"
+    else
+        # 刻意不用"管道 + grep -q": pipefail 下 grep -q 一找到就退出, 上游 grep -v
+        # 可能收 SIGPIPE(141), 整条管道非 0 而被判成"定时任务缺失" —— 误判方向恰好
+        # 是**不告警**, 正是本项要防的那件事。故整段落变量、滤注释后再用内建比对。
+        # (与 check_health_report 顶部"实现注意"同源的坑)
+        local cron_txt=''
+        cron_txt="$(crontab -l 2>/dev/null || true)"
+        # 滤注释行: 一行以 # 开头的备忘 (比如手抄的续签命令) 也含 'acme.sh --cron',
+        # 不过滤就会被当成"已就位" —— 同样是不告警方向的误判。
+        cron_txt="$(printf '%s\n' "${cron_txt}" | grep -v '^[[:space:]]*#' || true)"
+        if [[ "${cron_txt}" == *'acme.sh --cron'* ]]; then
+            _health_item 'pass' "$(_i18n ".${CUR_FILE}.health.cert_cron_label")$(_i18n ".${CUR_FILE}.health.present")"
+        else
+            _health_item 'warn' "$(_i18n ".${CUR_FILE}.health.cert_cron_label")$(_i18n ".${CUR_FILE}.health.cert_cron_missing")"
+        fi
+    fi
+
     custom_doms=''
     if cmd_exists 'jq' && [[ -f "${SCRIPT_CONFIG_PATH}" ]]; then
         cfg_cdn="$(jq -r '.nginx.cdn // empty' "${SCRIPT_CONFIG_PATH}" 2>/dev/null || true)"
@@ -2353,6 +2398,11 @@ function _health_certs() {
                 _health_item 'fail' "$(_i18n ".${CUR_FILE}.health.cert_label")${tmp} —— $(_i18n ".${CUR_FILE}.health.cert_expired")"
             elif ((cert_days < cert_warn_days)); then
                 _health_item 'warn' "$(_i18n ".${CUR_FILE}.health.cert_label")${tmp} —— $(_i18n ".${CUR_FILE}.health.cert_days")${cert_days} —— $(_i18n ".${CUR_FILE}.health.cert_expiring")"
+            elif ((cert_days < cert_renew_window_days)); then
+                # 还没到"快过期"的程度, 但已经跌进 acme.sh 的续期窗口却没被续掉 ——
+                # 正常链路下不该出现这种天数, 所以这里是**续期没跑成功**的间接证据
+                # (cron 里那次 acme.sh --cron 的成败无从直接取得, 见本分区开头注释)。
+                _health_item 'warn' "$(_i18n ".${CUR_FILE}.health.cert_label")${tmp} —— $(_i18n ".${CUR_FILE}.health.cert_days")${cert_days} —— $(_i18n ".${CUR_FILE}.health.cert_renew_stalled")"
             else
                 _health_item 'pass' "$(_i18n ".${CUR_FILE}.health.cert_label")${tmp} —— $(_i18n ".${CUR_FILE}.health.cert_days")${cert_days}"
             fi

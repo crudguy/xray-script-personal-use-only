@@ -46,6 +46,16 @@ expect_seq() {
 }
 # 某菜单打印的选项编号序列
 menu_nums() { printf '%s\n' "$(menu_block "$1")" | grep -oE '\$\{GREEN\}[0-9]+\.\$\{NC\}' || true; }
+# 某菜单打印的说明行编号集合 (去重)
+# 锚定 ${CYAN} 是刻意的: 说明行与选项行同样以 "N. " 起头, 若正则放宽成 '"[0-9]+\. ',
+# 就会把选项行一并匹配进来, 而选项编号恒 <= 项数 —— 于是"说明行整段消失"这类改动
+# 反而恒绿, 守卫形同虚设。抽不到任何说明行时 T3 直接判红, 不做静默跳过。
+# 注: 末尾必须 tr 成空格分隔 —— sort -u 输出是换行分隔, 而下方用 `case " ${inums} "`
+#     做"包含某个编号"的判断; 换行不是空格, 会让它恒不匹配, 报出一堆假的"缺说明"。
+info_nums() {
+    printf '%s\n' "$(menu_block "$1")" \
+        | grep -oE 'echo -e "\$\{CYAN\}[0-9]+\. ' | grep -oE '[0-9]+' | sort -u | tr '\n' ' ' || true
+}
 
 # ---------------------------------------------------------------------------
 # T1: 每个 menu_* 的显示编号必须严格连续 1..N (无空档 / 无重复)
@@ -88,21 +98,32 @@ for pair in "menu_config processes_config config_management" \
 done
 
 # ---------------------------------------------------------------------------
-# T3: 说明行编号不得越界 (说明指向不存在的选项 = 用户困惑)
+# T3: 说明行编号不得越界, 且**每个选项都必须有说明**
+#     (越界 = 说明指向不存在的选项; 缺项 = 选项无从得知是干什么的, 两者都让用户困惑)
+#     背景: 管理配置的"设置语言"、SNI 配置的"强制续签/更新 nginx/nginx 自动更新/Web 配置"
+#     曾长期没有说明行 (编号从 5 直接跳到 7、从 2 直接跳到 7), 而旧 T3 只查"越界",
+#     恰好放过了这两处。
 # ---------------------------------------------------------------------------
-echo "[T3] 说明行编号不越界"
-for pair in "menu_config config_management" "menu_sni_config sni_config" \
-            "menu_bbr bbr" "menu_ipv6 ipv6"; do
-    set -- $pair
-    mfn="$1"
-    n=0; for _v in $(menu_nums "$mfn" | seq_of || true); do n=$((n+1)); done
-    info_nums="$(menu_block "$mfn" | grep -oE 'echo -e "[0-9]+\. ' | grep -oE '[0-9]+' | sort -u || true)"
-    bad=''
-    for i in $info_nums; do [[ "$i" -le "$n" ]] || bad+="$i "; done
-    if [[ -z "$bad" ]]; then
-        assert_ok true "$mfn: 说明行编号均在 1..$n 内"
+echo "[T3] 说明行编号不越界且不缺项"
+# 例外是刻意的三类: 主菜单靠分组标题自解释; Web 配置是自动直通菜单 (不消费选择, 只有一项);
+# 语言菜单只有"中文 / English"两项, 选项名即说明。
+SKIP_INFO=' menu_index menu_web_config menu_language '
+for fn in $(grep -oE '^function menu_[a-z0-9_]+' core/menu.sh | awk '{print $2}' | sort -u); do
+    case "${SKIP_INFO}" in *" ${fn} "*) continue ;; esac
+    nums="$(menu_nums "$fn" | seq_of || true)"
+    n=0; for _v in $nums; do n=$((n+1)); done
+    inums="$(info_nums "$fn")"
+    if [[ -z "${inums}" ]]; then
+        assert_ok false "$fn: 未抽到说明行 (说明行须以 \${CYAN} 起头)"
+        continue
+    fi
+    bad=''; missing=''
+    for i in $inums; do [[ "$i" -le "$n" ]] || bad+="$i "; done
+    for i in $nums; do case " ${inums} " in *" ${i} "*) ;; *) missing+="$i " ;; esac; done
+    if [[ -z "${bad}" && -z "${missing}" ]]; then
+        assert_ok true "$fn: 说明行覆盖 1..$n 且不越界"
     else
-        assert_ok false "$mfn: 说明行编号越界 -> $bad"
+        assert_ok false "$fn: 越界[${bad}] 缺说明的选项[${missing}]"
     fi
 done
 

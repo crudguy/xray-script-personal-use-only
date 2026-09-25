@@ -120,9 +120,11 @@ readonly EMAIL_REGEX='^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$' # 邮箱
 #  与 DOMAIN_REGEX 同理: core/check.sh 与 service/ssl.sh 共用, 消除副本漂移)
 
 # 退出码约定 (单一来源): 用法错误统一用 EXIT_USAGE, 与"正常 0 / 真实故障 1"区分开。
-#   原本 check.sh / generate.sh / handler.sh 三处 main() 的 `*` 未知参数分支各写裸 `exit 2`,
-#   散落且语义不显; 收口为常量便于统一维护, 也避免将来误改某一处退出码 —— 监控/cron 依赖
-#   exit 2 识别"参数拼错", 改错一处会让 `core/check.sh --heath` 误报。
+#   e744c1d 之前, check.sh / generate.sh / handler.sh 三处 main() 的 `*` 未知参数分支
+#   各写裸 `exit 2`, 散落且语义不显; 收口为常量便于统一维护, 也避免将来误改某一处退出码
+#   —— 监控/cron 依赖 exit 2 识别"参数拼错", 改错一处会让 `core/check.sh --heath` 误报。
+#   注: 这三处 `*` 分支本身也不是一开始就有的 (更早时无 `*)` 分支, 未知参数会静默 exit 0,
+#       见各脚本 main() 内的说明) —— 两处注释说的是**不同历史阶段**, 不要互相"纠正"。
 readonly EXIT_USAGE=2
 
 # --- 全局变量声明 ---
@@ -318,7 +320,8 @@ function _menu_title() {
 # =============================================================================
 function load_i18n() {
     # 运行期内 i18n 文件不会变化; 主循环每轮会多次进入本函数,
-    # 若每次都重展平 683 键 JSON 会无谓 fork 大量 jq 子进程。已加载则跳过。
+    # 若每次都重展平整个 i18n JSON (键数随新文案持续增长) 会无谓 fork 大量 jq
+    # 子进程。已加载则跳过。
     if [[ -n "${I18N_MAP[*]:-}" ]]; then
         return 0
     fi
@@ -548,8 +551,8 @@ function _nginx_binary() {
 # 注: 此前 handler.sh 与 nginx.sh 各有一份, 且**写成了两个不同的变量**:
 #       handler.sh: [[ -x "${NGINX_PREFIX_DIR}/sbin/nginx" ]]
 #       nginx.sh:   [[ -x "${NGINX_PATH}/sbin/nginx" ]]
-#     两处的 NGINX_PATH 并非同一个东西 —— handler.sh:56 的 NGINX_PATH 是
-#     "${SERVICE_DIR}/nginx.sh" (服务脚本文件), 而 nginx.sh:58 的 NGINX_PATH 是
+#     两处的 NGINX_PATH 并非同一个东西 —— handler.sh 的 readonly NGINX_PATH 是
+#     "${SERVICE_DIR}/nginx.sh" (服务脚本文件), 而 service/nginx.sh 的 NGINX_PATH 是
 #     "/usr/local/nginx" (安装目录)。当前两份恰好都解析到同一路径所以没出事,
 #     但一旦有人按 handler.sh 的语义去改 nginx.sh, 判断就会静默反向。
 #     合并后统一走 _nginx_binary, 变量只认 NGINX_PREFIX_DIR。

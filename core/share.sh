@@ -13,7 +13,7 @@
 # 作者: crudguy
 # 时间: 2026-09-19
 # 版本: 1.0.0
-# 依赖: bash, jq, curl, qrencode, sed
+# 依赖: bash, jq, curl, qrencode, base64 (订阅产物), mkdir/chmod (写订阅文件)
 # 配置:
 #   - ${XRAY_CONFIG_PATH}: Xray 服务端配置文件 (用于读取协议、UUID、密码等)
 #   - ${SCRIPT_CONFIG_PATH}: 脚本自身配置文件 (用于读取端口、域名、路径等)
@@ -23,7 +23,9 @@
 # =============================================================================
 
 # --- 共享头部: 严格模式 / ERR trap / PATH / 颜色 / 目录常量 / i18n 公共函数 ---
-# 实际内容由 core/_common.sh 提供 (13 个脚本共用, 消除副本漂移); 设计取舍 (为何
+# 实际内容由 core/_common.sh 提供 (所有 source 它的脚本共用, 消除副本漂移);
+#   共用数此前写作 13 —— 那个随容器方案一起下线的服务脚本没了之后就不再是这个数,
+#   故此处不再写死绝对值 (写死就得跟着增删一起改, 只会再次漂移)。设计取舍 (为何
 # install.sh 不在此列, 为何用 $0 而非 BASH_SOURCE, 为何 PATH 是白名单而非追加) 见该文件。
 # 注: 下面这行刻意留在每个脚本里 —— shellcheck 的 `set -e` 判定不跨 source,
 #     移走会让本脚本内的 `cd` 全被误报 SC2164。
@@ -1066,7 +1068,8 @@ function _subscription_collect_all_inbounds() {
 #           4. 根据脚本配置中的 tag 值，选择相应的链接生成函数。
 #           5. 调用 show_config 显示最终结果。
 # 参数:
-#   $@: 所有命令行参数 (此脚本中未使用)
+#   $@: 所有命令行参数 (--save / --save=<路径> / --no-qr / --subscription,
+#       详见 main() 的参数解析; 另支持环境变量 XRAY_SCRIPT_SHARE_FILE 指定落盘路径)
 # 返回值: 无 (协调调用其他函数完成整个流程)
 # =============================================================================
 function main() {
@@ -1097,8 +1100,9 @@ function main() {
     # 订阅模式: 仅收集节点并生成三种订阅文件, 全程不打印明文/二维码
     if [[ "${SHARE_SUBSCRIPTION:-0}" -eq 1 ]]; then
         SHARE_COLLECT_ONLY=1
-        # fallback/sni 的聚合函数以 CLIENT_CONFIG 已填好首个 inbound 为前提 (display 模式由下方 1069 行
-        # 的 get_common_config 1 预填), 订阅分支提前返回, 故在此同样预填一次, 保证首节点字段正确。
+        # fallback/sni 的聚合函数以 CLIENT_CONFIG 已填好首个 inbound 为前提 (display 模式由本函数
+        # 末尾"获取第一个 inbound"处的 `get_common_config 1` 预填), 订阅分支提前返回，
+        # 故在此同样预填一次, 保证首节点字段正确。
         get_common_config 1
         case "$(echo "${SCRIPT_CONFIG}" | jq -r '.xray.tag | ascii_downcase')" in
         # fallback/sni 的聚合函数内部逐条 show_config (collect 模式即收集节点), 但末尾会

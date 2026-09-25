@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
 # --- 共享头部: 严格模式 / ERR trap / PATH / 颜色 / 目录常量 / i18n 公共函数 ---
-# 实际内容由 core/_common.sh 提供 (13 个脚本共用, 消除副本漂移); 设计取舍 (为何
+# 实际内容由 core/_common.sh 提供 (所有 source 它的脚本共用, 消除副本漂移);
+#   共用数此前写作 13 —— 那个随容器方案一起下线的服务脚本没了之后就不再是这个数,
+#   故此处不再写死绝对值 (写死就得跟着增删一起改, 只会再次漂移)。设计取舍 (为何
 # install.sh 不在此列, 为何用 $0 而非 BASH_SOURCE, 为何 PATH 是白名单而非追加) 见该文件。
 # 注: 下面这行刻意留在每个脚本里 —— shellcheck 的 `set -e` 判定不跨 source,
 #     移走会让本脚本内的 `cd` 全被误报 SC2164。
@@ -57,7 +59,7 @@ print_sum() {
             printf "SUM->up:\t%.0f\nSUM->down:\t%.0f\nSUM->TOTAL:\t%.0f\n", us, ds, us+ds;
         }' || true)
     # 刻意不使用 numfmt / column: 两者都不在 install.sh 的依赖清单里, 而依赖安装只在
-    # 首次运行 (或 --force-check-deps) 时执行 —— 最小化系统 / 事后丢包的机器上点"信息
+    # 首次运行 (或 --check-deps) 时执行 —— 最小化系统 / 事后丢包的机器上点"信息
     # 统计"会直接 command not found (Debian 12 起 column 已移入 bsdextrautils, 仅靠
     # bsdmainutils 传递带入)。改用单条 awk 完成 IEC 单位换算 + 标签列宽对齐, 零外部依赖。
     # 用 printf 而非 echo -e: 标签里若含反斜杠, echo -e 会把它解释成转义序列。

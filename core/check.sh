@@ -13,13 +13,22 @@
 # 时间: 2026-09-19
 # 版本: 1.0.0
 # 依赖: bash, jq, dig, curl, openssl, stdbuf
+#       另有按功能域分组的依赖, 缺失时对应检查项会退化/跳过而非报错:
+#         --net-status / BBR: sysctl, lsmod
+#         端口与进程归属:     ss, lsof, ip, timeout, stat
+#         防火墙放行:         ufw 或 firewall-cmd
+#         systemd 服务检查:   systemctl
+#         日志轮转检查:       logrotate
+#         IPv6 监听能力实测:  python3 (经 _common.sh:_ipv6_listen_probe; 缺失则该项报 unknown)
 # 配置:
 #   - ${SCRIPT_CONFIG_DIR}/config.json: 用于读取语言设置 (language)
 #   - ${I18N_DIR}/${lang}.json: 用于读取具体的提示文本 (i18n 数据文件)
 # =============================================================================
 
 # --- 共享头部: 严格模式 / ERR trap / PATH / 颜色 / 目录常量 / i18n 公共函数 ---
-# 实际内容由 core/_common.sh 提供 (13 个脚本共用, 消除副本漂移); 设计取舍 (为何
+# 实际内容由 core/_common.sh 提供 (所有 source 它的脚本共用, 消除副本漂移);
+#   共用数此前写作 13 —— 那个随容器方案一起下线的服务脚本没了之后就不再是这个数,
+#   故此处不再写死绝对值 (写死就得跟着增删一起改, 只会再次漂移)。设计取舍 (为何
 # install.sh 不在此列, 为何用 $0 而非 BASH_SOURCE, 为何 PATH 是白名单而非追加) 见该文件。
 # 注: 下面这行刻意留在每个脚本里 —— shellcheck 的 `set -e` 判定不跨 source,
 #     移走会让本脚本内的 `cd` 全被误报 SC2164。
@@ -462,7 +471,8 @@ function check_firewall_port_open() {
     return 2
 }
 
-# 仅检查 TCP 放行 (保留原函数名, 供既有调用点与外部沿用)
+# 仅检查 TCP 放行。原函数名保留仅为兼容外部调用 —— **本仓当前零调用点**
+#   (本文件另有 check_firewall_port 泛化版, 支持 UDP, 才是生产链路在用的)
 function check_firewall_tcp_port_open() {
     check_firewall_port_open "${1:-}" 'tcp'
 }
@@ -1759,7 +1769,7 @@ function _ipv6_render() {
 # =============================================================================
 # 函数名称: _health_item
 # 功能描述: 记录并打印一条体检结论, 并把级别累积到 _HEALTH_ITEMS 供末尾统计。
-#           用数组而非"多个全局计数器"的原因: 计数器要在 30+ 处自增, 而本函数
+#           用数组而非"多个全局计数器"的原因: 计数器要在几十处调用点自增, 而本函数
 #           是唯一自增点; 数组只需 append, 且天然规避"命令替换里改全局不回传"
 #           这一本项目已登记过的坑 (见 tool/backup.sh 的 _make_stage 注释)。
 # 参数:
@@ -1872,7 +1882,9 @@ function _file_mtime() {
 #   4. Nginx 服务 —— 仅 SNI 场景存在, 故用 skip 语义而非硬判失败;
 #   5. 端口归属 —— SNI 下 443 归 nginx、直连下归 xray, 归属错了会"看着在跑但连不上";
 #   6. TLS 证书 —— 到期是最典型的"某天突然不能用", 必须提前看剩余天数;
-#   7. 内核网络 —— 复用 check_net_status 的判据, 但只出结论不重印整段报告;
+#   7. 内核网络 —— 判据与 check_net_status 同源 (但本函数自行 sysctl 取值, 不调用它,
+#      以免重印整段报告); 2026-09-25 起 IPv6 检测 (_ipv6_collect) 也并入本分区,
+#      含"IPv6 socket 不可用但 nginx 仍配了 listen [::]"这一联动告警。
 #   8. 脚本配置与日志 —— config.json 可解析性 + path 一致性 + 日志体积 + 订阅新鲜度。
 #
 # 严重度口径 (刻意如此, 避免"处处是红灯"导致体检被无视):
@@ -2482,7 +2494,8 @@ function _health_script() {
     fi
 
     # 订阅新鲜度: 订阅产物是配置的"派生快照" —— 配置改了而订阅没重生成, 客户端仍指向
-    # 旧参数。正常路径由 handler_refresh_subscription 在配置写入后自动重生成, 这里兜住
+    # 旧参数。正常路径由 handler.sh 的 refresh_subscription_after_config_change()
+    # 在配置写入后自动重生成 (收口点在 handler.sh main() 末尾), 这里兜住
     # 异常情况 (手动改过配置 / 重生成失败 / 从旧版本升级上来)。没订阅文件则跳过不计分。
     for tmp in "${SCRIPT_CONFIG_DIR}"/subscription-*; do
         [[ -f "${tmp}" ]] || continue
@@ -2571,11 +2584,11 @@ function main() {
     # 所有函数的输出都重定向到标准错误输出 >&2，这样标准输出可以用于返回结果
     #
     # 每个臂末尾的 `|| exit $?` 是**刻意**的, 而且**必须每个臂都有**:
-    #   本脚本的每个选项都是只读检查器, 退出码即检查结论 (0=通过 / 非 0=未通过), 属正常
+    #   本脚本的每个选项都是检查器, 退出码即检查结论 (0=通过 / 非 0=未通过), 属正常
     #   业务语义。可 `return 1` 会被 set -e 的 ERR trap 当成"意外失败" —— 于是用户在一次
     #   正常的检查里, 报告末尾会多出一条 "[错误] 脚本在第 N 行意外失败 (退出码 1)"。
     #   此前只给 --rule-ip / --rule-domain 打了这个补丁 (它们要经 exec_read 透传退出码),
-    #   其余 18 个臂全在冒假报错: 2026-09-24 逐个实测, 15 个臂里 9 个复现, 其中
+    #   其余臂全在冒假报错: 2026-09-24 逐个实测 (当时 15 个臂), 9 个复现, 其中
     #   --net-status 把"BBR 持久化不完整"(正常结论) 渲染成了脚本崩溃。
     #   放进 `||` 右侧即进入"条件上下文", errexit 与 ERR trap 都不触发, 退出码照常透传
     #   (与 menu.sh 入口的 `main "$@" || OPTION=$?` 同一构造)。
@@ -2594,7 +2607,7 @@ function main() {
     --tag) check_xray_config_exists "$@" >&2 || exit $? ;;           # 检查 Xray 配置文件
     --xray) check_xray_version_exists "$@" >&2 || exit $? ;;         # 检查 Xray 版本
     --email) validate_email "$@" >&2 || exit $? ;;                   # 验证邮箱
-    --sni-ports) check_sni_ports "$@" >&2 || exit $? ;;              # 检查 SNI 必需端口与防火墙状态
+    --sni-ports) check_sni_ports "$@" >&2 || exit $? ;;              # 检查 SNI 端口; 未放行会 ufw/firewall-cmd 放行
     --proxy-target) check_proxy_target "$@" || exit $? ;;            # 取回伪装目标(结果走 stdout)
     --custom-domain) check_custom_site_domain "$@" >&2 || exit $? ;; # 检查自定义站点域名
     --list-index) check_list_index "$@" >&2 || exit $? ;;            # 校验列表序号
@@ -2606,7 +2619,9 @@ function main() {
     # P1-3 补漏: 本函数的 case 原本没有 `*)` 分支 —— 未知/拼错的参数什么都不做就退出,
     # 退出码 0。而 core/main.sh 与 README 都推荐脚本化调用走 `core/check.sh --health`
     # (0=无失败项 / 1=有失败项), cron 里把 `--health` 误写成 `--heath` 就会拿到 exit 0,
-    # 结果监控永远假绿 —— 这正是 handler.sh:3282 那段注释要防的问题, 本脚本却漏了网。
+    # 结果监控永远假绿 —— 这正是 handler.sh main() 里 `*` 分支那段注释要防的问题,
+    # 本脚本却漏了网。(原写法锁的是 handler.sh 行号, 文件一增长就指到别处去了;
+    #  引用他人注释一律写成"哪个函数/哪个分支", 不要写行号。)
     # 退出码 EXIT_USAGE(=2) = 用法错误, 与正常 0、真实故障 1 区分开 (与 handler.sh 的 main 保持一致)。
     *)
         printf "${RED}[%s]${NC} %s: %s\n" "$(_i18n '.title.error')" "$(_i18n ".${CUR_FILE}.unknown_option")" "${option}" >&2

@@ -25,7 +25,9 @@
 # =============================================================================
 
 # --- 共享头部: 严格模式 / ERR trap / PATH / 颜色 / 目录常量 / i18n 公共函数 ---
-# 实际内容由 core/_common.sh 提供 (13 个脚本共用, 消除副本漂移); 设计取舍 (为何
+# 实际内容由 core/_common.sh 提供 (所有 source 它的脚本共用, 消除副本漂移);
+#   共用数此前写作 13 —— 那个随容器方案一起下线的服务脚本没了之后就不再是这个数,
+#   故此处不再写死绝对值 (写死就得跟着增删一起改, 只会再次漂移)。设计取舍 (为何
 # install.sh 不在此列, 为何用 $0 而非 BASH_SOURCE, 为何 PATH 是白名单而非追加) 见该文件。
 # 注: 下面这行刻意留在每个脚本里 —— shellcheck 的 `set -e` 判定不跨 source,
 #     移走会让本脚本内的 `cd` 全被误报 SC2164。
@@ -143,7 +145,7 @@ function _audit_log() {
 # 功能描述: dispatch 层审计留痕收口 —— 为 handler 各臂没有自行记录的写操作补一条记录。
 #
 # 为什么需要它:
-#   各臂里散落的 `_audit_log` 只覆盖了 49 个臂里的一部分 (安装 / 卸载 / 启停 / 证书 /
+#   各臂里散落的 `_audit_log` 只覆盖了分派臂里的一部分 (安装 / 卸载 / 启停 / 证书 /
 #   备份 / BBR 调优), 而**改配置类**恰恰是零留痕 —— routing(分流规则)、xray-config、
 #   change-domain、change-port、warp / reset-warp、sniff-route-only、custom-sites、
 #   geodata-cron、nginx-cron、remove-certificate…… 这些才是事后最需要回溯的动作
@@ -151,7 +153,7 @@ function _audit_log() {
 #   留了痕 —— 覆盖面与"变更审计"的语义正好反了, 故在此统一收口。
 #
 # 为什么放 dispatch 层而不是逐臂去补:
-#   1) 动作名天然可得 (option 去掉 `--` 前缀), 不必为三十多个臂各写一份, 也不会漏。
+#   1) 动作名天然可得 (option 去掉 `--` 前缀), 不必为每个臂各写一份, 也不会漏。
 #   2) 菜单路径与 CLI 直调 (`bash handler.sh --routing ...`) 都经过 main, 一处收口两处覆盖。
 #   3) 调用点在 case **之前** (事前留痕): 不少失败路径直接 `_error`/exit, case 之后的代码
 #      根本跑不到, 而"有人请求执行了 purge"这件事本身就是要审计的内容。动作的结果
@@ -172,9 +174,13 @@ function _audit_dispatch() {
     #      purge / start / stop / restart / install / nginx-install / quick /
     #      export-config / import-config / nginx-purge / bbr / net-tune /
     #      nofile-limit / net-status / health / ipv6-status
-    #   B. 纯只读查询: share / traffic / sni-ports
-    #      查看类操作回答不了"谁改了什么", 不进变更审计; 又因 audit.log 目前尚无轮转
-    #      (见审计报告 P3), 放进来只会把真正的变更记录挤出日志。
+    #   B. 查看类操作: share / traffic / sni-ports
+    #      语义上它们回答的都是"当前是什么状态", 回答不了"谁改了什么"; 又因
+    #      audit.log 目前尚无轮转 (见审计报告 P3), 放进来只会把真正的变更记录挤出日志。
+    #      注: **这三并非严格只读** —— --sni-ports 在端口被自家 xray 占用时会
+    #      `systemctl stop xray` 再复检, 失败还会 start 回来 (见 handler_check_sni_ports),
+    #      --share --save 也会写 share-link.txt。它们被排除的理由不是"零副作用",
+    #      而是"副产物是自愈性质的中间动作, 不是用户意图的变更", 记进去反而淹没真变更。
     #  注: net-status / health 臂内的留痕**刻意保留** —— "上次体检是什么时候、结果如何"
     #      对无人值守机器有值班价值, 属诊断历史, 与 B 类新增排除项不冲突。
     #  注: --ipv6-enable / --ipv6-disable / --ipv6-disable-hard **刻意不排除** ——
@@ -274,7 +280,7 @@ function exec_read() {
     # 交互输入的**重试上限**: 允许用户输错重来, 但必须有界。
     # 背景: 此前循环无上限, 一旦 stdin 关闭 (cron / 管道 / `< /dev/null`), 每轮都会
     #       fork 一个 read.sh 拿到空串、通不过校验、立刻再 fork —— 无退让地空转,
-    #       实测 CPU 打满且不停止 (见 .workbuddy/reports 审计报告 P0-1)。
+    #       实测 CPU 打满且不停止 (记录见 .workbuddy/memory/2026-09-24.md)。
     #       现在 EOF 由 read.sh 直接以非 0 退出码上报 (下方立即失败退出), 本上限则
     #       兜住"输入源可用但内容一直不合法"的情形 (例如被喂了一整段非法值)。
     local max_retries=3
@@ -435,7 +441,9 @@ function reset_json_fields() {
             elif type == "boolean" then false
             else ""
             end;
-        # 定义函数 exec_clear，用于判断字段是否需要保留
+        # jq 内部函数 exec_clear: 决定每个字段是**清空还是保留原值** ——
+        #   键名在 $keep 白名单里 -> 原样保留; 否则递归清空。
+        #   (注意它是 jq 的 def, 不是 bash 函数, 全仓 grep 不到同名 bash 定义)
         def exec_clear:
             if .key | IN($keep[]) then .
             else .value |= clear_recursive
@@ -863,7 +871,10 @@ function sync_missing_nginx_support_dir() {
 # =============================================================================
 # 函数名称: ensure_nginx_support_files
 # 功能描述: 确保 Nginx 运行所需的标准目录结构存在, 并从仓库模板补齐缺失的
-#           conf.d / web / nginxconfig.io 支持文件。
+#           conf.d / nginxconfig.io 支持文件。
+#           注: 早期版本这里列过 "web", 但仓库里从来没有 config/nginx/conf/web ——
+#           sync_missing_nginx_support_dir 对不存在的源目录是 `return 0` 静默跳过,
+#           所以那一项从未生效, 已从描述中去掉 (别再照着说明去找它)。
 # 参数: 无
 # 返回值: 0-成功 1-建目录或同步文件失败
 # =============================================================================
@@ -1819,6 +1830,14 @@ readonly WARP_MTU='1280'
 # 启用健康探测时的出站 tag。刻意与 balancer tag 分开命名 —— routing 规则里的
 # outboundTag 可以指向 balancer, 于是"规则仍写 warp、实际由 balancer 接管"成为可能:
 # 所有往规则里写 outboundTag=warp 的代码路径 (菜单加分流 / 保留既有规则) 都不必改动。
+#
+# ⚠️ 待实测 (2026-09-25 标注): 上句描述的"接管链"需要 balancer 的 tag 恰好等于规则里
+#    写的那个名字, 而本文件的 balancer tag 是 warp-balancer (见 WARP_BALANCER_TAG),
+#    并不是 warp。即启用探测后, 规则里的 outboundTag="warp" 既不指向任何出站 (此时
+#    出站已改名 warp-out), 也不指向 balancer。xray 对此是"忽略该条规则"还是"拒绝加载
+#    整份配置", 尚未用真机 `xray run -test` 验证过 —— 上面那句"接管"的说法可能并不成立。
+#    若要动它: 先用真实 xray 跑 `_xray_config_probe` 确认行为, 再决定是改写规则 tag
+#    还是把 balancer tag 改回 warp。**不要照这段注释推理行事。**
 readonly WARP_OUTBOUND_TAG='warp-out'
 # ---- WARP 健康探测与自动回落 ----
 # WARP 出站指向 Cloudflare 任播 IP, 隧道抖动或出口被目标站点风控时会出现"TCP 连得上但
@@ -2600,7 +2619,8 @@ function handler_read_xray_config() {
     fi
     # 将配置标签存储到 CONFIG_DATA
     CONFIG_DATA['tag']="${CONFIG_TAG}"
-    # 检查脚本配置中的规则状态，如果是 current 或 reset 则读取规则输入
+    # 脚本配置里存在历史重置标记 (.xray.rules.reset 为 0 或 1) 则重新读取规则输入
+    #   (注意判定的是**存在该标记**, 取值是 0/1 而非字面 current/reset)
     if echo "${SCRIPT_CONFIG}" | jq -r '.xray.rules.reset' | grep -Eq '^(0|1)$'; then
         exec_read 'rules'
     fi
@@ -2652,7 +2672,7 @@ function handler_read_xray_config() {
 #           1. 根据当前配置标签决定是否需要停止相关服务。
 #           2. 如果是 SNI 配置，则调用 handler_web 配置 Web 服务。
 # 参数:
-#   $1: web - Web 服务类型 (normal, v3, v4)
+#   $1: web - Web 服务类型 (当前只有 normal; v3/v4 曾存在但已移除)
 # 返回值: 无 (通过调用其他函数执行操作)
 # =============================================================================
 function handler_sni_config() {
@@ -3844,7 +3864,9 @@ function _nofile_probe() {
 #           4. `systemctl daemon-reexec` 让 systemd 重新读取 Manager 段配置;
 #           5. 询问是否立刻重启 xray / nginx —— 已运行的服务不会自动套用新上限,
 #              但重启会瞬断连接, 故这一步单独确认而不是替用户决定;
-#           6. 从 /proc/<pid>/limits 读回真实值复核, 而不是只看文件写完没。
+#           6. 若第 5 步确实重启了服务, 从 /proc/<pid>/limits 读回真实值复核,
+#              而不是只看文件写完没 —— 未重启时进程仍用旧上限, 复核必然不符,
+#              所以这一步挂在 did_restart 之下, 不是无条件执行。
 # 参数: 无
 # 返回值: 0-已写入/用户取消 (均属正常结束)
 # =============================================================================
@@ -3856,7 +3878,8 @@ function handler_nofile_limit() {
     local banner='# Managed by xray-script-personal-use-only (nofile limit). Safe to delete this file.'
 
     local -a files=("${limits_file}" "${sysd_sys_file}" "${sysd_usr_file}")
-    # did_restart 必须显式初始化: 它在"是否重启"分支里才被赋值, 而下方复核段无条件
+    # did_restart 必须显式初始化: 它只在"是否重启"分支里被赋值, 而下方复核段要靠它
+#   判断是否该读 /proc/<pid>/limits (条件是 did_restart == 1), 初值缺失会在 set -u 下炸
     # 读它 —— 漏了初值, 用户在重启确认里选 N (或直接 EOF) 时就会因 set -u 报
     # unbound variable 崩掉, 偏偏那正是"配置已写好、只差重启"的正常路径。
     local f='' nr_open='' cur='' confirm='' answer='' val='' did_restart=0
@@ -4584,9 +4607,11 @@ function handler_nginx_restart() {
 # =============================================================================
 # 函数名称: handler_ssl_install
 # 功能描述: 安装 SSL 证书管理工具 (acme.sh)。
-#           1. 检查 acme.sh 是否已安装。
-#           2. 如果未安装，则从脚本配置中读取 CA 邮箱。
-#           3. 调用 ssl.sh 脚本安装 acme.sh。
+#           1. 检查 acme.sh 是否已安装 (已装则整个函数什么都不做)。
+#           2. 未安装时从脚本配置读取两个值: .nginx.ca (邮箱) 与
+#              .nginx.ca_server (证书机构, 缺失或字面 null 时兜底 zerossl)。
+#           3. 调用 ssl.sh --install --email=... --ca=... 安装。
+#           4. 审计留痕: 只记 CA 厂商, 不落邮箱明文。
 # 参数: 无
 # 返回值: 无 (通过调用 ssl.sh 脚本执行安装)
 # =============================================================================
@@ -4609,13 +4634,16 @@ function handler_ssl_install() {
 # =============================================================================
 # 函数名称: handler_change_domain
 # 功能描述: 更改 Nginx 配置中的域名 (包括 SSL 证书)。
-#           1. 获取旧域名。
-#           2. 读取新域名 (如果未提供)。
-#           3. 如果旧域名存在，则停止其证书续签并删除配置文件。
-#           4. 复制并修改新的站点配置模板。
-#           5. 申请新的 SSL 证书。
-#           6. 更新脚本配置中的域名。
-#           7. 调用 handler_nginx_restart 重启 Nginx 服务。
+#           实际编排是五个子函数依次执行 (序号见下方调用顺序):
+#           1. _change_domain_read_inputs  取旧域名 / 读新域名;
+#           2. _change_domain_render       渲染新站点 (**此步内部先删旧 conf**,
+#              旧域名是为新域名腾地方, 不是独立的前置步骤);
+#           3. _change_domain_issue        签发新证书 —— **成功之后**才去停旧域名
+#              的定时续签 (且要 `exec_ssl --status --domain=<旧>` 为真才停);
+#              (旧注释把"删配置"和"停续签"都写成无条件第 3 步, 与这里不符:
+#               时机一个在前一个在后, 且停续签还有前置判断。)
+#           4. _change_domain_only_branch  回写脚本配置里的域名;
+#           5. handler_nginx_restart       重启 Nginx 使配置生效。
 # 参数:
 #   $1: target_domain - 目标域名类型 ("domain" 或 "cdn")
 #   $2: stop_cert_service - 管理停止证书签发服务类型 ("n", 或默认的 "y")
@@ -4833,11 +4861,14 @@ function handler_web() {
 # 功能描述: 执行一键快速安装流程。
 #           1. 调用 handler_script_config 配置脚本。
 #           2. 调用 handler_install 安装 Xray。
-#           3. 调用 handler_xray_config 配置 Xray。
-#           4. 添加默认的阻止规则 (BT, CN IP, AD Domain)。
-#           5. 调用 handler_geodata_cron 更新 GeoData 并设置 Cron。
-#           6. 调用 handler_restart 重启 Xray 服务。
-#           7. 调用 handler_share 显示分享链接。
+#           3. 调用 handler_x25519_config 生成 Reality 密钥对
+#              (必须在 handler_xray_config **之前**: 后者要把它写进配置)。
+#           4. 调用 handler_xray_config 配置 Xray。
+#           5. 添加默认的阻止规则 (BT, CN IP, AD Domain)。
+#           6. 调用 handler_geodata_cron 更新 GeoData 并设置 Cron。
+#           7. 调用 handler_restart 重启 Xray 服务。
+#           8. 调用 handler_share 显示分享链接。
+#           9. 调用 handler_subscription 生成订阅 (收尾步骤, 失败不阻塞安装: `|| true`)。
 # 参数:
 #   $1: quick_install_type - 速安装类型 (例如 Vision, XHTTP, Fallback)，默认为 Vision
 # 返回值: 无 (通过调用一系列处理器函数执行完整安装流程)

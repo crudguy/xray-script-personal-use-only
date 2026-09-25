@@ -933,7 +933,12 @@
       "not_installed": "acme.sh is not installed; cannot set default CA."
     },
     "check_cron": {
-      "start": "Checking automatic renewal cron job settings..."
+      "start": "Checking automatic renewal cron job settings...",
+      "present": "The automatic renewal cron job is in place."
+    },
+    "cron": {
+      "missing": "No acme.sh auto-renewal cron job detected; certificates will not renew automatically (they expire in 90 days).",
+      "hint": "Make sure cron is installed, then run manually: ~/.acme.sh/acme.sh --install-cronjob"
     },
     "status": {
       "no_domain": "No domain provided when checking status."

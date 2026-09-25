@@ -933,7 +933,12 @@
       "not_installed": "acme.sh 未安装，无法设置默认 CA。"
     },
     "check_cron": {
-      "start": "正在检查自动续期的定时任务设置..."
+      "start": "正在检查自动续期的定时任务设置...",
+      "present": "自动续期的定时任务已就位。"
+    },
+    "cron": {
+      "missing": "未检测到 acme.sh 的自动续期定时任务，证书不会自动续期（将在 90 天后过期）。",
+      "hint": "请确认系统已安装 cron，然后手动执行：~/.acme.sh/acme.sh --install-cronjob"
     },
     "status": {
       "no_domain": "检查状态时未提供域名。"

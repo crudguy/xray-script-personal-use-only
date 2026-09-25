@@ -144,6 +144,66 @@ declare ACME_SH_INSTALL_SHA256="${ACME_SH_INSTALL_SHA256-8681df828f7765a351a4fc7
 declare ACME_SH_REF="${ACME_SH_REF-3.1.6}"
 
 # =============================================================================
+# 函数名称: _ssl_renew_cron_present
+# 功能描述: 判定 acme.sh 的自动续期定时任务是否**真的**落在 crontab 里。
+# 参数: 无
+# 返回值: 0=已就位  1=缺失, 或本机根本没有 crontab (环境不支持定时)
+# 背景 (为什么必须自己判一次, 不能只看 acme.sh 的退出码):
+#   acme.sh 3.1.6 的 install 主流程是
+#       if [ -z "$_nocron" ]; then installcronjob "$_c_home"; fi      (acme.sh:8246)
+#   —— **没有 || return**。而 installcronjob 在找不到 crontab / fcrontab 时是
+#       _err "crontab/fcrontab doesn't exist, so we cannot install cron jobs."
+#       _err "Your certs will not be renewed automatically."
+#       return 1                                                      (acme.sh:7510-7513)
+#   于是"cron 装失败"与"装成功"对外是同一个退出码, 上层无从分辨, 表现就是**静默**:
+#   用户以为配好了自动续期, 实际证书 90 天后过期且无人知晓。本项目此前完全依赖它
+#   且从不校验, 故在此补一道自检。
+# 注: crontab -l 在用户尚无任何条目时退出 1 并往 stderr 打 "no crontab for ...",
+#     这里 2>/dev/null 丢掉; pipefail 下该非 0 会传播, 所以整条管道必须放进 if 条件
+#     (set -e 不介入条件判定) —— 否则"还没有任何定时任务"会被当成脚本崩溃。
+# =============================================================================
+function _ssl_renew_cron_present() {
+    cmd_exists 'crontab' || return 1
+    # 先滤掉注释行再匹配: crontab 里一行以 # 开头的备忘 (比如手抄的续签命令) 也含
+    # "acme.sh --cron", 不过滤就会被当成"定时任务已就位" —— 误判方向恰好是**不告警**,
+    # 正是本函数要防的那件事, 所以这一步不能省。
+    if crontab -l 2>/dev/null | grep -v '^[[:space:]]*#' | grep -qF 'acme.sh --cron'; then
+        return 0
+    fi
+    return 1
+}
+
+# =============================================================================
+# 函数名称: _ssl_ensure_renew_cron
+# 功能描述: acme.sh 就位后自检自动续期定时任务; 缺失则先尝试补装一次, 仍不成就
+#           **明确告警**并给出手动补救命令 —— 绝不静默。
+# 参数: 无
+# 返回值: 恒 0
+# 设计取舍:
+#   - 用 print_warn 而非 print_error: 证书此刻是有效的, 只是"未来不会自动续"。
+#     属于"必须让用户知道", 不是"中断安装" —— exit 1 会让已装好的 acme.sh 与已签发
+#     的证书一起停在半路, 那比晚点发现更糟。
+#   - 只在检测到缺失时才动用户的 crontab (补装), 正常情况下不碰。
+#   - 补装失败不重试: --install-cronjob 失败的原因基本都是环境性的 (没有 cron /
+#     crontab 不可写), 重试不会变好, 只会拖慢安装。
+# =============================================================================
+function _ssl_ensure_renew_cron() {
+    if _ssl_renew_cron_present; then
+        return 0
+    fi
+
+    if cmd_exists 'crontab'; then
+        "${HOME}/.acme.sh/acme.sh" --install-cronjob >/dev/null 2>&1 || true
+        if _ssl_renew_cron_present; then
+            return 0
+        fi
+    fi
+
+    print_warn "$(_i18n ".${CUR_FILE}.cron.missing")"
+    print_warn "$(_i18n ".${CUR_FILE}.cron.hint")"
+}
+
+# =============================================================================
 # 函数名称: install_acme_sh
 # 功能描述: 安装 acme.sh 脚本。
 # 参数: 无 (使用全局变量 ACCOUNT_EMAIL)
@@ -152,6 +212,9 @@ declare ACME_SH_REF="${ACME_SH_REF-3.1.6}"
 function install_acme_sh() {
     if [[ -e "${HOME}/.acme.sh/acme.sh" ]]; then
         print_info "$(_i18n ".${CUR_FILE}.install.already_installed")"
+        # 已安装也要再确认一次: 定时任务可能被后来的操作清掉 (如重装系统 cron、
+        # 或用户手动 crontab -r)。此时什么都不做就等于默认"还在"。
+        _ssl_ensure_renew_cron
         return 0
     fi
 
@@ -175,6 +238,11 @@ function install_acme_sh() {
     "${HOME}/.acme.sh/acme.sh" --upgrade || print_error "$(_i18n ".${CUR_FILE}.install.fail_autoupgrade")"
 
     "${HOME}/.acme.sh/acme.sh" --set-default-ca --server "${CA_SERVER}" || print_error "$(_i18n ".${CUR_FILE}.install.fail_set_ca")"
+
+    # 自动续期定时任务自检: 装完必须确认它真在 crontab 里, 不能默认"acme.sh 应该装好了"。
+    # 上面每一步的 || print_error 只保证 acme.sh 本体可用, 与"续期会不会自动发生"无关 ——
+    # 那件事由 acme.sh 自己写 crontab, 而它把失败吞掉了 (见 _ssl_renew_cron_present 注释)。
+    _ssl_ensure_renew_cron
 }
 
 # =============================================================================
@@ -408,13 +476,24 @@ function stop_renew_certificates() {
 
 # =============================================================================
 # 函数名称: check_cron_jobs
-# 功能描述: 检查 acme.sh 的自动续期定时任务设置。
+# 功能描述: 检查 acme.sh 的自动续期定时任务设置, 并顺带跑一次续签判定。
 # 参数: 无
 # 返回值: 无 (打印检查信息)
+# 注: 旧实现只执行 `acme.sh --cron`, 那是"跑一次续签"而不是"检查定时任务设置" ——
+#     与函数名和 .check_cron.start 的文案都不符。想确认定时任务在不在的维护者会拿到
+#     错答案 (看到续签跑了一遍, 却不知道定时任务压根没装)。故改为先真查一次 crontab,
+#     再保留原有的续签动作 (不破坏 --check-cron 既有语义)。
 # =============================================================================
 function check_cron_jobs() {
     # 打印检查信息
     print_info "$(_i18n ".${CUR_FILE}.check_cron.start")"
+
+    if _ssl_renew_cron_present; then
+        print_pass "$(_i18n ".${CUR_FILE}.check_cron.present")"
+    else
+        print_warn "$(_i18n ".${CUR_FILE}.cron.missing")"
+        print_warn "$(_i18n ".${CUR_FILE}.cron.hint")"
+    fi
 
     # 执行 acme.sh 的 cron 检查命令
     "${HOME}/.acme.sh/acme.sh" --cron --home "${HOME}/.acme.sh"

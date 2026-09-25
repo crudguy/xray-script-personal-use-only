@@ -37,6 +37,7 @@
       "description": "Xray Management Script",
       "installation": "Installation",
       "operation": "Operation",
+      "sharing": "Share & Statistics",
       "configuration": "Configuration",
       "option1": "Full Installation",
       "option2": "Install/Update Only",
@@ -59,7 +60,7 @@
       "option2": "Uninstall Nginx",
       "info1": "Remove Xray core and project traces (Nginx/acme.sh/certs kept)",
       "info2": "Remove only the project-built Nginx (refuses distro builds to protect other sites)",
-      "option0": "Exit"
+      "option0": "Back to main menu"
     },
     "full_installation": {
       "title": "Installation Flow",
@@ -127,13 +128,14 @@
       "info2": "Manage blocking or WARP routing",
       "info3": "Includes Nginx update, domain change, web config",
       "info4": "(Non-SNI) Change Xray listen port and restart service",
-      "info5": "geodata provided by  https://github.com/Loyalsoldier/v2ray-rules-dat ",
-      "info6": "Enable/repair BBR, read-only health check, kernel net tuning and nofile limit",
-      "info7": "Export config and certificates into a single archive, or restore from one (migration / DR)",
-      "info8": "When on, sniffed domains are used for routing decisions only and outbounds connect to the client-supplied IP; may lose CDN origin selection. Off by default"
+      "info5": "Enable/Disable the scheduled auto-update of geodata rules (source: https://github.com/Loyalsoldier/v2ray-rules-dat)",
+      "info6": "Switch between Chinese / English, applied immediately",
+      "info7": "Enable/repair BBR, read-only health check, kernel net tuning and nofile limit",
+      "info8": "Export config and certificates into a single archive, or restore from one (migration / DR)",
+      "info9": "When on, sniffed domains are used for routing decisions only and outbounds connect to the client-supplied IP; may lose CDN origin selection. Off by default"
     },
     "route_management": {
-      "title": "Custom Routing",
+      "title": "Route Management",
       "option1": "Enable/Disable WARP Proxy",
       "option2": "Reset WARP Proxy",
       "option3": "Add block IP route",
@@ -142,13 +144,13 @@
       "option6": "Add WARP domain route",
       "option0": "Back to management",
       "info1": "WARP Proxy uses Xray's native WireGuard outbound; the first enable registers one device with Cloudflare.",
-      "info2": "Credentials are stored locally and reused on every later toggle, so no further registration is needed.",
-      "info3": "Resetting WARP Proxy discards the local credentials and registers a new device; frequent resets may get the IP banned by Cloudflare.",
-      "info4": "Discard local WARP credentials and register a new device (takes effect after Xray restart).",
-      "info5": "Add IP-based block route to ruleTag block-ip.",
-      "info6": "Add domain-based block route to ruleTag block-domain.",
-      "info7": "(WARP must be enabled) Add WARP IP route to ruleTag warp-ip.",
-      "info8": "(WARP must be enabled) Add WARP domain route to ruleTag warp-domain."
+      "info1_1": "Credentials are stored locally and reused on every later toggle, so no further registration is needed.",
+      "info2": "Discard local WARP credentials and register a new device (takes effect after Xray restart).",
+      "info2_1": "Frequent resets may get the IP banned by Cloudflare",
+      "info3": "Add IP-based block route to ruleTag block-ip.",
+      "info4": "Add domain-based block route to ruleTag block-domain.",
+      "info5": "(WARP must be enabled) Add WARP IP route to ruleTag warp-ip.",
+      "info6": "(WARP must be enabled) Add WARP domain route to ruleTag warp-domain."
     },
     "sni_config": {
       "title": "SNI Configuration",
@@ -161,12 +163,16 @@
       "option7": "Switch CA vendor",
       "option8": "Manage custom domains and reverse proxy apps",
       "option9": "Remove certificate",
-      "option0": "Back",
-      "info1": "Domain for REALITY",
-      "info2": "Domain for CDN",
-      "info3": "Switching CA updates config and affects subsequent certificate issuance",
-      "info4": "List, add, edit, or delete extra HTTPS reverse proxy sites",
-      "info5": "Remove a domain’s certificate (its HTTPS will break)"
+      "option0": "Back to previous menu",
+      "info1": "Change the default domain used by REALITY",
+      "info2": "Change the domain used when fronting with a CDN",
+      "info3": "Reissue certificates for all configured domains now, regardless of expiry",
+      "info4": "Regenerate and reload the Nginx site config from the current settings",
+      "info5": "Enable/Disable the scheduled Nginx config auto-update",
+      "info6": "Switch the web frontend (only the Nginx default page is available)",
+      "info7": "Switch between ZeroSSL / Let's Encrypt; affects subsequent certificate issuance",
+      "info8": "List, add, edit, or delete extra HTTPS reverse proxy sites",
+      "info9": "Remove a domain’s certificate (its HTTPS will break)"
     },
     "custom_sites": {
       "title": "Custom Site Management",
@@ -174,7 +180,7 @@
       "option2": "Add site",
       "option3": "Edit/Update site",
       "option4": "Delete site",
-      "option0": "Back to management",
+      "option0": "Back to previous menu",
       "info1": "Show index, domain, proxy target, and UDS name",
       "info2": "Add an independent certificate and reverse proxy site",
       "info3": "Modify the domain or upstream target",
@@ -184,7 +190,7 @@
       "title": "Backup & Migration",
       "option1": "Export configuration backup",
       "option2": "Restore from backup archive",
-      "option0": "Exit",
+      "option0": "Back to management",
       "info1": "Packages script config, Xray config, Nginx sites and certificates; contains private keys, keep it safe",
       "info2": "Auto-backs up the current state before import; rolls back on failure without leaving a half-applied state"
     },
@@ -193,7 +199,7 @@
       "option1": "Enable IPv6",
       "option2": "Disable IPv6 (soft, recommended)",
       "option3": "Disable IPv6 (hard)",
-      "option0": "Back",
+      "option0": "Back to previous menu",
       "info1": "Turn the stack and every interface's IPv6 back on",
       "info2": "Turn off IPv6 on non-loopback interfaces only; keeps nginx able to bind [::]",
       "info3": "Turn the whole IPv6 stack off (loopback included); IPv6 becomes fully unusable"

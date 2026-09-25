@@ -37,6 +37,7 @@
       "description": "Xray 管理脚本",
       "installation": "装载管理",
       "operation": "操作管理",
+      "sharing": "分享与统计",
       "configuration": "配置管理",
       "option1": "完整安装",
       "option2": "仅安装/更新",
@@ -59,7 +60,7 @@
       "option2": "卸载 Nginx",
       "info1": "卸载 Xray 核心并收口本项目痕迹 (Nginx/acme.sh/证书 保留)",
       "info2": "仅卸载本项目编译版 Nginx (检测到发行版会拒绝, 避免误删其它站点)",
-      "option0": "退出"
+      "option0": "返回主菜单"
     },
     "full_installation": {
       "title": "安装流程",
@@ -127,13 +128,14 @@
       "info2": "管理屏蔽或 WARP 分流",
       "info3": "包含 Nginx 更新，修改域名，修改 Web 配置等",
       "info4": "(非 SNI 配置) 修改 Xray 监听端口，并自动重启服务",
-      "info5": "geodata 由 https://github.com/Loyalsoldier/v2ray-rules-dat  提供",
-      "info6": "开启/修复 BBR、只读体检、内核网络高并发调优与文件句柄上限",
-      "info7": "导出配置与证书为单个归档，或从归档还原（迁移 / 灾备）",
-      "info8": "开启后嗅探出的域名只用于分流判定，出站改用客户端给的 IP 连接；套 CDN 时可能丢掉回源优选，默认关闭"
+      "info5": "开启/关闭 geodata 规则数据的定时自动更新 (数据来源: https://github.com/Loyalsoldier/v2ray-rules-dat)",
+      "info6": "在中文 / English 之间切换, 立即生效并返回本菜单",
+      "info7": "开启/修复 BBR、只读体检、内核网络高并发调优与文件句柄上限",
+      "info8": "导出配置与证书为单个归档，或从归档还原（迁移 / 灾备）",
+      "info9": "开启后嗅探出的域名只用于分流判定，出站改用客户端给的 IP 连接；套 CDN 时可能丢掉回源优选，默认关闭"
     },
     "route_management": {
-      "title": "自定义分流",
+      "title": "分流管理",
       "option1": "开/关 WARP Proxy",
       "option2": "重置 WARP Proxy",
       "option3": "添加屏蔽 ip 分流",
@@ -142,13 +144,13 @@
       "option6": "添加 WARP domain 分流",
       "option0": "返回管理配置",
       "info1": "WARP Proxy 走 Xray 原生 WireGuard 出站; 首次开启会向 Cloudflare 注册一台设备",
-      "info2": "注册凭据保存在本地, 之后反复开关均复用同一台设备, 不再联网申请",
-      "info3": "「重置 WARP Proxy」会丢弃本地凭据并重新注册; 频繁重置可能导致 IP 被 Cloudflare 拉黑",
-      "info4": "丢弃本地 WARP 凭据并重新注册一台设备 (重启 Xray 后生效)",
-      "info5": "添加关于 ip 的屏蔽分流, 相关分流添加在 ruleTag 为 block-ip 中",
-      "info6": "添加关于 domain 的屏蔽分流, 相关分流添加在 ruleTag 为 block-domain 中",
-      "info7": "(需要开启 WARP)添加关于 ip 的 WARP 分流, 相关分流添加在 ruleTag 为 warp-ip 中",
-      "info8": "(需要开启 WARP)添加关于 domain 的 WARP 分流, 相关分流添加在 ruleTag 为 warp-domain 中"
+      "info1_1": "注册凭据保存在本地, 之后反复开关均复用同一台设备, 不再联网申请",
+      "info2": "丢弃本地 WARP 凭据并重新注册一台设备 (重启 Xray 后生效)",
+      "info2_1": "频繁重置可能导致 IP 被 Cloudflare 拉黑",
+      "info3": "添加关于 ip 的屏蔽分流, 相关分流添加在 ruleTag 为 block-ip 中",
+      "info4": "添加关于 domain 的屏蔽分流, 相关分流添加在 ruleTag 为 block-domain 中",
+      "info5": "(需要开启 WARP) 添加关于 ip 的 WARP 分流, 相关分流添加在 ruleTag 为 warp-ip 中",
+      "info6": "(需要开启 WARP) 添加关于 domain 的 WARP 分流, 相关分流添加在 ruleTag 为 warp-domain 中"
     },
     "sni_config": {
       "title": "SNI 配置",
@@ -162,11 +164,15 @@
       "option8": "管理自定义域名与反代应用",
       "option9": "移除证书",
       "option0": "返回上级",
-      "info1": "Reality 对应的域名",
-      "info2": "套用 CDN 的域名",
-      "info3": "切换后会写入配置，并影响后续证书签发",
-      "info4": "为额外挂载的 HTTPS 反代站点做列表、新增、编辑和删除",
-      "info5": "移除指定域名的证书（该站点 HTTPS 将立即失效）"
+      "info1": "修改 REALITY 使用的默认域名",
+      "info2": "修改套用 CDN 时使用的域名",
+      "info3": "立即为所有已配置域名重新签发证书, 不受到期时间限制",
+      "info4": "按当前配置重新生成并加载 Nginx 站点配置",
+      "info5": "开启/关闭 Nginx 配置的定时自动更新",
+      "info6": "切换 Web 前端 (当前仅有 Nginx 默认页面一项)",
+      "info7": "在 ZeroSSL / Let's Encrypt 之间切换, 切换后影响后续证书签发",
+      "info8": "为额外挂载的 HTTPS 反代站点做列表、新增、编辑和删除",
+      "info9": "移除指定域名的证书（该站点 HTTPS 将立即失效）"
     },
     "custom_sites": {
       "title": "自定义站点管理",
@@ -174,7 +180,7 @@
       "option2": "新增站点",
       "option3": "编辑/更新站点",
       "option4": "删除站点",
-      "option0": "返回管理配置",
+      "option0": "返回上级",
       "info1": "显示索引、域名、反代目标与 UDS 名称",
       "info2": "新增独立证书和独立反代站点",
       "info3": "支持修改域名或上游地址",
@@ -184,7 +190,7 @@
       "title": "配置备份与迁移",
       "option1": "导出配置备份",
       "option2": "从备份导入还原",
-      "option0": "退出",
+      "option0": "返回管理配置",
       "info1": "打包脚本配置、Xray 配置、Nginx 站点与证书；含私钥，请妥善保管",
       "info2": "导入前自动备份当前状态，还原失败会自动回退，不留半成品"
     },
@@ -193,7 +199,7 @@
       "option1": "启用 IPv6",
       "option2": "禁用 IPv6（软禁用，推荐）",
       "option3": "禁用 IPv6（硬禁用）",
-      "option0": "返回",
+      "option0": "返回上级",
       "info1": "打开协议栈与所有接口的 IPv6",
       "info2": "只关外网侧接口的 IPv6，回环保留；不影响 nginx 绑定 [::]",
       "info3": "关闭整个 IPv6 协议栈（含回环），IPv6 彻底不可用"

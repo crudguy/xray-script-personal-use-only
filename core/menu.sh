@@ -74,9 +74,13 @@ function menu_index() {
     echo -e "${GREEN}5.${NC} $(_i18n ".${CUR_FILE}.index.option5")"
     echo -e "${GREEN}6.${NC} $(_i18n ".${CUR_FILE}.index.option6")"
 
-    _menu_title "$(_i18n ".${CUR_FILE}.index.configuration")"
+    # 7/8 曾挂在"配置管理"下, 但它们一个是把配置发给客户端、一个是只读看用量,
+    #   都不是"改配置" —— 与"管理配置"(9) 混在一节会让人以为点它们是改东西。
+    _menu_title "$(_i18n ".${CUR_FILE}.index.sharing")"
     echo -e "${GREEN}7.${NC} $(_i18n ".${CUR_FILE}.index.option7")"
     echo -e "${GREEN}8.${NC} $(_i18n ".${CUR_FILE}.index.option8")"
+
+    _menu_title "$(_i18n ".${CUR_FILE}.index.configuration")"
     echo -e "${GREEN}9.${NC} $(_i18n ".${CUR_FILE}.index.option9")"
 
     # 诊断单列一节而不是塞进"配置管理": 体检是只读的,
@@ -105,8 +109,8 @@ function menu_uninstall() {
     echo -e "${GREEN}2.${NC} $(_i18n ".${CUR_FILE}.uninstall.option2")"
 
     _menu_rule
-    echo -e "1. $(_i18n ".${CUR_FILE}.uninstall.info1")"
-    echo -e "2. $(_i18n ".${CUR_FILE}.uninstall.info2")"
+    echo -e "${CYAN}1. $(_i18n ".${CUR_FILE}.uninstall.info1")${NC}"
+    echo -e "${CYAN}2. $(_i18n ".${CUR_FILE}.uninstall.info2")${NC}"
     echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.uninstall.option0")"
     _menu_rule
 }
@@ -123,8 +127,8 @@ function menu_full_installation() {
     echo -e "${GREEN}2.${NC} $(_i18n ".${CUR_FILE}.full_installation.option2")"
 
     _menu_rule
-    echo -e "1. $(_i18n ".${CUR_FILE}.full_installation.info1")"
-    echo -e "2. $(_i18n ".${CUR_FILE}.full_installation.info2")"
+    echo -e "${CYAN}1. $(_i18n ".${CUR_FILE}.full_installation.info1")${NC}"
+    echo -e "${CYAN}2. $(_i18n ".${CUR_FILE}.full_installation.info2")${NC}"
     echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.full_installation.option0")"
     _menu_rule
 }
@@ -142,9 +146,9 @@ function menu_xray() {
     echo -e "${GREEN}3.${NC} $(_i18n ".${CUR_FILE}.xray_version.option3")"
 
     _menu_rule
-    echo -e "1. $(_i18n ".${CUR_FILE}.xray_version.info1")"
-    echo -e "2. $(_i18n ".${CUR_FILE}.xray_version.info2")"
-    echo -e "3. $(_i18n ".${CUR_FILE}.xray_version.info3")"
+    echo -e "${CYAN}1. $(_i18n ".${CUR_FILE}.xray_version.info1")${NC}"
+    echo -e "${CYAN}2. $(_i18n ".${CUR_FILE}.xray_version.info2")${NC}"
+    echo -e "${CYAN}3. $(_i18n ".${CUR_FILE}.xray_version.info3")${NC}"
     # 把"会不会顺手动我的配置"这个高频疑问的答案前置到决策点 (note1)。
     #   结论依据: 官方 install-release.sh 只在 /usr/local/etc/xray **目录不存在**时才
     #   创建目录并写入 {} —— 已有配置不会被覆盖 (源码见 install-release.sh 的
@@ -170,15 +174,15 @@ function menu_xray_config() {
     echo -e "${GREEN}6.${NC} $(_i18n ".${CUR_FILE}.protocol_config.option6")"
 
     _menu_rule
-    echo -e "1. $(_i18n ".${CUR_FILE}.protocol_config.info1")"
-    echo -e "2. $(_i18n ".${CUR_FILE}.protocol_config.info2")"
-    echo -e "3. $(_i18n ".${CUR_FILE}.protocol_config.info3")"
+    echo -e "${CYAN}1. $(_i18n ".${CUR_FILE}.protocol_config.info1")${NC}"
+    echo -e "${CYAN}2. $(_i18n ".${CUR_FILE}.protocol_config.info2")${NC}"
+    echo -e "${CYAN}3. $(_i18n ".${CUR_FILE}.protocol_config.info3")${NC}"
     echo -e "3.1. $(_i18n ".${CUR_FILE}.protocol_config.info3_1")"
     echo -e "3.2. $(_i18n ".${CUR_FILE}.protocol_config.info3_2")"
     echo -e "3.3. $(_i18n ".${CUR_FILE}.protocol_config.info3_3")"
-    echo -e "4. $(_i18n ".${CUR_FILE}.protocol_config.info4")"
-    echo -e "5. $(_i18n ".${CUR_FILE}.protocol_config.info5")"
-    echo -e "6. $(_i18n ".${CUR_FILE}.protocol_config.info6")"
+    echo -e "${CYAN}4. $(_i18n ".${CUR_FILE}.protocol_config.info4")${NC}"
+    echo -e "${CYAN}5. $(_i18n ".${CUR_FILE}.protocol_config.info5")${NC}"
+    echo -e "${CYAN}6. $(_i18n ".${CUR_FILE}.protocol_config.info6")${NC}"
     echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.protocol_config.option0")"
     _menu_rule
 }
@@ -206,8 +210,8 @@ function menu_ca_vendor() {
     echo -e "${GREEN}1.${NC} $(_i18n ".${CUR_FILE}.ca_vendor.option1")(${GREEN}$(_i18n ".${CUR_FILE}.status.default")${NC})"
     echo -e "${GREEN}2.${NC} $(_i18n ".${CUR_FILE}.ca_vendor.option2")"
     _menu_rule
-    echo -e "1. $(_i18n ".${CUR_FILE}.ca_vendor.info1")"
-    echo -e "2. $(_i18n ".${CUR_FILE}.ca_vendor.info2")"
+    echo -e "${CYAN}1. $(_i18n ".${CUR_FILE}.ca_vendor.info1")${NC}"
+    echo -e "${CYAN}2. $(_i18n ".${CUR_FILE}.ca_vendor.info2")${NC}"
     echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.ca_vendor.option0")"
     _menu_rule
 }
@@ -231,14 +235,15 @@ function menu_config() {
     echo -e "${GREEN}9.${NC} $(_i18n ".${CUR_FILE}.config_management.option9")"
 
     _menu_rule
-    echo -e "1. $(_i18n ".${CUR_FILE}.config_management.info1")"
-    echo -e "2. $(_i18n ".${CUR_FILE}.config_management.info2")"
-    echo -e "3. $(_i18n ".${CUR_FILE}.config_management.info3")"
-    echo -e "4. $(_i18n ".${CUR_FILE}.config_management.info4")"
-    echo -e "5. $(_i18n ".${CUR_FILE}.config_management.info5")"
-    echo -e "7. $(_i18n ".${CUR_FILE}.config_management.info6")"
-    echo -e "8. $(_i18n ".${CUR_FILE}.config_management.info7")"
-    echo -e "9. $(_i18n ".${CUR_FILE}.config_management.info8")"
+    echo -e "${CYAN}1. $(_i18n ".${CUR_FILE}.config_management.info1")${NC}"
+    echo -e "${CYAN}2. $(_i18n ".${CUR_FILE}.config_management.info2")${NC}"
+    echo -e "${CYAN}3. $(_i18n ".${CUR_FILE}.config_management.info3")${NC}"
+    echo -e "${CYAN}4. $(_i18n ".${CUR_FILE}.config_management.info4")${NC}"
+    echo -e "${CYAN}5. $(_i18n ".${CUR_FILE}.config_management.info5")${NC}"
+    echo -e "${CYAN}6. $(_i18n ".${CUR_FILE}.config_management.info6")${NC}"
+    echo -e "${CYAN}7. $(_i18n ".${CUR_FILE}.config_management.info7")${NC}"
+    echo -e "${CYAN}8. $(_i18n ".${CUR_FILE}.config_management.info8")${NC}"
+    echo -e "${CYAN}9. $(_i18n ".${CUR_FILE}.config_management.info9")${NC}"
     echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.config_management.option0")"
     _menu_rule
 }
@@ -265,12 +270,12 @@ function menu_bbr() {
     echo -e "${GREEN}6.${NC} $(_i18n ".${CUR_FILE}.bbr.option6")"
 
     _menu_rule
-    echo -e "1. $(_i18n ".${CUR_FILE}.bbr.info1")"
-    echo -e "2. $(_i18n ".${CUR_FILE}.bbr.info2")"
-    echo -e "3. $(_i18n ".${CUR_FILE}.bbr.info3")"
-    echo -e "4. $(_i18n ".${CUR_FILE}.bbr.info4")"
-    echo -e "5. $(_i18n ".${CUR_FILE}.bbr.info5")"
-    echo -e "6. $(_i18n ".${CUR_FILE}.bbr.info6")"
+    echo -e "${CYAN}1. $(_i18n ".${CUR_FILE}.bbr.info1")${NC}"
+    echo -e "${CYAN}2. $(_i18n ".${CUR_FILE}.bbr.info2")${NC}"
+    echo -e "${CYAN}3. $(_i18n ".${CUR_FILE}.bbr.info3")${NC}"
+    echo -e "${CYAN}4. $(_i18n ".${CUR_FILE}.bbr.info4")${NC}"
+    echo -e "${CYAN}5. $(_i18n ".${CUR_FILE}.bbr.info5")${NC}"
+    echo -e "${CYAN}6. $(_i18n ".${CUR_FILE}.bbr.info6")${NC}"
     echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.bbr.option0")"
     _menu_rule
 }
@@ -292,9 +297,9 @@ function menu_ipv6() {
     echo -e "${GREEN}3.${NC} $(_i18n ".${CUR_FILE}.ipv6.option3")"
 
     _menu_rule
-    echo -e "1. $(_i18n ".${CUR_FILE}.ipv6.info1")"
-    echo -e "2. $(_i18n ".${CUR_FILE}.ipv6.info2")"
-    echo -e "3. $(_i18n ".${CUR_FILE}.ipv6.info3")"
+    echo -e "${CYAN}1. $(_i18n ".${CUR_FILE}.ipv6.info1")${NC}"
+    echo -e "${CYAN}2. $(_i18n ".${CUR_FILE}.ipv6.info2")${NC}"
+    echo -e "${CYAN}3. $(_i18n ".${CUR_FILE}.ipv6.info3")${NC}"
     echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.ipv6.option0")"
     _menu_rule
 }
@@ -315,15 +320,17 @@ function menu_route() {
     echo -e "${GREEN}6.${NC} $(_i18n ".${CUR_FILE}.route_management.option6")"
 
     _menu_rule
-    # 选项 1 的说明分三行打印 (info1~info3, 均以序号 1. 呈现)
-    echo -e "1. $(_i18n ".${CUR_FILE}.route_management.info1")"
-    echo -e "1. $(_i18n ".${CUR_FILE}.route_management.info2")"
-    echo -e "1. $(_i18n ".${CUR_FILE}.route_management.info3")"
-    echo -e "2. $(_i18n ".${CUR_FILE}.route_management.info4")"
-    echo -e "3. $(_i18n ".${CUR_FILE}.route_management.info5")"
-    echo -e "4. $(_i18n ".${CUR_FILE}.route_management.info6")"
-    echo -e "5. $(_i18n ".${CUR_FILE}.route_management.info7")"
-    echo -e "6. $(_i18n ".${CUR_FILE}.route_management.info8")"
+    # 说明行的编号即"它解释的是第几项": infoN 对应选项 N, 同一项多行用 infoN_M。
+    #   旧版 info3 讲的是"重置 WARP"(即选项 2) 却挂在 "1." 下 —— 用户会以为那是
+    #   "开/关 WARP" 的注意事项。键名与编号对齐后这类错位由 menu_test 的 T4 兜住。
+    echo -e "${CYAN}1. $(_i18n ".${CUR_FILE}.route_management.info1")${NC}"
+    echo -e "${CYAN}1. $(_i18n ".${CUR_FILE}.route_management.info1_1")${NC}"
+    echo -e "${CYAN}2. $(_i18n ".${CUR_FILE}.route_management.info2")${NC}"
+    echo -e "${CYAN}2. $(_i18n ".${CUR_FILE}.route_management.info2_1")${NC}"
+    echo -e "${CYAN}3. $(_i18n ".${CUR_FILE}.route_management.info3")${NC}"
+    echo -e "${CYAN}4. $(_i18n ".${CUR_FILE}.route_management.info4")${NC}"
+    echo -e "${CYAN}5. $(_i18n ".${CUR_FILE}.route_management.info5")${NC}"
+    echo -e "${CYAN}6. $(_i18n ".${CUR_FILE}.route_management.info6")${NC}"
     echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.route_management.option0")"
     _menu_rule
 }
@@ -347,11 +354,15 @@ function menu_sni_config() {
     echo -e "${GREEN}9.${NC} $(_i18n ".${CUR_FILE}.sni_config.option9")"
 
     _menu_rule
-    echo -e "1. $(_i18n ".${CUR_FILE}.sni_config.info1")"
-    echo -e "2. $(_i18n ".${CUR_FILE}.sni_config.info2")"
-    echo -e "7. $(_i18n ".${CUR_FILE}.sni_config.info3")"
-    echo -e "8. $(_i18n ".${CUR_FILE}.sni_config.info4")"
-    echo -e "9. $(_i18n ".${CUR_FILE}.sni_config.info5")"
+    echo -e "${CYAN}1. $(_i18n ".${CUR_FILE}.sni_config.info1")${NC}"
+    echo -e "${CYAN}2. $(_i18n ".${CUR_FILE}.sni_config.info2")${NC}"
+    echo -e "${CYAN}3. $(_i18n ".${CUR_FILE}.sni_config.info3")${NC}"
+    echo -e "${CYAN}4. $(_i18n ".${CUR_FILE}.sni_config.info4")${NC}"
+    echo -e "${CYAN}5. $(_i18n ".${CUR_FILE}.sni_config.info5")${NC}"
+    echo -e "${CYAN}6. $(_i18n ".${CUR_FILE}.sni_config.info6")${NC}"
+    echo -e "${CYAN}7. $(_i18n ".${CUR_FILE}.sni_config.info7")${NC}"
+    echo -e "${CYAN}8. $(_i18n ".${CUR_FILE}.sni_config.info8")${NC}"
+    echo -e "${CYAN}9. $(_i18n ".${CUR_FILE}.sni_config.info9")${NC}"
     echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.sni_config.option0")"
     _menu_rule
 }
@@ -370,10 +381,10 @@ function menu_custom_sites() {
     echo -e "${GREEN}4.${NC} $(_i18n ".${CUR_FILE}.custom_sites.option4")"
 
     _menu_rule
-    echo -e "1. $(_i18n ".${CUR_FILE}.custom_sites.info1")"
-    echo -e "2. $(_i18n ".${CUR_FILE}.custom_sites.info2")"
-    echo -e "3. $(_i18n ".${CUR_FILE}.custom_sites.info3")"
-    echo -e "4. $(_i18n ".${CUR_FILE}.custom_sites.info4")"
+    echo -e "${CYAN}1. $(_i18n ".${CUR_FILE}.custom_sites.info1")${NC}"
+    echo -e "${CYAN}2. $(_i18n ".${CUR_FILE}.custom_sites.info2")${NC}"
+    echo -e "${CYAN}3. $(_i18n ".${CUR_FILE}.custom_sites.info3")${NC}"
+    echo -e "${CYAN}4. $(_i18n ".${CUR_FILE}.custom_sites.info4")${NC}"
     echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.custom_sites.option0")"
     _menu_rule
 }
@@ -392,8 +403,8 @@ function menu_backup() {
     echo -e "${GREEN}2.${NC} $(_i18n ".${CUR_FILE}.backup.option2")"
 
     _menu_rule
-    echo -e "1. $(_i18n ".${CUR_FILE}.backup.info1")"
-    echo -e "2. $(_i18n ".${CUR_FILE}.backup.info2")"
+    echo -e "${CYAN}1. $(_i18n ".${CUR_FILE}.backup.info1")${NC}"
+    echo -e "${CYAN}2. $(_i18n ".${CUR_FILE}.backup.info2")${NC}"
     echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.backup.option0")"
     _menu_rule
 }

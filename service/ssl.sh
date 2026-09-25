@@ -167,10 +167,18 @@ function _ssl_renew_cron_present() {
     # 先滤掉注释行再匹配: crontab 里一行以 # 开头的备忘 (比如手抄的续签命令) 也含
     # "acme.sh --cron", 不过滤就会被当成"定时任务已就位" —— 误判方向恰好是**不告警**,
     # 正是本函数要防的那件事, 所以这一步不能省。
-    if crontab -l 2>/dev/null | grep -v '^[[:space:]]*#' | grep -qF 'acme.sh --cron'; then
-        return 0
-    fi
-    return 1
+    #
+    # 另: 这里刻意不用"管道 + grep -q"的一步写法 (2026-09-26 改)。pipefail 下 grep -q
+    # 一找到匹配就退出, 上游 grep -v 写管道时可能收 SIGPIPE(141), 于是整条管道非 0
+    # —— 而"非 0"在本函数里被解读成"定时任务缺失", 一个 SIGPIPE 就能让自检把明明
+    # 装好的定时任务判成没装 (误判方向依旧是不告警)。故整段落变量、滤注释后用
+    # bash 内建的通配比对, 全程不产生可被打断的管道。
+    local cron_txt=''
+    cron_txt="$(crontab -l 2>/dev/null || true)"
+    # grep -v 在"全是注释行"时输出为空且退出 1, || true 兜住 (set -e 下命令替换的非 0
+    # 会中断本函数); 它不带 -q, 会读完整个输入, 不会让上游收 SIGPIPE。
+    cron_txt="$(printf '%s\n' "${cron_txt}" | grep -v '^[[:space:]]*#' || true)"
+    [[ "${cron_txt}" == *'acme.sh --cron'* ]]
 }
 
 # =============================================================================

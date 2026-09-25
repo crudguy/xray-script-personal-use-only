@@ -481,6 +481,50 @@ function _preferred_remote_host() {
 }
 
 # =============================================================================
+# 函数名称: _ipv6_listen_probe
+# 功能描述: 实测本机能否创建 IPv6 套接字并 **bind 到通配地址 ::**, stdout 输出
+#           ok / no / unknown。放在 _common.sh 是为了让 check.sh (只读体检) 与
+#           handler.sh (启停前的风险提示) 共用同一份判据, 避免两处实现漂移。
+#
+#           为什么测 bind(::) 而不是仅 socket(): 两者会分道扬镳。
+#           本机 (内核 6.12) 实测: all/default/lo 的 disable_ipv6 全为 1、接口上
+#           一个 IPv6 地址都没有时, socket(AF_INET6) 与 bind(::) 依然都成功 ——
+#           也就是说 **sysctl 关闭 IPv6 不会让 nginx 的 listen [::]:443 失败**
+#           (能 bind, 只是通了也没数据)。真正会让 nginx 起不来的是 GRUB 级
+#           ipv6.disable=1: 那时协议栈不初始化, 套接字根本建不出来。
+#           社区里"关 IPv6 后 nginx 崩"的报告混着这两种情况, 所以这里不猜,
+#           直接测出一条证据给用户看。
+#
+#           端口用 0 (由内核挑临时端口), 因此不会与任何在用端口冲突;
+#           SO_REUSEADDR 亦无副作用 —— 探测完立刻 close。
+# 前提: 需要 python3; 缺失时输出 unknown 而**不做推断** —— 实测已证明按
+#       disable_ipv6 推断会得出方向相反的结论, 那比不给结论更坏。
+# 参数: 无
+# 返回值: 恒 0 (结论走 stdout)
+# =============================================================================
+function _ipv6_listen_probe() {
+    local out=''
+    if ! cmd_exists 'python3'; then
+        printf 'unknown'
+        return 0
+    fi
+    out="$(python3 -c 'import socket
+try:
+    _s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    _s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    _s.bind(("::", 0))
+    _s.close()
+    print("ok")
+except OSError:
+    print("no")' 2>/dev/null || true)"
+    case "${out}" in
+    ok | no) printf '%s' "${out}" ;;
+    *) printf 'unknown' ;;
+    esac
+    return 0
+}
+
+# =============================================================================
 # 函数名称: _nginx_binary
 # 功能描述: 本项目编译安装的 Nginx 可执行文件路径。
 #           注: NGINX_PREFIX_DIR 由 core/handler.sh 以 readonly 定义, check.sh /

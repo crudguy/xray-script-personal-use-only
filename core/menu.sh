@@ -247,6 +247,9 @@ function menu_config() {
 #           选项语义: 1 是"改"(幂等开启/修复), 2 是"看"(只读体检), 3/4 是两批
 #           整机级优化 —— 单独成项而不并入 1, 因为它们的影响面远超 BBR 本身
 #           (对所有进程/用户/服务生效), 不该在用户点"开启 BBR"时被顺手施加。
+#           5/6 是 IPv6: 5 只读检测, 6 进入启停子菜单。挂在"内核网络"这一组
+#           而不是单开顶级菜单, 是因为它和 BBR 同属内核网络栈开关, 用户排查
+#           "网络不对劲"时的心智路径是同一个。
 # 参数: 无 (直接使用全局变量 I18N_MAP)
 # 返回值: 无 (直接打印到标准错误输出 >&2)
 # =============================================================================
@@ -256,13 +259,41 @@ function menu_bbr() {
     echo -e "${GREEN}2.${NC} $(_i18n ".${CUR_FILE}.bbr.option2")"
     echo -e "${GREEN}3.${NC} $(_i18n ".${CUR_FILE}.bbr.option3")"
     echo -e "${GREEN}4.${NC} $(_i18n ".${CUR_FILE}.bbr.option4")"
+    echo -e "${GREEN}5.${NC} $(_i18n ".${CUR_FILE}.bbr.option5")"
+    echo -e "${GREEN}6.${NC} $(_i18n ".${CUR_FILE}.bbr.option6")"
 
     _menu_rule
     echo -e "1. $(_i18n ".${CUR_FILE}.bbr.info1")"
     echo -e "2. $(_i18n ".${CUR_FILE}.bbr.info2")"
     echo -e "3. $(_i18n ".${CUR_FILE}.bbr.info3")"
     echo -e "4. $(_i18n ".${CUR_FILE}.bbr.info4")"
+    echo -e "5. $(_i18n ".${CUR_FILE}.bbr.info5")"
+    echo -e "6. $(_i18n ".${CUR_FILE}.bbr.info6")"
     echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.bbr.option0")"
+    _menu_rule
+}
+
+# =============================================================================
+# 函数名称: menu_ipv6
+# 功能描述: 显示 IPv6 启停子菜单。
+#           三个操作各自独立成项, 而不是合成一个"切换当前状态": 软禁用与硬禁用
+#           的影响面差一个数量级 (前者保留回环与协议栈, 后者全关), 让用户每次
+#           明确说出要哪一种, 比让脚本"按当前状态取反"更安全 —— 猜错的代价是
+#           整机失去 IPv6。
+# 参数: 无 (直接使用全局变量 I18N_MAP)
+# 返回值: 无 (直接打印到标准错误输出 >&2)
+# =============================================================================
+function menu_ipv6() {
+    _menu_title "$(_i18n ".${CUR_FILE}.ipv6.title")"
+    echo -e "${GREEN}1.${NC} $(_i18n ".${CUR_FILE}.ipv6.option1")"
+    echo -e "${GREEN}2.${NC} $(_i18n ".${CUR_FILE}.ipv6.option2")"
+    echo -e "${GREEN}3.${NC} $(_i18n ".${CUR_FILE}.ipv6.option3")"
+
+    _menu_rule
+    echo -e "1. $(_i18n ".${CUR_FILE}.ipv6.info1")"
+    echo -e "2. $(_i18n ".${CUR_FILE}.ipv6.info2")"
+    echo -e "3. $(_i18n ".${CUR_FILE}.ipv6.info3")"
+    echo -e "${RED}0.${NC} $(_i18n ".${CUR_FILE}.ipv6.option0")"
     _menu_rule
 }
 
@@ -595,6 +626,7 @@ function main() {
     --custom-sites) menu_custom_sites >&2 ;;
     --backup) menu_backup >&2 ;;              # 显示配置备份与迁移菜单
     --bbr) menu_bbr >&2 ;;                    # 显示 BBR 与内核网络加速菜单
+    --ipv6) menu_ipv6 >&2 ;;                  # 显示 IPv6 启停子菜单
     --banner) print_banner >&2 ;;         # 显示 Banner
     --status) print_status >&2 ;;         # 显示状态信息
     esac

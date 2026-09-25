@@ -171,16 +171,19 @@ function _audit_dispatch() {
     #   A. 臂内已自行留痕, 且细节比这里更丰富 (版本号 / 变更条数 / .failed 后缀):
     #      purge / start / stop / restart / install / nginx-install / quick /
     #      export-config / import-config / nginx-purge / bbr / net-tune /
-    #      nofile-limit / net-status / health
+    #      nofile-limit / net-status / health / ipv6-status
     #   B. 纯只读查询: share / traffic / sni-ports
     #      查看类操作回答不了"谁改了什么", 不进变更审计; 又因 audit.log 目前尚无轮转
     #      (见审计报告 P3), 放进来只会把真正的变更记录挤出日志。
     #  注: net-status / health 臂内的留痕**刻意保留** —— "上次体检是什么时候、结果如何"
     #      对无人值守机器有值班价值, 属诊断历史, 与 B 类新增排除项不冲突。
+    #  注: --ipv6-enable / --ipv6-disable / --ipv6-disable-hard **刻意不排除** ——
+    #      它们是真实的内核参数变更, 由本函数统一记 ipv6-enable / ipv6-disable /
+    #      ipv6-disable-hard 三条动作, 符合"变更单一收口"的约定。
     case "${option}" in
     --purge | --start | --stop | --restart | --install | --nginx-install | --quick) return 0 ;;
     --export-config | --import-config | --nginx-purge) return 0 ;;
-    --bbr | --net-tune | --nofile-limit | --net-status | --health) return 0 ;;
+    --bbr | --net-tune | --nofile-limit | --net-status | --health | --ipv6-status) return 0 ;;
     --share | --traffic | --sni-ports) return 0 ;;
     esac
     _audit_log "${option#--}" "${detail}"
@@ -3342,6 +3345,298 @@ function _unit_exists() {
 }
 
 # =============================================================================
+# 函数名称: _ipv6_iface_list
+# 功能描述: 枚举非 lo 的网络接口名 (空格分隔), 供软禁用逐个关闭接口的 IPv6。
+#           解析 `ip -o link show` 的一行一接口格式:
+#             "2: eth0: <BROADCAST,...> ..."   -> eth0
+#             "6: veth0@if3: <BROADCAST,...>"  -> veth0  (必须去掉 @ifN: sysctl 键
+#                                                 里只有 veth0, 带后缀会写出一堆
+#                                                 无效键)
+# 参数: 无
+# 返回值: 恒 0 (结果走 stdout; 无 ip 命令或只有 lo 时输出空串)
+# =============================================================================
+function _ipv6_iface_list() {
+    local line='' name='' result=''
+    cmd_exists 'ip' || return 0
+    # here-string 遍历而非管道 —— 管道会让循环跑在子 shell 里, 累积变量全丢
+    while IFS= read -r line; do
+        name="${line#*: }"
+        name="${name%%:*}"
+        name="${name%%@*}"
+        [[ -n "${name}" ]] || continue
+        # 刻意写成 if 而非 `[[ ]] && continue`: 后者条件为假时整条语句返回 1,
+        # 会被 set -e 判为失败而中断 (本项目已登记的坑)
+        if [[ "${name}" == 'lo' ]]; then
+            continue
+        fi
+        result="${result}${result:+ }${name}"
+    done <<<"$(ip -o link show 2>/dev/null || true)"
+    printf '%s' "${result}"
+}
+
+# =============================================================================
+# 函数名称: _ipv6_soft_pending_ifaces
+# 功能描述: 列出"软禁用尚未覆盖"的非 lo 接口 (仍开着 IPv6 的), 空格分隔。
+#           用于幂等判定: 结果为空即软禁用已完整生效。
+# 参数: 无
+# 返回值: 恒 0 (结果走 stdout)
+# =============================================================================
+function _ipv6_soft_pending_ifaces() {
+    local list='' iface='' v='' result=''
+    local -a ifaces=()
+    list="$(_ipv6_iface_list)"
+    if [[ -z "${list}" ]]; then
+        printf ''
+        return 0
+    fi
+    read -r -a ifaces <<<"${list}" || true
+    for iface in "${ifaces[@]}"; do
+        [[ -n "${iface}" ]] || continue
+        v="$(sysctl -n "net.ipv6.conf.${iface}.disable_ipv6" 2>/dev/null || true)"
+        if [[ "${v}" != '1' ]]; then
+            result="${result}${result:+ }${iface}"
+        fi
+    done
+    printf '%s' "${result}"
+}
+
+# =============================================================================
+# 函数名称: _ipv6_sysctl_body
+# 功能描述: 生成 IPv6 持久化文件的内容 (stdout), 供 _atomic_write 写盘。
+#
+#           **顺序即语义, 不可重排**: 写 net.ipv6.conf.all.disable_ipv6 会让内核
+#           遍历并重置**所有**接口, 所以 all 必须排在逐接口行之前 —— 反过来写,
+#           刚设好的 eth0=1 会被随后的 all=0 一次性抹掉, 表现为"重启后 IPv6 又
+#           回来了", 而且只在重启后才暴露。
+#
+#           三种模式的取舍 (模式名与 handler_ipv6 完全一致, 不做二次映射 ——
+#           曾经用过 enable/soft/hard 的另一套名字, 透传时对不上 case, 结果是
+#           **静默生成一个只含换行符的文件**: 写盘成功、sysctl -p 返回 0、rc 也是 0,
+#           只有复核才发现值没变。命名不一致的代价就是这么隐蔽):
+#             enable       全 0; 含 lo 是为覆盖此前可能被写成 1 的情况。
+#             disable      软禁用: all=0 (保持协议栈开启, nginx 的 listen [::] 才能
+#                          bind) + lo=0 (回环始终保留) + default=1 (管将来新增的
+#                          接口: 容器、热插网卡) + 逐接口 =1 (现存接口)。
+#             disable-hard 硬禁用: all=1 + default=1, 彻底关栈。实测 (内核 6.12)
+#                          这**不会**让 bind(::) 失败, 但仍会切断所有 IPv6 通信 ——
+#                          用户侧表现就是 IPv6 不可达。
+# 参数: $1 模式 (enable | disable | disable-hard)
+# 返回值: 恒 0 (内容走 stdout)
+# =============================================================================
+function _ipv6_sysctl_body() {
+    local mode="${1:-}"
+    local list='' iface=''
+    local -a ifaces=()
+
+    case "${mode}" in
+    enable)
+        printf 'net.ipv6.conf.all.disable_ipv6 = 0\n'
+        printf 'net.ipv6.conf.default.disable_ipv6 = 0\n'
+        printf 'net.ipv6.conf.lo.disable_ipv6 = 0\n'
+        ;;
+    disable-hard)
+        printf 'net.ipv6.conf.all.disable_ipv6 = 1\n'
+        printf 'net.ipv6.conf.default.disable_ipv6 = 1\n'
+        ;;
+    disable)
+        # 顺序敏感, 见函数头
+        printf 'net.ipv6.conf.all.disable_ipv6 = 0\n'
+        printf 'net.ipv6.conf.lo.disable_ipv6 = 0\n'
+        printf 'net.ipv6.conf.default.disable_ipv6 = 1\n'
+        list="$(_ipv6_iface_list)"
+        if [[ -n "${list}" ]]; then
+            read -r -a ifaces <<<"${list}" || true
+            for iface in "${ifaces[@]}"; do
+                [[ -n "${iface}" ]] || continue
+                printf 'net.ipv6.conf.%s.disable_ipv6 = 1\n' "${iface}"
+            done
+        fi
+        ;;
+    esac
+    return 0
+}
+
+# =============================================================================
+# 函数名称: handler_ipv6_status
+# 功能描述: 转发到 check.sh 的 IPv6 只读检测 (含出站连通性探测), 并按结论留痕。
+#           与 handler_net_status 同一取舍 —— 判据与报告语汇都在 check.sh,
+#           这里只转发与记录, 不复制一份判据。
+# 参数: 无
+# 返回值: 恒为 0 (理由同 handler_net_status: 非 0 会被 exec_handler 翻译成
+#         "[错误] handler 执行失败"并把用户踢出菜单, 而"IPv6 半残"是一种正常
+#         结论而非执行错误, 让报告自己说话即可)
+# =============================================================================
+function handler_ipv6_status() {
+    [[ -f "${CHECK_PATH}" ]] || _error "$(_i18n ".${CUR_FILE}.ipv6.unavailable")"
+    local rc=0
+    bash "${CHECK_PATH}" '--ipv6-status' || rc=$?
+    if [[ "${rc}" -eq 0 ]]; then
+        _audit_log 'ipv6-status' 'ok or explicitly disabled'
+    else
+        _audit_log 'ipv6-status' 'half-broken / undetermined (see report)'
+    fi
+    return 0
+}
+
+# =============================================================================
+# 函数名称: handler_ipv6
+# 功能描述: 启用 / 禁用 IPv6 (幂等, 危险操作二次确认)。
+#           1. 模式 -> 目标值: enable(all=0,default=0) / disable(软: all=0,default=1)
+#              / disable-hard(硬: all=1,default=1)。
+#           2. 幂等: 目标值已达成**且**持久化文件在, 直接返回零写盘。只比值不查
+#              文件会漏掉"当前生效但重启失效"的情形 —— 那是 BBR 那条"生效 !=
+#              持久"铁律的同类问题。软禁用还要逐个接口查, 因为它管的不止两个开关。
+#           3. 列影响面 + 二次确认 (默认取消), 与 handler_net_tune 同一姿态。
+#           4. 原子写 /etc/sysctl.d/99-...-ipv6.conf。
+#           5. `sysctl -p <本文件>` 应用 —— 刻意不用 `sysctl --system`: 那会连带
+#              加载整机其它 sysctl 配置, 别人的坏配置会把本次改动一起带崩。
+#           6. 复核目标值; 软禁用再查一遍逐接口, 未覆盖的接口列名告警。
+#
+#           关于 nginx: 本项目 nginx 资产的 redirect.conf / stream.conf 与生成的
+#           站点 conf 都写了 `listen [::]:80/443`。**是否会被禁用打断实测决定**,
+#           不靠推断 —— 见 _ipv6_listen_probe 的函数头 (实测结论: sysctl 关 IPv6
+#           并不阻止 bind(::), 所以不会打断; GRUB 级 ipv6.disable=1 才会)。
+#           只有实测"不可监听"且 nginx 确实配置了 [::] 时, 才在确认前额外告警。
+# 参数: $1 模式 (enable | disable | disable-hard)
+# 返回值: 恒为 0 (已应用 / 本就达标 / 用户取消 都属正常结束; 致命错走 _error 直接退出)
+# =============================================================================
+function handler_ipv6() {
+    local mode="${1:-}"
+    # $2/$3 仅为可测性, 菜单/CLI 调用都不传, 落到系统真实路径。
+    #   $2 = sysctl 持久化文件路径 —— 本函数唯一会真正改动机器的地方, 测试必须
+    #        能重定向到沙箱, 否则用例只能在真机上跑, 或者更糟: 跑测试时顺手改了
+    #        机器的 IPv6 配置。(与 _bbr_persist_files 把路径做成参数同一取舍。)
+    #   $3 = nginx 配置目录 —— 它决定"是否提示 nginx 联动风险"。这条提示是给用户
+    #        看的**安全警告**, 必须能验证它真的会出现; 不留注入口的话, 该分支只能
+    #        靠"读代码"确认, 而 NEG 也证明不了它 (没有 nginx 的机器上改坏它,
+    #        行为完全一样, 测试照样全绿)。
+    local sysctl_file="${2:-/etc/sysctl.d/99-xray-script-personal-use-only-ipv6.conf}"
+    local ngx_dir="${3:-}"
+    local body='' cur_all='' cur_def='' tgt_all='' tgt_def=''
+    local confirm='' pending='' probe='' dir=''
+    local nginx6=0 done_flag=0
+    local -a ngx_confs=()
+    if [[ -n "${ngx_dir}" ]]; then
+        ngx_confs=("${ngx_dir}")
+    else
+        ngx_confs=('/usr/local/nginx/conf' '/etc/nginx')
+    fi
+
+    case "${mode}" in
+    enable)
+        tgt_all='0'
+        tgt_def='0'
+        ;;
+    disable)
+        tgt_all='0'
+        tgt_def='1'
+        ;;
+    disable-hard)
+        tgt_all='1'
+        tgt_def='1'
+        ;;
+    *)
+        _error "$(_i18n ".${CUR_FILE}.ipv6.bad_mode")"
+        ;;
+    esac
+
+    if ! cmd_exists 'sysctl'; then
+        _error "$(_i18n ".${CUR_FILE}.ipv6.no_sysctl")"
+    fi
+    # 无协议栈时这些 sysctl 键根本不存在, 写进去必然失败 —— 提前给出准确原因,
+    # 而不是让 sysctl -p 抛一串 "cannot stat" 噪音
+    if [[ ! -d '/proc/sys/net/ipv6' ]]; then
+        _error "$(_i18n ".${CUR_FILE}.ipv6.no_stack")"
+    fi
+
+    cur_all="$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || true)"
+    cur_def="$(sysctl -n net.ipv6.conf.default.disable_ipv6 2>/dev/null || true)"
+
+    # ---- 幂等 ----
+    if [[ "${cur_all}" == "${tgt_all}" && "${cur_def}" == "${tgt_def}" && -e "${sysctl_file}" ]]; then
+        if [[ "${mode}" != 'disable' ]]; then
+            done_flag=1
+        else
+            pending="$(_ipv6_soft_pending_ifaces)"
+            if [[ -z "${pending}" ]]; then
+                done_flag=1
+            fi
+        fi
+    fi
+    if [[ "${done_flag}" -eq 1 ]]; then
+        echo -e "${GREEN}[$(_i18n '.title.tip')]${NC} $(_i18n ".${CUR_FILE}.ipv6.already")" >&2
+        return 0
+    fi
+
+    # ---- 影响面 + 二次确认 ----
+    if [[ "${mode}" == 'disable' ]]; then
+        echo -e "${YELLOW}[$(_i18n '.title.tip')]${NC} $(_i18n ".${CUR_FILE}.ipv6.plan_soft")" >&2
+        echo -e "  $(_i18n ".${CUR_FILE}.ipv6.plan_scope_soft")" >&2
+    else
+        echo -e "${YELLOW}[$(_i18n '.title.tip')]${NC} $(_i18n ".${CUR_FILE}.ipv6.plan_hard")" >&2
+        echo -e "  $(_i18n ".${CUR_FILE}.ipv6.plan_scope_hard")" >&2
+    fi
+    echo -e "  $(_i18n ".${CUR_FILE}.ipv6.plan_file")${sysctl_file}" >&2
+
+    # nginx 联动告警: 只在**实测**不可监听时才提 —— 见函数头
+    probe="$(_ipv6_listen_probe)"
+    for dir in "${ngx_confs[@]}"; do
+        [[ -d "${dir}" ]] || continue
+        if grep -rq 'listen[[:space:]]*\[::\]' "${dir}" 2>/dev/null; then
+            nginx6=1
+            break
+        fi
+    done
+    if [[ "${nginx6}" -eq 1 && "${probe}" == 'no' ]]; then
+        echo -e "${RED}[$(_i18n '.title.warn')]${NC} $(_i18n ".${CUR_FILE}.ipv6.nginx_risk")" >&2
+    fi
+
+    printf ' %s [y/N]: ' "$(_i18n ".${CUR_FILE}.ipv6.confirm")" >&2
+    read -r confirm || confirm=''
+    case "${confirm,,}" in
+    y | yes) ;;
+    *)
+        echo -e "${YELLOW}[$(_i18n '.title.tip')]${NC} $(_i18n ".${CUR_FILE}.ipv6.cancelled")" >&2
+        return 0
+        ;;
+    esac
+
+    # ---- 写盘 + 应用 ----
+    body="$(_ipv6_sysctl_body "${mode}")"
+    if ! printf '%s\n' "${body}" | _atomic_write "${sysctl_file}"; then
+        _error "$(_i18n ".${CUR_FILE}.ipv6.write_failed")"
+    fi
+    sysctl -p "${sysctl_file}" >/dev/null 2>&1 || true
+
+    # ---- 复核 ----
+    cur_all="$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || true)"
+    cur_def="$(sysctl -n net.ipv6.conf.default.disable_ipv6 2>/dev/null || true)"
+    if [[ "${cur_all}" != "${tgt_all}" || "${cur_def}" != "${tgt_def}" ]]; then
+        _error "$(_i18n ".${CUR_FILE}.ipv6.verify_failed")"
+    fi
+    if [[ "${mode}" == 'disable' ]]; then
+        pending="$(_ipv6_soft_pending_ifaces)"
+        if [[ -n "${pending}" ]]; then
+            echo -e "${YELLOW}[$(_i18n '.title.warn')]${NC} $(_i18n ".${CUR_FILE}.ipv6.verify_ifaces")${pending}" >&2
+            return 0
+        fi
+    fi
+
+    case "${mode}" in
+    enable)
+        echo -e "${GREEN}[$(_i18n '.title.pass')]${NC} $(_i18n ".${CUR_FILE}.ipv6.done_enable")" >&2
+        ;;
+    disable)
+        echo -e "${GREEN}[$(_i18n '.title.pass')]${NC} $(_i18n ".${CUR_FILE}.ipv6.done_soft")" >&2
+        ;;
+    disable-hard)
+        echo -e "${GREEN}[$(_i18n '.title.pass')]${NC} $(_i18n ".${CUR_FILE}.ipv6.done_hard")" >&2
+        ;;
+    esac
+    return 0
+}
+
+# =============================================================================
 # 函数名称: handler_net_status
 # 功能描述: 转发到 check.sh 的只读网络体检, 并在有结论后写审计日志。
 #           体检本体放 check.sh —— 那里有现成的 _check_info/_check_pass/_check_fail 报告语汇,
@@ -4657,6 +4952,10 @@ function main() {
     --restart) handler_restart ;; # 重启 Xray
     --bbr) handler_bbr ;;         # 启用/修复内核 BBR 拥塞控制 (幂等)
     --net-status) handler_net_status ;;     # 只读体检内核网络与 BBR 状态
+    --ipv6-status) handler_ipv6_status ;;   # 只读检测 IPv6 栈状态 (含出站探测)
+    --ipv6-enable) handler_ipv6 'enable' ;;         # 启用 IPv6 (幂等)
+    --ipv6-disable) handler_ipv6 'disable' ;;       # 软禁用 IPv6 (幂等, 需确认)
+    --ipv6-disable-hard) handler_ipv6 'disable-hard' ;; # 硬禁用 IPv6 (幂等, 需确认)
     --health) handler_health ;;             # 一键全量体检 (只读)
     --net-tune) handler_net_tune ;;         # 内核网络高并发调优 (需确认)
     --nofile-limit) handler_nofile_limit ;; # 进程文件句柄上限 (需确认)

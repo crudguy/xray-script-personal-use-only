@@ -593,7 +593,37 @@ function processes_bbr() {
         2) exec_handler '--net-status' ;;   # 选择 2：只读体检 BBR 与内核网络
         3) exec_handler '--net-tune' ;;     # 选择 3：内核网络高并发调优
         4) exec_handler '--nofile-limit' ;; # 选择 4：进程文件句柄上限
+        5) exec_handler '--ipv6-status' ;;  # 选择 5：只读检测 IPv6 状态
+        6) processes_ipv6 ;;                # 选择 6：进入 IPv6 启停子菜单
         *) break ;;                          # 0/EOF/非法 -> 退回管理配置菜单
+        esac
+    done
+}
+
+# =============================================================================
+# 函数名称: processes_ipv6
+# 功能描述: 处理 IPv6 启停流程。
+#           1. 显示 IPv6 子菜单。
+#           2. 选项 1/2/3 分别是启用、软禁用、硬禁用 —— 各自独立成项, 不做
+#              "按当前状态取反"的智能切换: 软/硬的影响面差一个数量级, 猜错
+#              的代价是整机失去 IPv6。
+#           当前状态不在这里显示 —— 那是菜单 5(只读检测) 的职责。分开的好处是
+#           本菜单的确认提示可以专注讲"影响面", 不必让用户先读懂一段状态再决定。
+# 参数: 无
+# 返回值: 无 (通过调用 exec_handler 执行操作)
+# =============================================================================
+
+function processes_ipv6() {
+    # 显示 IPv6 子菜单 (循环: 完成一项后回到本菜单; 0/EOF -> 退回 BBR 子菜单)。
+
+    local choose=0
+    while true; do
+        choose="$(exec_menu '--ipv6')"
+        case ${choose} in
+        1) exec_handler '--ipv6-enable' ;;       # 选择 1：启用 IPv6
+        2) exec_handler '--ipv6-disable' ;;      # 选择 2：软禁用 (关外网侧, 保留回环)
+        3) exec_handler '--ipv6-disable-hard' ;; # 选择 3：硬禁用 (关协议栈)
+        *) break ;;                              # 0/EOF/非法 -> 退回 BBR 子菜单
         esac
     done
 }
@@ -741,6 +771,13 @@ function main() {
     # (--net-status 是只读的, 适合放进监控定时任务里盯"BBR 有没有掉")
     --bbr) exec_handler '--bbr' ;;
     --net-status) exec_handler '--net-status' ;;
+    # IPv6: 检测只读; 启停三条都会改内核参数, 且 handler_ipv6 内置二次确认 ——
+    # 无 TTY 时 read 会立刻 EOF, 确认串为空 -> 走"取消"分支, 因此放进 cron
+    # 不会静默改机器。真要无人值守启停, 走 handler 直接传模式参数。
+    --ipv6-status) exec_handler '--ipv6-status' ;;
+    --ipv6-enable) exec_handler '--ipv6-enable' ;;
+    --ipv6-disable) exec_handler '--ipv6-disable' ;;
+    --ipv6-disable-hard) exec_handler '--ipv6-disable-hard' ;;
     # 一键全量体检: 只读, 适合放进 cron / 监控脚本。
     #
     # 这里刻意**不走** exec_handler: handler_health 为了不中断菜单而恒 return 0,

@@ -1431,6 +1431,332 @@ function _net_render() {
 }
 
 # =============================================================================
+# 函数名称: check_ipv6_status
+# 功能描述: 只读检测主机 IPv6 栈状态 (CLI: --ipv6-status)。
+#           与 check_net_status 同一取舍 —— 只采集与渲染, 不做任何写操作。
+#
+#           采集结果写入 _IPV6_* 全局变量, 而非经动态作用域回写父函数的 local:
+#           体检的内核网络分区也要复用同一份采集, 且只需其中几项, 若走动态作用域,
+#           _health_kernel 就得为十几个共享变量各写一行 local。这与 _common.sh 里
+#           _PUBLIC_IPV4 / _PUBLIC_IP_PROBED 的缓存范式一致。
+#
+#           判定分档 (_IPV6_MODE):
+#             grub       内核命令行 ipv6.disable=1 —— GRUB 级硬禁用, sysctl 改不回来
+#             no_stack   内核无 IPv6 栈 (/proc/sys/net/ipv6 不存在)
+#             off        net.ipv6.conf.all.disable_ipv6=1, 协议栈关闭
+#             soft_off   本项目软禁用: all=0 (栈仍在, nginx 的 [::] 仍能 bind),
+#                        但 default=1 且非 lo 接口已无 global 地址
+#             no_addr    栈启用但没有任何 global 地址
+#             partial    **半残**: 有 global 地址, 但无默认路由 / 出站不通
+#             ok         栈启用 + 有 global 地址 + 有默认路由 + (已探测)能出网
+#             unknown    读不到内核开关 (无 sysctl 或无权限)
+#
+#           为什么必须单独判"半残": IPv6 半残时 glibc 的 getaddrinfo 照样返回
+#           AAAA, 客户端优先连 IPv6 然后超时 —— 表现为"某些网站莫名变慢/失败"
+#           而 v4 侧一切正常。这正是用户想禁用 IPv6 最常见的动机, 也是本命令
+#           最该一眼看出的结论; 笼统报一句"IPv6 已启用"等于没说。
+#
+#           另有两项联动检查 (回答"禁用会不会打爆别的服务"):
+#             - nginx 配置里是否有 listen [::] —— 本项目 nginx 资产 (redirect.conf /
+#               stream.conf) 与生成的站点 conf 都写了 [::]:80/443。硬禁用 IPv6 后
+#               这些 bind 会失败, 而 `nginx -t` 只查语法仍会通过, 于是 reload/重启
+#               才崩, 机器重启后 nginx 直接起不来。
+#             - IPv6 socket 能否真的创建 (python3 实测 AF_INET6; 无 python3 时退化
+#               为按 all.disable_ipv6 推断**并标注来源**) —— 这是"软禁用会不会打断
+#               nginx"的唯一可靠依据, 不靠对内核语义的假设。
+# 参数:
+#   $1: 可选 '--no-probe' —— 跳过出站连通性探测 (体检用; 探测含 curl, 最长约 45s)
+# 返回值: 0-状态明确 (正常 / 已禁用) 1-半残 / 无地址 / 未知
+# =============================================================================
+function check_ipv6_status() {
+    local no_probe=0
+    if [[ "${1:-}" == '--no-probe' ]]; then
+        no_probe=1
+    fi
+    _ipv6_collect "${no_probe}"
+    _ipv6_render
+    return "${_IPV6_RC}"
+}
+
+# =============================================================================
+# 函数名称: _ipv6_collect
+# 功能描述: 采集 IPv6 状态 (只读), 结果写入 _IPV6_* 全局变量。
+#           每次调用都重新采集 (不像 _resolve_public_ips 那样缓存): 状态会被
+#           禁用/启用操作立即改变, 缓存只会给出过期结论。
+# 参数:
+#   $1: 1 = 跳过出站探测, 0/空 = 探测
+# 返回值: 无 (结论写入 _IPV6_MODE / _IPV6_RC)
+# =============================================================================
+function _ipv6_collect() {
+    local no_probe="${1:-0}"
+    local persist_file='/etc/sysctl.d/99-xray-script-personal-use-only-ipv6.conf'
+    local ngx_confs=('/usr/local/nginx/conf' '/etc/nginx')
+    local dir='' tmp=''
+
+    # 全部显式初始化 —— set -u 下不能留空洞, 且本函数会被重复调用
+    _IPV6_MODE='unknown'
+    _IPV6_GRUB_OFF=0
+    _IPV6_STACK=0
+    _IPV6_ALL=''
+    _IPV6_DEF=''
+    _IPV6_ADDRS=''
+    _IPV6_DEFROUTE=''
+    _IPV6_PUB=''
+    _IPV6_PROBED=0
+    _IPV6_PERSIST=0
+    _IPV6_PERSIST_MODE=''
+    _IPV6_SOCK='unknown'
+    _IPV6_SOCK_SRC=''
+    _IPV6_NGINX6=0
+    _IPV6_OTHERS=0
+    _IPV6_RC=1
+
+    # GRUB 级硬禁用: 命令行带 ipv6.disable=1 时整个 IPv6 栈不会初始化,
+    # 此时写任何 net.ipv6.* 都是无效操作 (sysctl 里根本没这些键)
+    tmp="$(cat /proc/cmdline 2>/dev/null || true)"
+    if [[ "${tmp}" == *'ipv6.disable=1'* ]]; then
+        _IPV6_GRUB_OFF=1
+    fi
+
+    if [[ -d '/proc/sys/net/ipv6' ]]; then
+        _IPV6_STACK=1
+    fi
+
+    if cmd_exists 'sysctl'; then
+        _IPV6_ALL="$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || true)"
+        _IPV6_DEF="$(sysctl -n net.ipv6.conf.default.disable_ipv6 2>/dev/null || true)"
+    fi
+
+    # 非 lo 接口的 global 地址。lo 的 ::1 是 scope host, 天然被 scope 过滤排除 ——
+    # 这正是"软禁用"的判据: 外网侧地址没了, 回环仍在。
+    # 用 sed -n '1,Np' 而非 head: head 读够行数即退出, 上游 ip 收 SIGPIPE(141),
+    # pipefail 下整条管道被判失败 (本项目已登记的坑)。
+    tmp="$(ip -6 addr show scope global 2>/dev/null || true)"
+    _IPV6_ADDRS="$(printf '%s\n' "${tmp}" | sed -n 's/.*inet6 \([0-9A-Fa-f:]*\)\/.*/\1/p' | sed -n '1,3p' || true)"
+
+    _IPV6_DEFROUTE="$(ip -6 route show default 2>/dev/null | sed -n '1,2p' || true)"
+
+    # 本项目写入的持久化文件 + 从内容反推模式 (重启后靠它恢复, 见 handler_ipv6)
+    if [[ -e "${persist_file}" ]]; then
+        _IPV6_PERSIST=1
+        tmp="$(cat "${persist_file}" 2>/dev/null || true)"
+        if [[ "${tmp}" == *'all.disable_ipv6 = 1'* ]]; then
+            _IPV6_PERSIST_MODE='hard'
+        elif [[ "${tmp}" == *'default.disable_ipv6 = 1'* ]]; then
+            _IPV6_PERSIST_MODE='soft'
+        else
+            _IPV6_PERSIST_MODE='enable'
+        fi
+    fi
+
+    # 除本项目外还有谁在写 disable_ipv6: 用户手改 / 云镜像预置的文件会与本脚本
+    # 互相覆盖 (sysctl.d 按文件名排序应用, 99- 能压住多数; 但 /etc/sysctl.conf
+    # 最后读, 会反过来压住我们)。只报数量, 不猜谁赢。
+    tmp="$(grep -rl 'disable_ipv6' '/etc/sysctl.d' '/etc/sysctl.conf' 2>/dev/null || true)"
+    if [[ -n "${tmp}" ]]; then
+        _IPV6_OTHERS="$(printf '%s\n' "${tmp}" | grep -vc '99-xray-script-personal-use-only-ipv6' || true)"
+        [[ "${_IPV6_OTHERS}" =~ ^[0-9]+$ ]] || _IPV6_OTHERS=0
+    fi
+
+    # nginx 是否在监听 IPv6 通配地址
+    for dir in "${ngx_confs[@]}"; do
+        [[ -d "${dir}" ]] || continue
+        tmp="$(grep -rl 'listen[[:space:]]*\[::\]' "${dir}" 2>/dev/null || true)"
+        if [[ -n "${tmp}" ]]; then
+            _IPV6_NGINX6=1
+            break
+        fi
+    done
+    # 提示: 这里刻意只扫配置文件, 不跑 `nginx -T` —— 后者要求 nginx 可执行且
+    # 配置无语法错, 在"就是要排查网络问题"的场景下反而不该成为前置依赖。
+
+    # IPv6 监听能力: 复用 _common.sh 的实测 (与 handler 启停前的风险提示同源)。
+    # 判据与取舍 (为何测 bind(::) 而非仅 socket()、为何无 python3 时不做推断)
+    # 见 _ipv6_listen_probe 的函数头。
+    tmp="$(_ipv6_listen_probe)"
+    case "${tmp}" in
+    ok | no)
+        _IPV6_SOCK="${tmp}"
+        _IPV6_SOCK_SRC='probe'
+        ;;
+    *)
+        _IPV6_SOCK='unknown'
+        _IPV6_SOCK_SRC='no_probe'
+        ;;
+    esac
+
+    if [[ "${no_probe}" != '1' ]]; then
+        # 直调以复用进程内缓存; 不能写 < <(_resolve_public_ips): 进程替换同样是
+        # 子 shell, 缓存写不回当前 shell (见该函数注释)
+        _resolve_public_ips >/dev/null
+        _IPV6_PUB="${_PUBLIC_IPV6}"
+        _IPV6_PROBED=1
+    fi
+
+    # ---- 分档 (顺序即优先级) ----
+    if [[ "${_IPV6_GRUB_OFF}" -eq 1 ]]; then
+        _IPV6_MODE='grub'
+    elif [[ "${_IPV6_STACK}" -eq 0 ]]; then
+        _IPV6_MODE='no_stack'
+    elif [[ "${_IPV6_ALL}" == '1' ]]; then
+        _IPV6_MODE='off'
+    elif [[ "${_IPV6_ALL}" != '0' ]]; then
+        _IPV6_MODE='unknown'
+    elif [[ -z "${_IPV6_ADDRS}" && "${_IPV6_DEF}" == '1' ]]; then
+        _IPV6_MODE='soft_off'
+    elif [[ -z "${_IPV6_ADDRS}" ]]; then
+        _IPV6_MODE='no_addr'
+    elif [[ -z "${_IPV6_DEFROUTE}" ]]; then
+        _IPV6_MODE='partial'
+    elif [[ "${_IPV6_PROBED}" -eq 1 && -z "${_IPV6_PUB}" ]]; then
+        _IPV6_MODE='partial'
+    else
+        _IPV6_MODE='ok'
+    fi
+
+    # "正常"与"已明确禁用"都算健康结论; 半残/无地址/未知才返回 1
+    case "${_IPV6_MODE}" in
+    ok | off | soft_off | grub | no_stack) _IPV6_RC=0 ;;
+    *) _IPV6_RC=1 ;;
+    esac
+}
+
+# =============================================================================
+# 函数名称: _ipv6_render
+# 功能描述: 渲染 _ipv6_collect 的采集结果为只读报告 (样式与 _net_render 一致)。
+# 参数: 无
+# 返回值: 无 (直接打印到标准错误输出 >&2)
+# =============================================================================
+function _ipv6_render() {
+    local txt_mode='' txt_stack='' txt_switch='' txt_addr='' txt_route='' txt_pub=''
+    local txt_sock='' txt_persist='' txt_nginx=''
+
+    printf '\n%s\n' '======================================================' >&2
+    printf '%s%s%s\n' "${GREEN}" "$(_i18n ".${CUR_FILE}.ipv6.title")" "${NC}" >&2
+    printf '%s\n' '======================================================' >&2
+
+    case "${_IPV6_MODE}" in
+    ok) txt_mode="${GREEN}$(_i18n ".${CUR_FILE}.ipv6.mode_ok")${NC}" ;;
+    partial) txt_mode="${YELLOW}$(_i18n ".${CUR_FILE}.ipv6.mode_partial")${NC}" ;;
+    off) txt_mode="${YELLOW}$(_i18n ".${CUR_FILE}.ipv6.mode_off")${NC}" ;;
+    soft_off) txt_mode="${YELLOW}$(_i18n ".${CUR_FILE}.ipv6.mode_soft_off")${NC}" ;;
+    grub) txt_mode="${YELLOW}$(_i18n ".${CUR_FILE}.ipv6.mode_grub")${NC}" ;;
+    no_stack) txt_mode="${YELLOW}$(_i18n ".${CUR_FILE}.ipv6.mode_no_stack")${NC}" ;;
+    no_addr) txt_mode="${YELLOW}$(_i18n ".${CUR_FILE}.ipv6.mode_no_addr")${NC}" ;;
+    *) txt_mode="${YELLOW}$(_i18n ".${CUR_FILE}.health.unknown")${NC}" ;;
+    esac
+    printf '  %s%s\n' "$(_i18n ".${CUR_FILE}.ipv6.mode_label")" "${txt_mode}" >&2
+
+    # 内核支持 (有无 IPv6 协议栈) 与内核开关 (disable_ipv6) 分开报 —— 二者独立:
+    # 无协议栈时读不到开关; 有协议栈而开关为 1 时, 接口上不会有任何 IPv6 地址。
+    if [[ "${_IPV6_STACK}" -eq 1 ]]; then
+        txt_stack="${GREEN}$(_i18n ".${CUR_FILE}.ipv6.present")${NC}"
+    else
+        txt_stack="${RED}$(_i18n ".${CUR_FILE}.ipv6.absent")${NC}"
+    fi
+    printf '  %s%s\n' "$(_i18n ".${CUR_FILE}.ipv6.stack_label")" "${txt_stack}" >&2
+
+    if [[ -z "${_IPV6_ALL}" ]]; then
+        txt_switch="${YELLOW}$(_i18n ".${CUR_FILE}.health.unknown")${NC}"
+    elif [[ "${_IPV6_ALL}" == '1' ]]; then
+        txt_switch="${YELLOW}$(_i18n ".${CUR_FILE}.ipv6.switch_off")${NC}"
+    else
+        txt_switch="${GREEN}$(_i18n ".${CUR_FILE}.ipv6.switch_on")${NC}"
+    fi
+    txt_switch="${txt_switch} (all=${_IPV6_ALL:-?}, default=${_IPV6_DEF:-?})"
+    printf '  %s%s\n' "$(_i18n ".${CUR_FILE}.ipv6.switch_label")" "${txt_switch}" >&2
+
+    if [[ "${_IPV6_GRUB_OFF}" -eq 1 ]]; then
+        printf '  %s%s\n' "$(_i18n ".${CUR_FILE}.ipv6.cmdline_label")" \
+            "${RED}$(_i18n ".${CUR_FILE}.ipv6.cmdline_off")${NC}" >&2
+    else
+        printf '  %s%s\n' "$(_i18n ".${CUR_FILE}.ipv6.cmdline_label")" \
+            "${GREEN}$(_i18n ".${CUR_FILE}.ipv6.cmdline_ok")${NC}" >&2
+    fi
+
+    # global 地址
+    if [[ -n "${_IPV6_ADDRS}" ]]; then
+        txt_addr="${GREEN}$(printf '%s' "${_IPV6_ADDRS}" | tr '\n' ' ')${NC}"
+    else
+        txt_addr="${YELLOW}$(_i18n ".${CUR_FILE}.ipv6.addr_none")${NC}"
+    fi
+    printf '  %s%s\n' "$(_i18n ".${CUR_FILE}.ipv6.addr_label")" "${txt_addr}" >&2
+
+    # 默认路由
+    if [[ -n "${_IPV6_DEFROUTE}" ]]; then
+        txt_route="${GREEN}$(printf '%s' "${_IPV6_DEFROUTE}" | tr '\n' ' ')${NC}"
+    else
+        txt_route="${YELLOW}$(_i18n ".${CUR_FILE}.ipv6.route_none")${NC}"
+    fi
+    printf '  %s%s\n' "$(_i18n ".${CUR_FILE}.ipv6.route_label")" "${txt_route}" >&2
+
+    # 出站连通性 (仅 --ipv6-status 探测)
+    if [[ "${_IPV6_PROBED}" -eq 0 ]]; then
+        txt_pub="${YELLOW}$(_i18n ".${CUR_FILE}.ipv6.pub_skipped")${NC}"
+    elif [[ -n "${_IPV6_PUB}" ]]; then
+        txt_pub="${GREEN}${_IPV6_PUB}${NC}"
+    else
+        txt_pub="${YELLOW}$(_i18n ".${CUR_FILE}.ipv6.pub_fail")${NC}"
+    fi
+    printf '  %s%s\n' "$(_i18n ".${CUR_FILE}.ipv6.pub_label")" "${txt_pub}" >&2
+
+    # IPv6 socket 可用性 (实测 / 推断)
+    case "${_IPV6_SOCK}" in
+    ok) txt_sock="${GREEN}$(_i18n ".${CUR_FILE}.ipv6.sock_ok")${NC}" ;;
+    no) txt_sock="${YELLOW}$(_i18n ".${CUR_FILE}.ipv6.sock_no")${NC}" ;;
+    *) txt_sock="${YELLOW}$(_i18n ".${CUR_FILE}.health.unknown")${NC}" ;;
+    esac
+    case "${_IPV6_SOCK_SRC}" in
+    probe) txt_sock="${txt_sock} $(_i18n ".${CUR_FILE}.ipv6.src_probe")" ;;
+    no_probe) txt_sock="${txt_sock} $(_i18n ".${CUR_FILE}.ipv6.src_no_probe")" ;;
+    esac
+    printf '  %s%s\n' "$(_i18n ".${CUR_FILE}.ipv6.sock_label")" "${txt_sock}" >&2
+
+    # 本项目持久化文件
+    if [[ "${_IPV6_PERSIST}" -eq 1 ]]; then
+        txt_persist="${GREEN}$(_i18n ".${CUR_FILE}.ipv6.persist_yes")${NC}"
+        case "${_IPV6_PERSIST_MODE}" in
+        soft) txt_persist="${txt_persist} ($(_i18n ".${CUR_FILE}.ipv6.persist_mode_soft"))" ;;
+        hard) txt_persist="${txt_persist} ($(_i18n ".${CUR_FILE}.ipv6.persist_mode_hard"))" ;;
+        enable) txt_persist="${txt_persist} ($(_i18n ".${CUR_FILE}.ipv6.persist_mode_enable"))" ;;
+        esac
+    else
+        txt_persist="${YELLOW}$(_i18n ".${CUR_FILE}.ipv6.persist_no")${NC}"
+    fi
+    printf '  %s%s\n' "$(_i18n ".${CUR_FILE}.ipv6.persist_label")" "${txt_persist}" >&2
+
+    # nginx 联动风险
+    if [[ "${_IPV6_NGINX6}" -eq 1 ]]; then
+        txt_nginx="${YELLOW}$(_i18n ".${CUR_FILE}.ipv6.nginx_yes")${NC}"
+    else
+        txt_nginx="${GREEN}$(_i18n ".${CUR_FILE}.ipv6.nginx_no")${NC}"
+    fi
+    printf '  %s%s\n' "$(_i18n ".${CUR_FILE}.ipv6.nginx_label")" "${txt_nginx}" >&2
+
+    if [[ "${_IPV6_OTHERS}" -gt 0 ]]; then
+        printf '  %s%s\n' "$(_i18n ".${CUR_FILE}.ipv6.others_label")" \
+            "${YELLOW}${_IPV6_OTHERS}${NC}" >&2
+    fi
+
+    printf '\n' >&2
+    case "${_IPV6_MODE}" in
+    ok)
+        printf '%s%s%s\n' "${GREEN}" "$(_i18n ".${CUR_FILE}.ipv6.done_ok")" "${NC}" >&2
+        ;;
+    off | soft_off)
+        printf '%s%s%s\n' "${YELLOW}" "$(_i18n ".${CUR_FILE}.ipv6.done_off")" "${NC}" >&2
+        ;;
+    partial)
+        printf '%s%s%s\n' "${YELLOW}" "$(_i18n ".${CUR_FILE}.ipv6.done_partial")" "${NC}" >&2
+        ;;
+    *)
+        printf '%s%s%s\n' "${YELLOW}" "$(_i18n ".${CUR_FILE}.ipv6.done_other")" "${NC}" >&2
+        ;;
+    esac
+    printf '\n' >&2
+}
+
+# =============================================================================
 # 函数名称: _health_item
 # 功能描述: 记录并打印一条体检结论, 并把级别累积到 _HEALTH_ITEMS 供末尾统计。
 #           用数组而非"多个全局计数器"的原因: 计数器要在 30+ 处自增, 而本函数
@@ -2057,6 +2383,42 @@ function _health_kernel() {
     else
         _health_item 'warn' "$(_i18n ".${CUR_FILE}.health.net_persist_label")$(_i18n ".${CUR_FILE}.health.net_persist_missing")"
     fi
+
+    # IPv6 栈状态: 复用 check_ipv6_status 的采集, 但传 1 跳过出站探测 ——
+    # 体检要快速返回, 而那次探测含两次 curl (最长约 45s)。代价是"半残"判定在
+    # 体检里只看"有无默认路由", 出站不通需 `--ipv6-status` 才能确认。
+    _ipv6_collect 1
+    case "${_IPV6_MODE}" in
+    ok)
+        _health_item 'pass' "$(_i18n ".${CUR_FILE}.health.ipv6_label")$(_i18n ".${CUR_FILE}.health.ipv6_ok")"
+        ;;
+    off)
+        _health_item 'pass' "$(_i18n ".${CUR_FILE}.health.ipv6_label")$(_i18n ".${CUR_FILE}.health.ipv6_off")"
+        ;;
+    soft_off)
+        _health_item 'pass' "$(_i18n ".${CUR_FILE}.health.ipv6_label")$(_i18n ".${CUR_FILE}.health.ipv6_soft_off")"
+        ;;
+    partial)
+        _health_item 'warn' "$(_i18n ".${CUR_FILE}.health.ipv6_label")$(_i18n ".${CUR_FILE}.health.ipv6_partial")"
+        ;;
+    no_addr)
+        _health_item 'warn' "$(_i18n ".${CUR_FILE}.health.ipv6_label")$(_i18n ".${CUR_FILE}.health.ipv6_no_addr")"
+        ;;
+    grub | no_stack)
+        # 这两种是"本机根本没有可用的 IPv6 栈", 不属于本脚本能管的状态,
+        # 记 skip 而不记 pass —— 否则体检全绿会掩盖"这台机器没有 IPv6"这一事实。
+        _health_item 'skip' "$(_i18n ".${CUR_FILE}.health.ipv6_label")$(_i18n ".${CUR_FILE}.health.ipv6_absent")"
+        ;;
+    *)
+        _health_item 'warn' "$(_i18n ".${CUR_FILE}.health.ipv6_label")$(_i18n ".${CUR_FILE}.health.unknown")"
+        ;;
+    esac
+
+    # 硬禁用 IPv6 会让 nginx 的 listen [::] bind 失败 (nginx -t 查不出来),
+    # 这里只在"确实有人在监听 IPv6"且"IPv6 socket 已不可创建"时告警。
+    if [[ "${_IPV6_NGINX6}" -eq 1 && "${_IPV6_SOCK}" == 'no' ]]; then
+        _health_item 'warn' "$(_i18n ".${CUR_FILE}.health.ipv6_nginx_risk")"
+    fi
 }
 
 # =============================================================================
@@ -2239,6 +2601,7 @@ function main() {
     --rule-ip) check_rule_ip "$@" >&2 || exit $? ;;                  # 写前校验 ip 分流值
     --rule-domain) check_rule_domain "$@" >&2 || exit $? ;;          # 写前校验 domain 分流值
     --net-status) check_net_status "$@" >&2 || exit $? ;;            # 只读体检内核网络与 BBR 状态
+    --ipv6-status) check_ipv6_status "$@" >&2 || exit $? ;;          # 只读检测 IPv6 栈状态
     --health) check_health_report "$@" >&2 || exit $? ;;             # 一键全量体检 (只读)
     # P1-3 补漏: 本函数的 case 原本没有 `*)` 分支 —— 未知/拼错的参数什么都不做就退出,
     # 退出码 0。而 core/main.sh 与 README 都推荐脚本化调用走 `core/check.sh --health`

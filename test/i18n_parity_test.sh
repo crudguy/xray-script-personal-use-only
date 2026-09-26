@@ -97,6 +97,132 @@ else
     ok 1 && echo "[FAIL T3] 键规模异常偏小 (zh=${n_zh} en=${n_en}), 疑似语言文件被清空或截断"
 fi
 
+# ---------------------------------------------------------------------------
+# T4/T5 代码侧引用核对 (T1-T3 只比对两份语言文件之间, 看不见"代码引用的键"这一侧)
+# ---------------------------------------------------------------------------
+# 为什么需要: _i18n 查表落空时**恒返回 0 且打印空串** —— 不报错、不留日志。键名写错
+#   或漏加的结果, 只是用户看到一行没有内容的提示/警告。2026-09-26 复审把全部引用
+#   与 zh.keys 求差, 才发现 service/nginx.sh 引用的
+#   nginx.update.backup_skipped 两语言都缺 (Nginx 升级时旧二进制不存在的那条
+#   降级告警渲染成空白)。这类漂移 T1/T2/T3 全看不见。
+#
+# 口径 (抽取器与判定见下):
+#   - 只扫产品代码 core/ service/ tool/, **不扫 test/** —— 测试里有刻意取不存在的
+#     键来验证兜底行为的用例, 纳入会产生假红;
+#   - 键里的 ${CUR_FILE} 按该文件 basename(去扩展名、去前导下划线) 展开, 与
+#     _common.sh 的 readonly CUR_FILE 同口径;
+#   - 含 ${...} 的键是动态后缀, 只取静态前缀并要求前缀下至少有一个真键;
+#   - 形如 .$key 的纯变量键静态不可判, 跳过 (read.sh 的 read.* 走这条, 由
+#     param_map 的 field 驱动);
+#   - 跳过注释行。
+SRC_FILES=()
+for f in core/*.sh service/*.sh tool/*.sh; do [[ -f "$f" ]] && SRC_FILES+=("$f"); done
+
+refs="$SB/refs"
+: > "$refs"
+for f in "${SRC_FILES[@]}"; do
+    cur="$(basename "$f")"; cur="${cur%%.*}"; cur="${cur#_}"
+    grep -v '^[[:space:]]*#' "$f" \
+        | grep -oE "_i18n(_sub|_raw|_array)?[[:space:]]+[\"'][.][^\"']*[\"']" \
+        | sed -E "s/^_i18n(_sub|_raw|_array)?[[:space:]]+//; s/^[\"']//; s/[\"']\$//" \
+        | while IFS= read -r raw; do
+            [[ -n "$raw" ]] || continue
+            raw="${raw#.}"
+            raw="${raw//'${CUR_FILE}'/$cur}"
+            if [[ "$raw" == *'${'* ]]; then
+                pre="${raw%%\$\{*}"; pre="${pre%.}"
+                [[ -n "$pre" ]] && printf 'P\t%s\n' "$pre" >> "$refs"
+            elif [[ "$raw" == *'$'* ]]; then
+                : # 纯变量键, 静态不可判
+            else
+                printf 'F\t%s\n' "$raw" >> "$refs"
+            fi
+        done
+done
+
+# 输出 refs 里"在语言文件中找不到"的完整键; 供 T4 与 T4c 负向自检共用
+check_refs() {
+    local rf="$1" k=''
+    while IFS= read -r k; do
+        [[ -n "$k" ]] || continue
+        grep -Fxq -- "$k" "$SB/zh.keys" || printf '%s\n' "$k"
+    done < <(awk -F'\t' '$1=="F"{print $2}' "$rf" | sort -u)
+}
+
+n_full="$(awk -F'\t' '$1=="F"' "$refs" | sort -u | wc -l | tr -d '[:space:]')"
+n_pref="$(awk -F'\t' '$1=="P"' "$refs" | sort -u | wc -l | tr -d '[:space:]')"
+
+miss="$(check_refs "$refs")"
+if [[ -z "${miss}" ]]; then
+    ok 0 && echo "[T4] 代码引用的 ${n_full} 个键全部存在 (动态前缀式 ${n_pref} 个)"
+else
+    ok 1 && echo "[FAIL T4] 代码引用了语言文件中不存在的键 (运行期将渲染成空串):"
+    printf '%s\n' "${miss}" | sed 's/^/        - /' | head -n 20
+fi
+
+# T4b 抽取器有效性自检: 正则写坏时集合为空 -> 缺检查恒绿, 必须先卡住
+if [[ "${n_full}" -ge 500 ]]; then
+    ok 0 && echo "[T4b] 抽取器有效性自检通过 (${n_full} >= 500)"
+else
+    ok 1 && echo "[FAIL T4b] 抽到的键数异常偏少 (${n_full}), 抽取正则可能已失效"
+fi
+
+# T4c 负向自检: 注入一个必然不存在的键, 检查器必须恰好报出它
+printf 'F\tzzz.definitely.not.a.real.key\n' > "$SB/neg.refs"
+neg="$(check_refs "$SB/neg.refs")"
+if [[ "${neg}" == 'zzz.definitely.not.a.real.key' ]]; then
+    ok 0 && echo "[T4c] 负向自检通过 (不存在的键被正确报出)"
+else
+    ok 1 && echo "[FAIL T4c] 负向自检失败 —— 检查器对不存在的键无反应, T4 可能是恒绿"
+fi
+
+# ---------------------------------------------------------------------------
+# T5 _i18n_sub 的占位符名必须出现在该键的文案里
+# ---------------------------------------------------------------------------
+# 为什么需要: 占位符是"字符串字面量替换"而不是变量插值 —— 名子写错 (或文案侧漏写
+#   ${x}) 不会报错, 只是把名子原样留在输出里。约定形态: _i18n_sub <key> <ph> <val> …,
+#   其中 key 与 ph 一律用**单引号**(或 key 用双引号、ph 用单引号), val 一律用双引号。
+#   故判定: 切到 _i18n_sub 之后, 第一个引号串是 key, 其余**单引号**串是占位符名,
+#   双引号串一律是值 (形如 "${bad}") 必须排除 —— 二者字面形态相同, 只能靠引号区分。
+#   (2026-09-26 初版正是把值当成了占位符名, 34 个调用报出 27 条假红。)
+kv="$SB/zh.kv"
+jq -r 'paths(scalars) as $p | [(($p | map(tostring) | join("."))), (getpath($p) | tostring)] | @tsv' \
+    "${ZH}" > "$kv"
+
+ph_bad=''
+for f in "${SRC_FILES[@]}"; do
+    cur="$(basename "$f")"; cur="${cur%%.*}"; cur="${cur#_}"
+    while IFS= read -r line; do
+        [[ "${line}" == *_i18n_sub* ]] || continue
+        [[ "${line}" =~ ^[[:space:]]*# ]] && continue
+        after="${line#*_i18n_sub}"
+        toks=()
+        while IFS= read -r t; do [[ -n "$t" ]] && toks+=("$t"); done \
+            < <(printf '%s' "${after}" | grep -oE "'[^']*'|\"[^\"]*\"" || true)
+        [[ ${#toks[@]} -ge 2 ]] || continue
+        key="${toks[0]}"; key="${key:1:${#key}-2}"
+        [[ "${key}" == .* ]] || continue
+        key="${key#.}"; key="${key//'${CUR_FILE}'/$cur}"
+        [[ "${key}" == *'$'* ]] && continue
+        text="$(awk -F'\t' -v k="${key}" '$1==k{print $2; exit}' "$kv")"
+        # 键本身不存在由 T4 负责; 此处只检查"键存在时占位符是否落在文案里"
+        [[ -n "${text}" ]] || continue
+        for t in "${toks[@]:1}"; do
+            [[ "${t}" == "'"* ]] || continue   # 双引号 = 值参数
+            ph="${t:1:${#t}-2}"
+            [[ -n "${ph}" ]] || continue
+            [[ "${text}" == *"${ph}"* ]] || ph_bad+="${key} 缺 [${ph}]"$'\n'
+        done
+    done < "$f"
+done
+
+if [[ -z "${ph_bad}" ]]; then
+    ok 0 && echo "[T5] _i18n_sub 占位符与文案一致"
+else
+    ok 1 && echo "[FAIL T5] 占位符名未出现在对应文案中 (会原样渲染在输出里):"
+    printf '%s' "${ph_bad}" | sed 's/^/        - /' | head -n 20
+fi
+
 echo "==== i18n_parity_test: PASS=$pass FAIL=$fail ===="
 rm -rf "$SB"
 [[ $fail -eq 0 ]]

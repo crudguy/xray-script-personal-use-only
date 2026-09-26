@@ -17,11 +17,17 @@
 #   B  _xray_observatory_mode: full / plain 降级, 告警只打一次, 进程内只探测一次;
 #   C  _warp_outbound_tag: 按形态给出 warp-out / warp;
 #   D  _xray_apply_warp: full 形态出站改名 warp-out, 并清掉旧 warp 出站;
-#   E  _xray_apply_warp_balancer: 注入内容逐字段核对; **不改写规则 tag**; 幂等;
+#   E  _xray_apply_warp_balancer: 注入内容逐字段核对; **把规则改写成 balancerTag**
+#      (实测 outboundTag 只在 outbounds 里查 tag, 不落 balancer -> 不改写则 fail-closed);
+#      E8d 校验规则引用的每个 tag 都能解析到; 幂等;
+#   E2 _warp_rules_use_balancer / _warp_rules_use_outbound: 就是这对函数的正反跑
+#      (只动 warp 规则 / 两键不并存 / 可来回切);
 #   F  降级形态下不写 balancer (它的 selector 会解析不到 warp-out);
 #   G  未启用 WARP 时清掉残留的观测/均衡段;
-#   H  handler_warp 关闭: 出站(两种 tag)/规则/观测/均衡四样一起清;
-#   H2 handler_warp 开启: 同一次动作就写入观测/均衡 (不依赖后续"更新配置");
+#   H  handler_warp 关闭: 出站的两种 tag / 规则的**两种形态** (outboundTag 与
+#      balancerTag) / 观测/均衡 一起清;
+#   H2 handler_warp 开启: 同一次动作就写入观测/均衡 + 把存量规则改写成 balancerTag
+#      (不依赖后续"更新配置");
 #   I  _xray_dns_mode / _xray_apply_dns: full -> minimal -> off 三档降级;
 #   J  _xray_apply_domain_strategy: 有 IP 规则才切 IPIfNonMatch, 否则清掉残留。
 #
@@ -103,7 +109,7 @@ extract() { # $1=函数名 $2=文件
     awk -v fn="$1" '$0 ~ "^function " fn "\\(\\) \\{" {f=1} f{print} f && /^}$/ {exit}' "$2"
 }
 for fn in _xray_bin_path _xray_config_probe _xray_probe_error_hint _xray_observatory_mode \
-          _warp_outbound_tag \
+          _warp_outbound_tag _warp_rules_use_balancer _warp_rules_use_outbound \
           _warp_outbound_json _xray_apply_warp _xray_apply_warp_balancer \
           _xray_dns_mode _xray_apply_dns _xray_apply_domain_strategy handler_warp; do
     body="$(extract "$fn" "$HANDLER")"
@@ -241,7 +247,7 @@ assert_eq "D4 mtu 写入" \
     "$(printf '%s' "$XRAY_CONFIG" | jq -r '.outbounds[] | select(.tag == "warp-out") | .settings.mtu')" "${WARP_MTU}"
 
 echo "== E  _xray_apply_warp_balancer (启用, full) =="
-XRAY_CONFIG='{"outbounds":[{"tag":"direct","protocol":"freedom"},{"tag":"warp-out","protocol":"wireguard"},{"tag":"block","protocol":"blackhole"}],"routing":{"rules":[{"ruleTag":"warp-ip","ip":["1.2.3.4"],"outboundTag":"warp"}]}}'
+XRAY_CONFIG='{"outbounds":[{"tag":"direct","protocol":"freedom"},{"tag":"warp-out","protocol":"wireguard"},{"tag":"block","protocol":"blackhole"}],"routing":{"rules":[{"ruleTag":"warp-ip","ip":["1.2.3.4"],"outboundTag":"warp"},{"ruleTag":"private-ip","outboundTag":"block"}]}}'
 _xray_apply_warp_balancer
 assert_eq "E1 observatory 探测对象" \
     "$(printf '%s' "$XRAY_CONFIG" | jq -c '.observatory.subjectSelector')" '["warp-out"]'
@@ -259,32 +265,90 @@ assert_eq "E6b fallbackTag 目标出站确实存在" \
     "$(printf '%s' "$XRAY_CONFIG" | jq -r '[.outbounds[] | select(.tag == "direct")] | length')" "1"
 assert_eq "E7 策略 leastPing (需要 observatory 供数)" \
     "$(printf '%s' "$XRAY_CONFIG" | jq -r '.routing.balancers[0].strategy.type')" "leastPing"
-assert_eq "E8 规则 tag **未**被改写 (仍是 warp, 靠 balancer 顶替同名 tag)" \
-    "$(printf '%s' "$XRAY_CONFIG" | jq -r '.routing.rules[0].outboundTag')" "warp"
+assert_eq "E8 规则改写成走 balancerTag" \
+    "$(printf '%s' "$XRAY_CONFIG" | jq -r '.routing.rules[0].balancerTag')" "${WARP_BALANCER_TAG}"
+assert_eq "E8b outboundTag 键已删除 (两键不并存, 免得优先级靠猜)" \
+    "$(printf '%s' "$XRAY_CONFIG" | jq -r '.routing.rules[0] | has("outboundTag")')" "false"
+assert_eq "E8c 非 WARP 规则一字不动" \
+    "$(printf '%s' "$XRAY_CONFIG" | jq -c '.routing.rules[1]')" '{"ruleTag":"private-ip","outboundTag":"block"}'
+# E8d 是整个修复的要害: 实测 (Xray 26.3.27) 规则里解析不到的 tag 不是"忽略该条规则",
+# 而是 fail-closed —— 命中它的流量全部阻断且无显眼日志。所以"每个 tag 都解析得到"必须
+# 是硬断言, 而不是靠人肉记着 balancer 叫什么。改坏这个字段时它会直接变红。
+assert_eq "E8d 规则引用的 tag 全部可解析 (fail-closed 防线)" \
+    "$(printf '%s' "$XRAY_CONFIG" | jq -r '
+        ([ (.outbounds // [])[].tag ] + [ (.routing.balancers // [])[].tag ]) as $known
+        | [ .routing.rules[] | (.outboundTag? // empty), (.balancerTag? // empty) ]
+        | map(select(. as $t | ($known | index($t)) == null))
+        | length')" "0"
+# E8e 反向: 若把规则改回 outboundTag="warp", 在 full 形态 (出站已改名 warp-out) 下
+# **必须**变成"不可解析" —— 否则说明 E8d 的量具是恒绿的假绿。
+assert_eq "E8e NEG: 改回 outboundTag=warp 会被 E8d 判为不可解析" \
+    "$(printf '%s' "$XRAY_CONFIG" | jq -r --arg bt "${WARP_BALANCER_TAG}" '
+        .routing.rules[0] |= (del(.balancerTag) + {outboundTag: "warp"})
+        | ([ (.outbounds // [])[].tag ] + [ (.routing.balancers // [])[].tag ]) as $known
+        | [ .routing.rules[] | (.outboundTag? // empty), (.balancerTag? // empty) ]
+        | map(select(. as $t | ($known | index($t)) == null))
+        | length')" "1"
 _xray_apply_warp_balancer
-assert_eq "E9 重复应用幂等" \
+assert_eq "E9 重复应用幂等 (balancer 段)" \
     "$(printf '%s' "$XRAY_CONFIG" | jq -r '.routing.balancers | length')" "1"
+assert_eq "E9b 重复应用幂等 (规则仍是 balancerTag 形态)" \
+    "$(printf '%s' "$XRAY_CONFIG" | jq -r '.routing.rules[0].balancerTag')" "${WARP_BALANCER_TAG}"
 
-echo "== F  _xray_apply_warp_balancer (降级形态不写 balancer) =="
+echo "== E2  改写/还原函数对 (幂等, 只动 warp 规则) =="
+XRAY_CONFIG='{"routing":{"rules":[{"ruleTag":"warp-ip","ip":["1.2.3.4"],"outboundTag":"warp"},{"ruleTag":"private-ip","outboundTag":"block"}]}}'
+_warp_rules_use_balancer
+assert_eq "E2a 改写: warp 规则换成 balancerTag" \
+    "$(printf '%s' "$XRAY_CONFIG" | jq -r '.routing.rules[] | select(.ruleTag == "warp-ip") | .balancerTag')" "${WARP_BALANCER_TAG}"
+_warp_rules_use_balancer
+assert_eq "E2b 改写再改写不叠加 (仍只剩 1 条 warp 规则)" \
+    "$(printf '%s' "$XRAY_CONFIG" | jq -r '[.routing.rules[] | select(.balancerTag != null)] | length')" "1"
+_warp_rules_use_outbound
+assert_eq "E2c 还原: 回到 outboundTag=warp" \
+    "$(printf '%s' "$XRAY_CONFIG" | jq -r '.routing.rules[] | select(.ruleTag == "warp-ip") | .outboundTag')" "warp"
+assert_eq "E2d 还原后不残留 balancerTag" \
+    "$(printf '%s' "$XRAY_CONFIG" | jq -r '[.routing.rules[] | select(.balancerTag != null)] | length')" "0"
+assert_eq "E2e 无关规则两次都没被动 (block)" \
+    "$(printf '%s' "$XRAY_CONFIG" | jq -c '.routing.rules[] | select(.ruleTag == "private-ip")')" '{"ruleTag":"private-ip","outboundTag":"block"}'
+# E2f 形状守卫: 没有 routing.rules 键时两个函数都不得凭空造键 / 报错
+XRAY_CONFIG='{"outbounds":[]}'
+_warp_rules_use_balancer
+_warp_rules_use_outbound
+assert_eq "E2f 无 rules 键时不凭空造键" \
+    "$(printf '%s' "$XRAY_CONFIG" | jq -r 'has("routing")')" "false"
+
+echo "== F  _xray_apply_warp_balancer (降级形态不写 balancer, 且把规则还原) =="
 reset_modes
 STUB_MODE=no_observatory
-XRAY_CONFIG='{"outbounds":[{"tag":"direct","protocol":"freedom"},{"tag":"warp","protocol":"wireguard"}],"routing":{"rules":[]}}'
+# 规则刻意先用 full 形态 (balancerTag): 换了 xray 二进制导致本机降级时, 上一轮留下的
+# balancerTag 会指向一个**本轮不会写**的 balancer -> 不还原就 fail-closed 断流。
+XRAY_CONFIG='{"outbounds":[{"tag":"direct","protocol":"freedom"},{"tag":"warp","protocol":"wireguard"}],"routing":{"rules":[{"ruleTag":"warp-ip","balancerTag":"warp-balancer"},{"ruleTag":"private-ip","outboundTag":"block"}]}}'
 _xray_apply_warp_balancer
 assert_eq "F1 降级时不写 observatory" \
     "$(printf '%s' "$XRAY_CONFIG" | jq -r '.observatory // "none"')" "none"
 assert_eq "F2 降级时不写 balancer" \
     "$(printf '%s' "$XRAY_CONFIG" | jq -r '.routing.balancers // "none"')" "none"
+assert_eq "F3 降级时规则还原为 outboundTag=warp (出站此刻就叫 warp)" \
+    "$(printf '%s' "$XRAY_CONFIG" | jq -r '.routing.rules[0].outboundTag')" "warp"
+assert_eq "F4 降级时不留 balancerTag" \
+    "$(printf '%s' "$XRAY_CONFIG" | jq -r '.routing.rules[0] | has("balancerTag")')" "false"
+assert_eq "F5 无关规则不动" \
+    "$(printf '%s' "$XRAY_CONFIG" | jq -c '.routing.rules[1]')" '{"ruleTag":"private-ip","outboundTag":"block"}'
 
-echo "== G  未启用 WARP: 清理残留 =="
+echo "== G  未启用 WARP: 清理残留 (但规则不归这里管) =="
 reset_modes
 STUB_MODE=accept
 export WARP_STATUS=0
-XRAY_CONFIG='{"outbounds":[{"tag":"direct","protocol":"freedom"}],"observatory":{"subjectSelector":["warp-out"]},"routing":{"balancers":[{"tag":"warp-balancer","selector":["warp-out"]}],"rules":[]}}'
+XRAY_CONFIG='{"outbounds":[{"tag":"direct","protocol":"freedom"}],"observatory":{"subjectSelector":["warp-out"]},"routing":{"balancers":[{"tag":"warp-balancer","selector":["warp-out"]}],"rules":[{"ruleTag":"warp-ip","outboundTag":"warp"}]}}'
 _xray_apply_warp_balancer
 assert_eq "G1 observatory 已摘" \
     "$(printf '%s' "$XRAY_CONFIG" | jq -r '.observatory // "none"')" "none"
 assert_eq "G2 balancers 键整体移除 (不留空数组)" \
     "$(printf '%s' "$XRAY_CONFIG" | jq -r '.routing.balancers // "none"')" "none"
+# G3 钉死职责边界: "删指向 WARP 的分流规则"是 handler_warp 关闭分支的活 (它还得同步
+# SCRIPT_CONFIG.rules 权威副本, 只清一处更糟)。这里若也删, 两处会各删一半。
+assert_eq "G3 未启用时不碰规则 (清理归 handler_warp)" \
+    "$(printf '%s' "$XRAY_CONFIG" | jq -r '.routing.rules[0].outboundTag')" "warp"
 
 echo "== H  handler_warp 关闭: 出站/规则/观测/均衡四样一起清 =="
 reset_modes
@@ -301,19 +365,25 @@ cat > "$XRAY_CONFIG_PATH" <<'JSON'
     "balancers": [{"tag": "warp-balancer", "selector": ["warp-out"], "fallbackTag": "direct"}],
     "rules": [
       {"ruleTag": "warp-ip", "ip": ["1.2.3.4"], "outboundTag": "warp"},
+      {"ruleTag": "warp-ip-live", "ip": ["5.6.7.8"], "balancerTag": "warp-balancer"},
       {"ruleTag": "private-ip", "outboundTag": "block"}
     ]
   }
 }
 JSON
+# 配置侧刻意摆成"两种形态并存" —— 开了健康探测后规则会被改写成 balancerTag 形态, 而
+# SCRIPT_CONFIG.rules 权威副本里恒是 outboundTag 形态。关闭时两种都必须清掉, 漏掉
+# balancerTag 那份就是"balancer 已摘、规则仍指着它" -> fail-closed 静默断流。
 SCRIPT_CONFIG='{"xray":{"warp":1},"rules":[{"ruleTag":"warp-ip","ip":["1.2.3.4"],"outboundTag":"warp"},{"ruleTag":"private-ip","outboundTag":"block"}]}'
 handler_warp
 assert_eq "H1 出站 (warp-out) 已摘" \
     "$(jq -r '[.outbounds[] | select(.tag == "warp-out")] | length' "$XRAY_WRITTEN")" "0"
 assert_eq "H2 出站 (warp) 也没有" \
     "$(jq -r '[.outbounds[] | select(.tag == "warp")] | length' "$XRAY_WRITTEN")" "0"
-assert_eq "H3 指向 warp 的规则已清" \
+assert_eq "H3 指向 warp 的规则已清 (outboundTag 形态)" \
     "$(jq -r '[.routing.rules[] | select(.outboundTag == "warp")] | length' "$XRAY_WRITTEN")" "0"
+assert_eq "H3b 指向 balancer 的规则也已清 (balancerTag 形态)" \
+    "$(jq -r '[.routing.rules[] | select(.balancerTag == "warp-balancer")] | length' "$XRAY_WRITTEN")" "0"
 assert_eq "H4 无关规则 (private-ip) 保留" \
     "$(jq -r '[.routing.rules[] | select(.ruleTag == "private-ip")] | length' "$XRAY_WRITTEN")" "1"
 assert_eq "H5 observatory 已摘" \
@@ -332,7 +402,7 @@ echo "== H2 handler_warp 开启: 同一次动作就把观测/均衡带上 =="
 reset_modes
 STUB_MODE=accept
 cat > "$XRAY_CONFIG_PATH" <<'JSON'
-{"outbounds":[{"tag":"direct","protocol":"freedom"},{"tag":"block","protocol":"blackhole"}],"routing":{"rules":[]}}
+{"outbounds":[{"tag":"direct","protocol":"freedom"},{"tag":"block","protocol":"blackhole"}],"routing":{"rules":[{"ruleTag":"warp-ip","ip":["1.2.3.4"],"outboundTag":"warp"}]}}
 JSON
 SCRIPT_CONFIG='{"xray":{"warp":0},"rules":[]}'
 handler_warp
@@ -342,6 +412,16 @@ assert_eq "H2b observatory 同一次动作写入" \
     "$(jq -r '.observatory.subjectSelector[0]' "$XRAY_WRITTEN")" "warp-out"
 assert_eq "H2c balancer 同一次动作写入" \
     "$(jq -r '.routing.balancers[0].tag' "$XRAY_WRITTEN")" "warp-balancer"
+# H2e/H2f 是这次修复的正面断言: 开 WARP 的**同一次动作**里, 存量规则也被改写成走
+# balancer —— 否则出站已改名 warp-out 而规则仍写 outboundTag=warp, 分流直接 fail-closed。
+assert_eq "H2e 存量规则改写成 balancerTag (开关动作里完成)" \
+    "$(jq -r '.routing.rules[] | select(.ruleTag == "warp-ip") | .balancerTag' "$XRAY_WRITTEN")" "warp-balancer"
+assert_eq "H2f 落盘配置里规则引用的 tag 全部可解析" \
+    "$(jq -r '
+        ([ (.outbounds // [])[].tag ] + [ (.routing.balancers // [])[].tag ]) as $known
+        | [ .routing.rules[] | (.outboundTag? // empty), (.balancerTag? // empty) ]
+        | map(select(. as $t | ($known | index($t)) == null))
+        | length' "$XRAY_WRITTEN")" "0"
 assert_eq "H2d 状态位翻 1" "$(jq -r '.xray.warp' "$SCRIPT_WRITTEN")" "1"
 
 echo "== I  _xray_dns_mode / _xray_apply_dns =="

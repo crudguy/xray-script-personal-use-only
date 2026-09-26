@@ -1664,7 +1664,14 @@ function handler_xray_config() {
     _xray_apply_warp_balancer      # WARP 健康探测 + 自动回落 (未启用则清理残留)
     _xray_apply_sockopt            # 出站 sockopt 网络调优 (字段集由本机实测决定)
     # 回写路由规则到脚本配置并持久化
-    XRAY_RULES="$(echo "${XRAY_CONFIG}" | jq '.routing.rules')"
+    # 注: 副本必须取**未改写**形态 —— 上面 _xray_apply_warp_balancer 可能把规则改成了
+    #     balancerTag (探测启用时), 那是"给 xray 看的临时形态"。权威副本里规则 tag 恒为
+    #     outboundTag="warp" (add_rule 就这么写, handler_warp 关闭分支也按这个形态删),
+    #     否则下次写回配置时形态会随"当次探测结果"漂移, 且开关 WARP 会漏删规则。
+    XRAY_RULES="$(echo "${XRAY_CONFIG}" | jq --arg bt "${WARP_BALANCER_TAG}" '.routing.rules
+        | if type == "array" then
+            map(if .balancerTag == $bt then del(.balancerTag) + {outboundTag: "warp"} else . end)
+          else . end')"
     SCRIPT_CONFIG="$(echo "${SCRIPT_CONFIG}" | jq --argjson rules "${XRAY_RULES}" '.rules = $rules')"
     persist_script_config
     persist_xray_config
@@ -1831,17 +1838,19 @@ readonly WARP_API_USER_AGENT='okhttp/3.12.1'
 readonly WARP_ENDPOINT_FALLBACK='engage.cloudflareclient.com:2408'
 # 官方客户端同款 MTU: WARP 隧道内层取 1280 以避免分片
 readonly WARP_MTU='1280'
-# 启用健康探测时的出站 tag。刻意与 balancer tag 分开命名 —— routing 规则里的
-# outboundTag 可以指向 balancer, 于是"规则仍写 warp、实际由 balancer 接管"成为可能:
-# 所有往规则里写 outboundTag=warp 的代码路径 (菜单加分流 / 保留既有规则) 都不必改动。
+# 启用健康探测时的出站 tag。探测开启后指向 WARP 的规则改由 balancer 中转 (见
+# _warp_rules_use_balancer): 走哪个 tag 出站是实现细节, 规则侧不感知。
 #
-# ⚠️ 待实测 (2026-09-25 标注): 上句描述的"接管链"需要 balancer 的 tag 恰好等于规则里
-#    写的那个名字, 而本文件的 balancer tag 是 warp-balancer (见 WARP_BALANCER_TAG),
-#    并不是 warp。即启用探测后, 规则里的 outboundTag="warp" 既不指向任何出站 (此时
-#    出站已改名 warp-out), 也不指向 balancer。xray 对此是"忽略该条规则"还是"拒绝加载
-#    整份配置", 尚未用真机 `xray run -test` 验证过 —— 上面那句"接管"的说法可能并不成立。
-#    若要动它: 先用真实 xray 跑 `_xray_config_probe` 确认行为, 再决定是改写规则 tag
-#    还是把 balancer tag 改回 warp。**不要照这段注释推理行事。**
+# ── 实测结论 (真机 Xray 26.3.27, 2026-09-26) ────────────────────────────────
+# 1) 规则里的 outboundTag **只**在 outbounds 里查 tag, 绝不会落到 balancer —— 把
+#    balancer 改名叫 warp、出站叫 warp-out, 规则 outboundTag="warp" 依然不通 (实测
+#    矩阵已验)。走 balancer 的唯一途径是规则字段 **balancerTag**。
+# 2) tag 解析不到时不是"忽略该条规则", 而是 fail-closed: 命中该规则的流量全部阻断,
+#    且不留显眼日志 —— 表现为"WARP 分流静默失效", 极难排查。
+# 故"规则照旧写 warp、由 balancer 顶替同名 tag"这条设想**不成立**: 开探测后出站已改名
+# warp-out, 规则里的 warp 无处可解析 -> 整条 WARP 分流静默断掉。修法是把改写的责任
+# 收在 _warp_rules_use_balancer / _warp_rules_use_outbound 这对函数里 (幂等, 可来回切),
+# 而不是去动本常量、也不是让规则裸写 balancerTag。
 readonly WARP_OUTBOUND_TAG='warp-out'
 # ---- WARP 健康探测与自动回落 ----
 # WARP 出站指向 Cloudflare 任播 IP, 隧道抖动或出口被目标站点风控时会出现"TCP 连得上但
@@ -2314,8 +2323,9 @@ function _xray_observatory_mode() {
 
 # =============================================================================
 # 子函数名称: _warp_outbound_tag
-# 功能描述: 决定 wireguard 出站用哪个 tag。开探测时用 WARP_OUTBOUND_TAG (warp-out), 让
-#           同名 tag 的 balancer 顶替指向它的规则; 降级时用 warp, 规则直接落到出站。
+# 功能描述: 决定 wireguard 出站用哪个 tag。开探测时用 WARP_OUTBOUND_TAG (warp-out),
+#           并配套把规则改写成走 balancer (见 _warp_rules_use_balancer); 降级时用
+#           warp, 规则直接落到出站。
 # 参数: 无
 # 返回值: 恒 0 (结果读 _WARP_OB_TAG)
 # =============================================================================
@@ -2332,14 +2342,60 @@ function _warp_outbound_tag() {
 }
 
 # =============================================================================
+# 子函数名称: _warp_rules_use_balancer
+# 功能描述: 把指向 WARP 出站的规则改写成走 balancer: outboundTag 换成 balancerTag。
+#           实测 (Xray 26.3.27) 规则里的 outboundTag 只在 outbounds 里查 tag, 解析
+#           不到就 fail-closed 阻断整条分流 —— 开探测后出站已改名 warp-out, 所以
+#           必须显式改字段, 否则"分流静默失效且无日志"。详见 WARP_OUTBOUND_TAG 处注释。
+#           只动 outboundTag=="warp" 的规则; 两个键**不同时保留** —— 同存时的优先级
+#           未经实测, 留单键才能保证行为确定。
+# 参数: 无 (改写全局 XRAY_CONFIG)
+# 返回值: 恒 0
+# =============================================================================
+function _warp_rules_use_balancer() {
+    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg bt "${WARP_BALANCER_TAG}" '
+        if (.routing.rules | type) == "array" then
+            .routing.rules |= map(
+                if .outboundTag == "warp"
+                then del(.outboundTag) + {balancerTag: $bt}
+                else . end)
+        else . end')"
+}
+
+# =============================================================================
+# 子函数名称: _warp_rules_use_outbound
+# 功能描述: _warp_rules_use_balancer 的逆操作 —— 把 balancerTag 还原回
+#           outboundTag="warp"。降级形态 (出站 tag=warp) 与未启用 WARP 时**必须**
+#           还原: 否则上一轮 full 形态留下的 balancerTag 会指向一个已不存在的
+#           balancer, fail-closed 断流。
+# 参数: 无 (改写全局 XRAY_CONFIG)
+# 返回值: 恒 0
+# =============================================================================
+function _warp_rules_use_outbound() {
+    XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg bt "${WARP_BALANCER_TAG}" '
+        if (.routing.rules | type) == "array" then
+            .routing.rules |= map(
+                if .balancerTag == $bt
+                then del(.balancerTag) + {outboundTag: "warp"}
+                else . end)
+        else . end')"
+}
+
+# =============================================================================
 # 子函数名称: _xray_apply_warp_balancer
 # 功能描述: 给 WARP 出站加健康探测与自动回落。
 #           启用: 写 observatory (周期探测 warp-out) + routing.balancers
 #                 (tag=warp-balancer, selector=[warp-out], fallbackTag=direct,
-#                  strategy=leastPing)。路由规则里的 outboundTag 仍是 "warp" ——
-#                 由 balancer 顶替同名 tag, 于是"菜单加分流/保留既有规则"等所有写规则
-#                 的路径都不用改, 也不会出现两份副本不一致。
-#           未启用: 幂等清掉可能残留的观测/均衡段。
+#                  strategy=leastPing), 并把规则改成走 balancerTag —— 实测
+#                 outboundTag 不会落 balancer, 不改字段则分流 fail-closed。
+#           **规则字段的改写/还原都由本函数单点负责**: handler_xray_config 的注入链
+#           与 handler_warp / handler_reset_warp 三条路径都经过这里, 所以不必改
+#           add_rule, 存量规则也会在下次生成配置时自动迁移。
+#           降级 (xray 不支持 observatory): 不写观测/均衡段, 但**把规则还原成
+#                 outboundTag** —— 否则上一轮 full 形态留下的 balancerTag 会指向一个
+#                 本轮不会写的 balancer, fail-closed 断流。
+#           未启用: 只幂等清掉观测/均衡段, **不碰规则** —— "清掉指向 WARP 的分流规则"
+#                 归 handler_warp 关闭分支 (它还要同步 SCRIPT_CONFIG.rules 权威副本)。
 # 参数: 无 (读父函数 local 的 WARP_STATUS, 改写全局 XRAY_CONFIG)
 # 返回值: 0-成功 (含降级与未启用的零操作)
 # =============================================================================
@@ -2353,12 +2409,19 @@ function _xray_apply_warp_balancer() {
             | if (.routing.balancers | type) == "array" and (.routing.balancers | length) == 0 then
                 del(.routing.balancers)
               else . end')"
+        # 注: 此处**不**碰规则 —— "清掉指向 WARP 的分流规则"是 handler_warp 关闭分支的
+        # 职责 (它还要同步 SCRIPT_CONFIG.rules 权威副本, 只清一处反而更糟)。本函数只管
+        # 观测/均衡段。
         return 0
     fi
     _warp_outbound_tag
-    # 降级形态 (出站 tag=warp): 不能写 balancer —— 它的 selector 会解析不到 warp-out,
-    # 反而让配置加载失败。
-    [[ "${_WARP_OB_TAG}" == "${WARP_OUTBOUND_TAG}" ]] || return 0
+    if [[ "${_WARP_OB_TAG}" != "${WARP_OUTBOUND_TAG}" ]]; then
+        # 降级形态 (出站 tag=warp): 不能写 balancer —— 它的 selector 会解析不到 warp-out,
+        # 反而让配置加载失败。但必须把上一轮 full 形态留下的 balancerTag 还原回去。
+        _warp_rules_use_outbound
+        return 0
+    fi
+    _warp_rules_use_balancer
     local obs='' bal=''
     obs="$(jq -nc --arg url "${WARP_PROBE_URL}" --arg iv "${WARP_PROBE_INTERVAL}" \
         --arg sel "${WARP_OUTBOUND_TAG}" '
@@ -4416,11 +4479,15 @@ function handler_warp() {
         # 规则必须两处副本都清 —— Xray 配置里那份, 以及 SCRIPT_CONFIG.rules (权威副本,
         # _xray_apply_rules 的 case 0 会整份写回配置)。只删一处的话, 下次"更新配置"会把
         # 规则写回来而出站已删 -> xray 拒绝加载整份配置。
-        # 注: 权威副本里规则 tag 恒为 "warp"(从不改写), $bt 分支纯属对历史残留的防御。
+        # 注: 配置里这份规则可能处于**两种形态** —— 开了健康探测时被 _xray_apply_warp_balancer
+        # 改成了 balancerTag (见 _warp_rules_use_balancer), 否则是 outboundTag="warp"。
+        # 两种都要删: 漏掉 balancerTag 那份, 关闭后 balancer 已摘而规则仍指着它 ->
+        # fail-closed 静默断流。$bt 分支的注释在下行同步改写。
+        # 权威副本 (SCRIPT_CONFIG.rules) 里则恒为 outboundTag="warp", 由下方单独清理。
         XRAY_CONFIG="$(echo "${XRAY_CONFIG}" | jq --arg bt "${WARP_BALANCER_TAG}" \
             --arg ot "${WARP_OUTBOUND_TAG}" '
             del(.outbounds[] | select(.tag == "warp" or .tag == $ot))
-            | del(.routing.rules[]? | select(.outboundTag == "warp" or .outboundTag == $bt))
+            | del(.routing.rules[]? | select(.outboundTag == "warp" or .balancerTag == $bt))
             | del(.observatory) | del(.burstObservatory)
             | if (.routing.balancers | type) == "array" then
                 .routing.balancers |= map(select(.tag != $bt))

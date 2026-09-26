@@ -148,7 +148,8 @@ extract() { # $1=函数名 $2=文件
 for fn in _xray_bin_path _warp_key_probe _warp_gen_keypair _warp_reserved_from_client_id \
           _warp_register _warp_ensure_credentials _warp_forget_credentials _warp_outbound_json \
           _xray_apply_warp handler_warp \
-          _xray_config_probe _xray_observatory_mode _warp_outbound_tag _xray_apply_warp_balancer; do
+          _xray_config_probe _xray_observatory_mode _warp_outbound_tag \
+          _warp_rules_use_balancer _warp_rules_use_outbound _xray_apply_warp_balancer; do
     body="$(extract "$fn" "$HANDLER")"
     if [[ -z "$body" ]]; then
         echo "  [FAIL] 抽取产品函数失败: $fn"
@@ -320,7 +321,8 @@ cat > "$XRAY_CONFIG_PATH" <<'JSON'
   ],
   "routing": {"rules": [
     {"ruleTag": "private-ip", "ip": ["geoip:private"], "outboundTag": "block"},
-    {"ruleTag": "warp-ip", "ip": ["1.2.3.4"], "outboundTag": "warp"}
+    {"ruleTag": "warp-ip", "ip": ["1.2.3.4"], "outboundTag": "warp"},
+    {"ruleTag": "warp-ip-live", "ip": ["5.6.7.8"], "balancerTag": "warp-balancer"}
   ]}
 }
 JSON
@@ -329,6 +331,10 @@ SCRIPT_CONFIG='{"xray":{"warp":1},"rules":[{"ruleTag":"private-ip","outboundTag"
 handler_warp
 assert_eq "T12a 出站已摘" "$(jq -r '[.outbounds[] | select(.tag == "warp")] | length' "$XRAY_WRITTEN")" "0"
 assert_eq "T12b 配置里规则已摘" "$(jq -r '[.routing.rules[] | select(.outboundTag == "warp")] | length' "$XRAY_WRITTEN")" "0"
+# T12b2: 规则可能处于 balancerTag 形态 (开过健康探测被 _xray_apply_warp_balancer 改写),
+# 漏删这份就是"balancer 已摘、规则仍指着它" -> fail-closed 静默断流。
+assert_eq "T12b2 配置里 balancerTag 形态的规则也已摘" \
+    "$(jq -r '[.routing.rules[] | select(.balancerTag == "warp-balancer")] | length' "$XRAY_WRITTEN")" "0"
 assert_eq "T12c 其它规则保留" "$(jq -r '[.routing.rules[] | select(.outboundTag == "block")] | length' "$XRAY_WRITTEN")" "1"
 assert_eq "T12d rules 副本里的 warp 规则也清了" "$(jq -r '[.rules[] | select(.outboundTag == "warp")] | length' "$SCRIPT_WRITTEN")" "0"
 assert_eq "T12e 状态位置 0" "$(jq -r '.xray.warp' "$SCRIPT_WRITTEN")" "0"

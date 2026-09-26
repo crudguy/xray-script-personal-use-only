@@ -79,9 +79,10 @@ EOF
 )"
 
 # TOLERATED: 允许缺失 —— 每条都必须写明**原因**, 原因留空视为 FAIL。
+# 当前为空: 原先唯一登记的 config/nginx/conf/web 已伴随源码里那条失效的
+# sync_missing_nginx_support_dir 调用一起删除 (2026-09-26), 不再需要容忍项。
 TOLERATED="$(
     cat <<'EOF'
-config/nginx/conf/web	源码里被 sync_missing_nginx_support_dir 引用, 但该函数对不存在的源目录是 `return 0` 静默跳过 (见 ensure_nginx_support_files 头注释: 仓库从来没有这个目录, 那一项从未生效); 缺失无副作用
 EOF
 )"
 

@@ -872,9 +872,11 @@ function sync_missing_nginx_support_dir() {
 # 函数名称: ensure_nginx_support_files
 # 功能描述: 确保 Nginx 运行所需的标准目录结构存在, 并从仓库模板补齐缺失的
 #           conf.d / nginxconfig.io 支持文件。
-#           注: 早期版本这里列过 "web", 但仓库里从来没有 config/nginx/conf/web ——
-#           sync_missing_nginx_support_dir 对不存在的源目录是 `return 0` 静默跳过,
-#           所以那一项从未生效, 已从描述中去掉 (别再照着说明去找它)。
+#           注: 早期版本这里还有一条 "web" 的同步, 但仓库里从来没有
+#           config/nginx/conf/web —— sync_missing_nginx_support_dir 对不存在的源目录
+#           是 `return 0` 静默跳过, 那条调用从未生效, 现已连同源引用一并删除
+#           (2026-09-26)。目标目录 ${NGINX_CONFIG_DIR}/web 仍由 mkdir 建出 (并纳入
+#           备份), 只是不再从仓库同步任何内容。
 # 参数: 无
 # 返回值: 0-成功 1-建目录或同步文件失败
 # =============================================================================
@@ -888,7 +890,6 @@ function ensure_nginx_support_files() {
         "${NGINX_CONFIG_DIR}/nginxconfig.io" || return 1
 
     sync_missing_nginx_support_dir "${CONFIG_DIR}/nginx/conf/conf.d" "${NGINX_CONFIG_DIR}/conf.d" || return 1
-    sync_missing_nginx_support_dir "${CONFIG_DIR}/nginx/conf/web" "${NGINX_CONFIG_DIR}/web" || return 1
     sync_missing_nginx_support_dir "${CONFIG_DIR}/nginx/conf/nginxconfig.io" "${NGINX_CONFIG_DIR}/nginxconfig.io" || return 1
 }
 

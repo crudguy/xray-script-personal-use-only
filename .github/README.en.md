@@ -14,6 +14,7 @@
 * SNI configuration uses Nginx to implement SNI traffic splitting, suitable for CDN routing, upstream/downstream separation, and multi-site coexistence
 * SNI share links support upstream/downstream separation (upstream xhttp+TLS+CDN | downstream xhttp+Reality, upstream xhttp+Reality | downstream xhttp+TLS+CDN)
 * SNI configuration supports managing custom domains and reverse proxy apps, with independent certificates, site configs, stream mappings, and UDS per site
+* :warning: **Known limitation**: both "manage the default / CDN domain" and "custom domains and reverse proxy apps" rely on three site templates (`domain` / `cdn` / `custom-site`, i.e. three `*.example.com.conf`) under `config/nginx/conf/sites-available/`. They are **not shipped with the repo yet** and must be placed manually before these features work; while missing, "change domain" fails loudly *before* touching anything and **leaves every existing config untouched**. See the "Known issues" note in CHANGELOG.
 * Rule configuration and custom input:
   * Block BitTorrent traffic (optional)
   * Block China-bound IP traffic (optional)

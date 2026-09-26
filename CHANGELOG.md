@@ -34,14 +34,6 @@ suffix for additional releases on the same day).
 不丢内容"的暂停机制**；另附一轮"handler 分派臂零覆盖清零 + 仓库静态守卫"的测试体系建设，
 以及公网探测与分享生成的两处性能优化。
 
-> **已知问题（本版未收口）**：新增的仓库资产守卫（`test/repo_assets_test.sh`）暴露一处既存
-> 缺陷 —— `config/nginx/conf/sites-available/` 下三个站点模板（`domain` / `cdn` /
-> `custom-site`）**从未入库**，而 `render_custom_site_config` 与 `_change_domain_render`
-> 都是直接 `cp` 它们使用，故「自定义站点」与「变更域名」两个功能当前必然失败（后者还是
-> 破坏性路径）。改动只做到"失败方向从破坏变为不动"：变更域名已加**模板存在性前置守卫**，
-> 缺失即报错且一个字节都不删。模板补齐前，守卫会以 `PEND` 持续高亮（置
-> `XRAY_ASSET_GUARD_STRICT=1` 可让 CI 直接判红）。
-
 ### 新增 Added
 
 - **WARP 出站改用原生 WireGuard**：原实现靠 Docker 拉 `cloudflare-warp` 容器、Xray 侧用
@@ -113,6 +105,19 @@ suffix for additional releases on the same day).
 
 ### 修复 Fixed
 
+- **三个 Nginx 站点模板从未入库，导致「自定义站点」与「变更域名」必然失败（本版收口）**：
+  `config/nginx/conf/sites-available/` 下的 `domain` / `cdn` / `custom-site` 三份
+  `*.example.com.conf` 是 `render_custom_site_config`（`handler.sh:1001`）与
+  `_change_domain_render`（`handler.sh:4873`）直接 `cp` 的模板，但**从未随仓库提交**
+  （`git log --all` 对该路径零命中、`.gitignore` 也未忽略 → 属遗漏而非刻意排除），
+  于是两个已在 README 宣称的功能必然失败，且「变更域名」还是破坏性路径
+  （原顺序为"先删旧站点配置、后 cp 模板"）。本版两步收口：①补三份占位符模板
+  （占位域名 / 占位路径由脚本整串替换，故同一模板服务任意域名）；②`_change_domain_render`
+  加**模板存在性前置守卫**，缺失即报错且一个字节都不删（失败方向从"破坏"变为"不动"）。
+  三份模板的形态约束（三者都有 `listen ... quic` / `Alt-Svc ... always` / `server_name` /
+  `ssl_certificate`，`quic reuseport` 全库只许一处，占位符必须保留）由
+  `test/http3_test.sh` 的 T1r/T2r/T3r/T13r 对**真模板**固化；`test/repo_assets_test.sh`
+  的 PEND 随之清零，资产再被删即直接判红（不再容忍）。
 - **`add_rule` 重建路由规则崩溃（数组 + 对象）**：带位置插入与追加分支把单个对象直接
   `+=` 到数组上，jq 报 `array and object cannot be added`，路由规则菜单在 `set -e` 下中断。
   两处漏改一并修掉，并补空值守卫 —— 输入为空或夹带多余逗号时会生成 `ip:[""]` 非法规则，

@@ -45,10 +45,11 @@ Xray 版本可选最新版、稳定版或自选版。
 - 自定义域名与反代应用：列表 / 新增 / 编辑 / 删除，每个站点拥有独立证书、独立站点配置、独立 stream 映射与 UDS
 - Nginx 手动更新与自动更新开关
 
-> ⚠️ **已知限制**：「管理默认域名 / CDN 域名」与「自定义域名与反代应用」都依赖
-> `config/nginx/conf/sites-available/` 下的三个站点模板（`domain` / `cdn` / `custom-site`
-> 三份 `*.example.com.conf`）。它们**尚未随仓库提供**，需自行放置后才能使用；缺失时
-> 「变更域名」会在动手前明确报错，**不会改动任何现有配置**。详见 CHANGELOG 的「已知问题」。
+> 三个站点模板（`domain` / `cdn` / `custom-site` 三份 `*.example.com.conf`）随仓库提供，
+> 位于 `config/nginx/conf/sites-available/`。它们是**占位符模板**：脚本复制一份后把
+> 占位域名 / 占位路径整串替换成你的真实值，所以同一个模板能服务任意域名，不需要手改。
+> 想自定义伪装站点内容，改这三份模板即可；约束（`quic reuseport` 只许一处、必须保留
+> 占位符等）见 `test/http3_test.sh` 的 T1r/T2r/T3r/T13r。
 
 ### 证书管理
 

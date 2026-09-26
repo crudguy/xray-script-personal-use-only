@@ -10,6 +10,7 @@
 #   时旧配置已经删掉了, 用户拿到"站点消失"的现场。2026-09-26 的生产就绪度审计正是
 #   靠人工翻找才发现 config/nginx/conf/sites-available/ 下三个站点模板**从未入库** ——
 #   而 test/http3_test.sh 当时自己造了同名的夹具, 于是静态守卫一直是绿的。
+#   (2026-09-26 当晚三个模板已按契约补齐入库并转入 MANIFEST, PENDING 清零。)
 #   这个用例把"引用 -> 资产"的关系变成可自动校验的断言, 不再依赖人工翻找。
 #
 # 锁定:
@@ -56,6 +57,10 @@ config/nginx/conf/nginxconfig.io	ensure_nginx_support_files (handler.sh:892)
 config/nginx/conf/nginx.conf	nginx.conf 主配置模板
 config/nginx/conf/nginxconfig.txt	nginx 配置片段说明
 config/nginx/conf/modules-enabled/stream.conf	stream 模块装载模板
+config/nginx/conf/sites-available	站点模板目录 (ensure_nginx_support_files handler.sh:885)
+config/nginx/conf/sites-available/domain.example.com.conf	主域名站点模板 (_change_domain_render handler.sh:4873)
+config/nginx/conf/sites-available/cdn.example.com.conf	CDN 域名站点模板 (_change_domain_render handler.sh:4873)
+config/nginx/conf/sites-available/custom-site.example.com.conf	自定义站点模板 (render_custom_site_config handler.sh:1001)
 config/nginx/nginx.service	systemd 单元模板
 core	${PROJECT_ROOT}/core (install.sh)
 i18n	${I18N_DIR}/${lang}.json (_common.sh:349)
@@ -87,9 +92,9 @@ EOF
 )"
 
 # PENDING: 已知缺失且**必须补**的资产 (P0)。留空原因同样判 FAIL。
-# 2026-09-26 生产就绪度审计发现: 三个站点模板从未入库, 于是"自定义站点"与"变更域名"
-# 两个已在 README 宣称的功能必然失败 (后者还是破坏性路径)。
-# 契约 (由 test/http3_test.sh T1/T2/T3 固化 + 两处渲染函数的占位符替换固化):
+# 当前为空: 2026-09-26 生产就绪度审计发现的三个站点模板已全部入库并转入 MANIFEST,
+# 于是这里不再有"已知缺失但容忍"的条目 —— 资产再被删就直接判 FAIL (不再是 PEND)。
+# 模板的形态约束由 test/http3_test.sh 的 T1r/T2r/T3r/T13r 段守住 (对真模板跑断言):
 #   - 三者都有 `listen 443 quic` / `listen [::]:443 quic` / `Alt-Svc ... always` /
 #     `server_name` / `ssl_certificate`;
 #   - `quic reuseport` 只允许出现在主域名模板 (nginx 限制: 同一 listen 只许一次);
@@ -97,10 +102,6 @@ EOF
 #   - custom-site 用 `example.com` / `unix:/dev/shm/nginx/custom_site.sock` / `PROXY_TARGET`。
 PENDING="$(
     cat <<'EOF'
-config/nginx/conf/sites-available	P0: 目录本身不存在, 上面三个模板无处安放
-config/nginx/conf/sites-available/domain.example.com.conf	P0: _change_domain_render (handler.sh:4860) 直接 cp 它; 缺失时"变更域名"必然失败
-config/nginx/conf/sites-available/cdn.example.com.conf	P0: 同上 (target_domain=cdn, 套 CDN 场景)
-config/nginx/conf/sites-available/custom-site.example.com.conf	P0: render_custom_site_config (handler.sh:1000) 直接 cp 它; 缺失时"自定义站点"必然失败
 EOF
 )"
 

@@ -41,6 +41,8 @@
 #     T17 =n 或缺失 -> 完全不动
 #   [F] 编排顺序
 #     T18 正常路径最终必调 handler_nginx_restart, 且 persist 在此之前
+#   [G] 模板缺失守卫
+#     T19 模板缺失 -> 报错拦截且**不删任何现有配置** (失败方向必须是"不动"); 模板齐备时不得误报
 #
 # 实现备注:
 #   被测函数会把结果写回全局 SCRIPT_CONFIG —— 正常路径**直接调用**(不用子 shell, 否则
@@ -88,11 +90,14 @@ ob_fn="$(extract_fn core/handler.sh _change_domain_only_branch)"
 # 真的-common.sh 工具函数: 让 cp/mv/ln 之后的删除与替换走真实实现
 repl_fn="$(extract_fn core/_common.sh _replace_in_file)"
 rmsc_fn="$(extract_fn core/_common.sh _remove_site_conf)"
+# 渲染路径的"模板缺失"守卫用 _i18n_sub 组装文案 —— 抽真实实现 (它内部只依赖 _i18n,
+# 而 _i18n 在驱动里被桩成"回显键名", 所以不会引入额外依赖)。
+sub_fn="$(extract_fn core/_common.sh _i18n_sub)"
 
 # 判据只需证明"抽到了带函数头的实现体" —— 别用含 \| 的多选 pattern: [[ ]] 里它是字面
 # 字符, 不会当 alternation, 恒不匹配; 也别锚 'local' —— 有的子函数刻意不声明自己的
 # local (读父函数的)。抽不到时变量为空串, 下面的包含判定自然为假。
-for pair in "handler_change_domain:$cd_fn" "_change_domain_read_inputs:$ri_fn" "_change_domain_render:$rd_fn" "_change_domain_issue:$is_fn" "_change_domain_only_branch:$ob_fn" "_replace_in_file:$repl_fn" "_remove_site_conf:$rmsc_fn"; do
+for pair in "handler_change_domain:$cd_fn" "_change_domain_read_inputs:$ri_fn" "_change_domain_render:$rd_fn" "_change_domain_issue:$is_fn" "_change_domain_only_branch:$ob_fn" "_replace_in_file:$repl_fn" "_remove_site_conf:$rmsc_fn" "_i18n_sub:$sub_fn"; do
     assert_contains "T0 ${pair%%:*} 抽取成功" "${pair#*:}" 'function '
 done
 
@@ -102,15 +107,21 @@ SC_BASE='{"version":"v-test","target":{"domain":"old.example.com","cdn":"old.cdn
 
 # ---------------------------------------------------------------------------
 # 建沙箱: 临时 nginx 目录树 + 站点模板
-# 注: 仓库里 config/nginx/conf/sites-available/*.example.com.conf **并不存在**
-#     (未被 .gitignore 命中也不是运行时产物) —— 本测试自建一份最小模板, 测的是
+# 注: 仓库里 config/nginx/conf/sites-available/*.example.com.conf 历史上长期缺失
+#     (2026-09-26 审计确认: 从未提交、.gitignore 也没忽略), 本测试自建最小模板来测
 #     change_domain 的逻辑而非缺失资产本身。
+#     **夹具必须覆盖这条臂会取用的全部 target_domain (domain / cdn)**: 自 2026-09-26
+#     起 _change_domain_render 入口先校验模板存在, 缺失即 _error 并**不动任何现有配置**;
+#     只造 domain 一份的话, CD_KEY=cdn 的用例会静默走不到 SCRIPT_CONFIG 更新那一步
+#     (以前 cp 失败被"调度在 &&/|| 列表里的子 shell 抑制 errexit"吞掉, 才看不出问题)。
 # ---------------------------------------------------------------------------
 mk_sandbox() {
     rm -rf "$SB"
     mkdir -p "$SB/nginx/modules-enabled" "$SB/nginx/sites-available" "$SB/nginx/sites-enabled" "$SB/script"
     mkdir -p "$SB/repo/nginx/conf/sites-available"
-    cat >"$SB/repo/nginx/conf/sites-available/domain.example.com.conf" <<'TPL'
+    local _k
+    for _k in domain cdn; do
+        cat >"$SB/repo/nginx/conf/sites-available/${_k}.example.com.conf" <<'TPL'
 server {
     server_name example.com;
     location /yourpath {
@@ -118,6 +129,7 @@ server {
     }
 }
 TPL
+    done
     # 旧现场的初始状态: stream.conf + 旧站点 conf + enabled 软链
     printf 'stream-old\n' >"$SB/nginx/modules-enabled/stream.conf"
     printf 'server { server_name old.example.com; }\n' >"$SB/nginx/sites-available/old.example.com.conf"
@@ -217,6 +229,7 @@ run_cd() {
 
     eval "$rmsc_fn"
     eval "$repl_fn"
+    eval "$sub_fn"
     eval "$cd_fn"
     eval "$ri_fn"
     eval "$rd_fn"
@@ -431,6 +444,35 @@ else
 fi
 assert_contains "T18c read 在 issue 之前" "$seq" 'ENSURE'
 assert_eq "T18d 失败路径才重启两次以上; 正常路径只重启一次" "$(count_lines '^NGINX_RESTART$' "$SB/../cd.log")" '1'
+
+# ---------------------------------------------------------------------------
+# T19: 模板缺失守卫 —— 必须在删除任何现有配置**之前**拦住
+# ---------------------------------------------------------------------------
+# 背景: _change_domain_render 的原顺序是「备份旧 conf -> _remove_site_conf 真删旧
+# available/enabled -> cp 模板」。模板缺失时旧站点配置已被删掉, 紧随的 cp 失败再由 ERR
+# trap 终止脚本, _issue 里的回滚分支根本轮不到执行 —— 用户拿到"站点消失、配置全无"的现场。
+# 2026-09-26 在函数入口加了模板存在性校验, 本组锁的就是"失败方向 = 不动任何东西"。
+echo "== T19 模板缺失 -> 拦住且不动现有配置 =="
+mk_sandbox
+old_avail_before="$(cat "$SB/nginx/sites-available/old.example.com.conf" 2>/dev/null || printf '')"
+rm -f "$SB/repo/nginx/conf/sites-available/domain.example.com.conf"
+( CD_READ='new.example.com' SSL_ISSUE_RC=0 run_cd ) >/dev/null 2>&1 || true
+assert_contains "T19a 报错点名 site_template_missing" "$(cat "$SB/../cd.log")" 'site_template_missing'
+assert_eq "T19b 旧站点 available 未被删除" \
+    "$(cat "$SB/nginx/sites-available/old.example.com.conf" 2>/dev/null || printf '')" "${old_avail_before}"
+[[ -L "$SB/nginx/sites-enabled/old.example.com.conf" ]] && ok || bad "T19c 旧站点 enabled 软链未被删除"
+if [[ ! -e "$SB/nginx/sites-available/new.example.com.conf" ]]; then
+    ok
+else
+    bad "T19d 守卫拦下后不应产出新站点 conf"
+fi
+# 文案里必须带缺失路径的占位符: 否则用户只看到"模板缺失"却不知道缺哪一个。
+# (驱动里 _i18n 被桩成回显键名, 运行时看不到替换结果, 故这里做静态契约断言)
+assert_contains "T19e 守卫文案携带 \${path} 占位符" "$rd_fn" '${path}'
+# 反向: 模板齐备时不得误报 —— 否则守卫退化成"永远拦", 整条臂直接不可用
+mk_sandbox
+( CD_READ='new.example.com' SSL_ISSUE_RC=0 run_cd ) >/dev/null 2>&1 || true
+assert_not_contains "T19f 模板齐备时不得出现该错误" "$(cat "$SB/../cd.log")" 'site_template_missing'
 
 # ---------------------------------------------------------------------------
 # 负向校验

@@ -993,6 +993,10 @@ function render_custom_site_config() {
     local proxy_target="${scheme}://${host}:${port}"
 
     ensure_nginx_support_files || return 1
+    # 注: 模板缺失时这里刻意**不**自己 _error, 只 return 1 —— 调用方
+    #     (_custom_site_prepare 等) 的失败分支带着完整的回滚 (停续签 / 清半成品 /
+    #     恢复 stream 备份), 在本函数里抢先用 _error 退出会绕过那套回滚。
+    #     这条路径已有用例守着 (handler_custom_sites_arm_test T14/T19)。
     cp -f "${CONFIG_DIR}/nginx/conf/sites-available/custom-site.example.com.conf" "${output_path}" || return 1
     _replace_in_file "${output_path}" "example.com" "${domain}"
     _replace_in_file "${output_path}" "unix:/dev/shm/nginx/custom_site.sock" "unix:/dev/shm/nginx/${socket_name}.sock"
@@ -4779,16 +4783,26 @@ function _change_domain_read_inputs() {
 # 函数名称: _change_domain_render
 # 功能描述: 备份旧域名的 stream.conf 与站点 conf, 删除旧 available/enabled, 复制模板 ->
 #           替换 example.com 与 /yourpath -> 对齐 HTTP/3 能力 -> 建立 available/enabled 软链。
+#           **入口先校验模板存在**: 缺失即 _error 且不动任何现有配置 (见函数内注释:
+#           原顺序是"先删旧配置、后 cp 模板", 模板缺失会留下站点消失的现场)。
 # 参数: 无 (使用父函数 local: target_domain / old_domain / XHTTP_PATH / CONFIG_DATA)
-# 返回值: 无
+# 返回值: 0-成功 1-复制模板失败 (模板缺失由入口守卫以 _error 终止)
 # =============================================================================
 function _change_domain_render() {
+    # 守卫: 模板必须先存在, 且必须在**动任何现有配置之前**判定。
+    # 本函数的原顺序是「备份旧 conf -> _remove_site_conf 真删旧 available/enabled -> cp 模板」,
+    # 于是模板缺失时旧站点配置已经被删掉, 紧接着 cp 失败由 ERR trap 终止脚本,
+    # _issue 里的回滚分支根本轮不到执行 —— 用户拿到的是"站点消失、配置全无"的现场。
+    # 把判断前移到这里, 缺失即 _error 退出, 一个字节都不删 (失败方向从"破坏"变成"不动")。
+    local site_tpl="${CONFIG_DIR}/nginx/conf/sites-available/${target_domain}.example.com.conf"
+    [[ -f "${site_tpl}" ]] || _error "$(_i18n_sub ".${CUR_FILE}.nginx.site_template_missing" '${path}' "${site_tpl}")"
+
     [[ -e "${NGINX_CONFIG_DIR}/modules-enabled/stream.conf" ]] && cp -f "${NGINX_CONFIG_DIR}/modules-enabled/stream.conf" "${SCRIPT_CONFIG_DIR}/stream.conf"
     if [[ -n "${old_domain}" && -e "${NGINX_CONFIG_DIR}/sites-available/${old_domain}.conf" ]]; then
         cp -f "${NGINX_CONFIG_DIR}/sites-available/${old_domain}.conf" "${SCRIPT_CONFIG_DIR}/${old_domain}.conf"
         _remove_site_conf "${old_domain}"
     fi
-    cp -f "${CONFIG_DIR}/nginx/conf/sites-available/${target_domain}.example.com.conf" "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf"
+    cp -f "${site_tpl}" "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf" || return 1
     _replace_in_file "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf" "example.com" "${CONFIG_DATA["${target_domain}"]:-}"
     _replace_in_file "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf" "/yourpath" "${XHTTP_PATH}"
     align_site_http3 "${NGINX_CONFIG_DIR}/sites-available/${CONFIG_DATA["${target_domain}"]:-}.conf"

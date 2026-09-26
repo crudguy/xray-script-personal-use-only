@@ -1003,7 +1003,8 @@
       "check_update": "判断是否需要更新。",
       "start_update": "更新 Nginx。",
       "smooth_upgrade": "正在平滑升级 Nginx...",
-      "no_old_process": "未找到旧的 Nginx 进程。跳过后续步骤。"
+      "no_old_process": "未找到旧的 Nginx 进程。跳过后续步骤。",
+      "backup_skipped": "未找到旧的 Nginx 二进制文件，跳过备份。"
     },
     "purge": {
       "start_purge": "正在卸载 Nginx...",

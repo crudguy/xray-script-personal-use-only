@@ -1003,7 +1003,8 @@
       "check_update": "Checking if an update is needed.",
       "start_update": "Updating Nginx.",
       "smooth_upgrade": "Performing a smooth upgrade of Nginx...",
-      "no_old_process": "Old Nginx process not found. Skipping subsequent steps."
+      "no_old_process": "Old Nginx process not found. Skipping subsequent steps.",
+      "backup_skipped": "Old Nginx binary not found. Skipping backup."
     },
     "purge": {
       "start_purge": "Uninstalling Nginx...",

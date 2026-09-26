@@ -27,6 +27,170 @@ suffix for additional releases on the same day).
 
 ---
 
+## [v2026-09-26]
+
+`v2026-09-23` 之后的累计批次（130 笔提交）。主线三条：**WARP 换原生 WireGuard 并补健康
+探测与自动回落**、**新增 IPv6 状态检测与启停 / BBR 持久化补齐**、**菜单交互反馈与"执行完
+不丢内容"的暂停机制**；另附一轮"handler 分派臂零覆盖清零 + 仓库静态守卫"的测试体系建设，
+以及公网探测与分享生成的两处性能优化。
+
+> **已知问题（本版未收口）**：新增的仓库资产守卫（`test/repo_assets_test.sh`）暴露一处既存
+> 缺陷 —— `config/nginx/conf/sites-available/` 下三个站点模板（`domain` / `cdn` /
+> `custom-site`）**从未入库**，而 `render_custom_site_config` 与 `_change_domain_render`
+> 都是直接 `cp` 它们使用，故「自定义站点」与「变更域名」两个功能当前必然失败（后者还是
+> 破坏性路径）。改动只做到"失败方向从破坏变为不动"：变更域名已加**模板存在性前置守卫**，
+> 缺失即报错且一个字节都不删。模板补齐前，守卫会以 `PEND` 持续高亮（置
+> `XRAY_ASSET_GUARD_STRICT=1` 可让 CI 直接判红）。
+
+### 新增 Added
+
+- **WARP 出站改用原生 WireGuard**：原实现靠 Docker 拉 `cloudflare-warp` 容器、Xray 侧用
+  socks 出站指向容器端口。改为一次性向 Cloudflare 注册端点取 WireGuard 凭据 → 落
+  `warp.json` 复用（含私钥，`_atomic_write` 保证 600）→ 出站直接写 `wireguard`。代价是
+  去掉 Docker 依赖、少一个常驻容器与一跳转发，且**注册只做一次**，之后反复开关不再联网。
+  凭据来源按"先复用落盘文件、没有再注册"优先；注册端点对部分机房 IP 段会直接回 500（社区
+  实测案例），此时保持既有配置不动并明确报错，绝不把状态位改成"已启用"。
+- **WARP 健康探测与自动回落**：`observatory` 周期探测 WARP 出站可用性，`routing.balancers`
+  在探测判定失效时把流量交给 `fallbackTag`（`direct`），实现"WARP 挂了自动走直连"而不是
+  干等超时。balancer 的 `selector` **只放 WARP 自己** —— 若把 `direct` 也放进去做"选优"，
+  `leastPing` 会因为直连延迟更低而把本该走 WARP 的流量抢走，违背分流本意。
+  见下方「修复」中"规则 tag 自相矛盾"一条：实测发现规则字段必须跟着改写，本版一并修好。
+- **顶层 `dns` 段**：不写 `dns` 时域名解析交给主机商 resolver，结果不可控。改为显式声明
+  DoH 解析器（`1.1.1.1` / `8.8.8.8` 的 `dns-query`）＋一家明文兜底，并按本机 xray 实测
+  走 `full` → `minimal` → `off` 三档降级（`queryStrategy` / `enableParallelQuery` 是较新
+  版本才有的字段，老版本遇到会拒绝整份配置）。
+- **IPv6 状态检测与启停**：新增 `check.sh --ipv6-status [--no-probe]` 只读七档判定，其中
+  **"半残"被单独识别** —— 有 IPv6 地址但无默认路由或出站不通，这正是"某些站点莫名慢"的
+  病因；新增 `handler_ipv6 enable|disable|disable-hard`。内核实测（6.12）：
+  `disable_ipv6=1` 不会让 `bind(::)` 失败（只有 GRUB 级 `ipv6.disable=1` 才会），故软禁用
+  为主、硬禁用单独列为一档；软禁用的写入顺序敏感（`all` 必须在逐接口之前）。
+- **BBR 持久化补齐**：体检里的「开机自启」原本指的是 BBR 持久化（`modules-load.d` +
+  `sysctl.d`）而非 xray 服务自启，语义容易被误读；现在**已生效时也补齐持久化落盘**，并把
+  两项结论分开表述（见「变更」）。
+- **`sniffing.routeOnly` 可选开关**：默认**关**，即"承诺默认零改写"——开启会让 CDN 回源
+  优选丢失。
+- **出站 `sockopt` 网络调优**：`tcpUserTimeout` 让"已建立但对端无响应"的连接尽快判死
+  （内核 `tcp_retries2` 默认约 15 分钟，代理层表现为"客户端卡住不动、看不出错"），
+  `tcpKeepAliveIdle` / `tcpKeepAliveInterval` 把长连接保活在 NAT 老化之前。字段名全小写
+  （`tcpcongestion`，无 `tcpNoDelay`），且**只对 `freedom` 出站**用 `+` 合并写入。
+- **dispatch 层统一审计留痕**：收口在 `handler.sh main()` 的 `case` 之前（事前记录），
+  补上改配置类写操作的留痕；纯只读臂（share / traffic / sni-ports）与臂内留痕更细者排除。
+- **分流值写前预校验**：非法输入当场提示重输，不再"先写后回滚"。
+- **多选项子菜单循环导航**：可选项子菜单执行完回到本菜单循环，只有"返回上级"才真的退；
+  所有可导航子菜单统一补 `0. 返回` 项（此前部分子菜单缺返回项，且 `0` 曾被误判）。
+- **输出型命令执行后暂停**：新增 `XRAY_MENU_PAUSE=auto|always|never`（交互才有的行为一律
+  走 TTY 门控）。挂载范围：一键安装收尾、更新配置 / SNI 安装收尾、菜单 4/5/6（启停重启）。
+  **CLI 入口刻意不挂** —— 要能进 cron。暂停函数恒 `return 0`，`read` 一律 `|| answer=''`。
+- **启停重启三臂执行反馈**：补上结果输出，`stop` 另加"停止后复查"。
+- **`target` 预设清单展示与自愈**：读取 `target` 时展示预设清单并补说明（消除"随便填"的
+  误解）；新增 `target_removed` 名单声明上游已判定失效的预设；启动期把上游 `target` 预设
+  同步进运行时配置（自愈），并清理预设清单里不可用的域名。
+- **色板新增 `CYAN`**：说明文字专用色，并写明层级约定（`GREEN` 可操作选项 / `CYAN` 说明
+  文字 / `YELLOW` 提示 / `RED` 退出）。说明文字不用"置暗"——置暗在深浅两类终端总有一边
+  读不清。
+
+### 变更 Changed
+
+- **mKCP 迁移 FinalMask**：Xray 26.2.6 起 `finalmask` 取代 `seed` / `header`，且两种写法
+  互不兼容、写错一边整份配置被拒。迁移后**类型 id 改为按本机 xray 实测选定**，不再写死
+  `mkcp-legacy`；新增 `heal_mkcp_finalmask` 自适应自愈，挂在 install 末尾与 restart 开头。
+- **可恢复失败改为软失败回菜单**：`exec_handler` 把它吸收为 `print_warn` + `return 0`，
+  不再 `_error` 杀掉整个交互脚本；菜单守卫（前置条件不满足）同样改为"提示并返回"，
+  例如未开 WARP 时选「WARP 分流」不再硬退出。
+- **`check.sh` 报告助手加 `_check_` 前缀**：与 `handler.sh` 的同名助手区分开，消除同名
+  遮蔽歧义。
+- **说明文案与选项分层**：菜单说明文案对齐实际功能，改用青色并与选项分层；`option0`
+  用词按各子菜单 `*)` 分支的真实去向写实（只有主菜单的 `0` 是"退出"）。
+- **公网 IP 探测性能**（实测 5 入站、外网 5s/请求）：冷启动 **14.43s → 5.97s**，第二次
+  **14.26s → 0.80s**。三级解析：进程内缓存 → 落盘缓存（TTL 600s，`XRAY_PUBLIC_IP_TTL` /
+  `XRAY_SKIP_IP_CACHE`）→ 外网；**空结果绝不落盘**，时钟回拨按未命中。按需 + 并行：
+  无 v6 默认路由就跳过 v6，两栈并行取慢的那个，超时 3 / 5 / 1。
+- **分享 / 订阅生成削减 jq**：`get_common_config` 13→2、`clash_build_proxy` 14→1、
+  `singbox_build_outbound` 13→1（合计 237→41 次），随机下标改用内建 `$RANDOM`（只是从数组
+  挑一项，非密钥）。合并时**分隔符必须用 `\x1f` 而非 tab** —— tab 属 `IFS` 空白，`read`
+  会合并连续 tab 致空字段丢失、后续整体串位，生成"看着正常实际连不上"的链接。
+- **测试临时目录归位 `.workbuddy/tmp/`**（承接 `v2026-09-23` 的约定）。
+
+### 修复 Fixed
+
+- **`add_rule` 重建路由规则崩溃（数组 + 对象）**：带位置插入与追加分支把单个对象直接
+  `+=` 到数组上，jq 报 `array and object cannot be added`，路由规则菜单在 `set -e` 下中断。
+  两处漏改一并修掉，并补空值守卫 —— 输入为空或夹带多余逗号时会生成 `ip:[""]` 非法规则，
+  触发 xray 校验失败并回滚。
+- **WARP 分流规则 tag 自相矛盾（本版重点，实测确证）**：开启健康探测后出站改名 `warp-out`、
+  balancer 名为 `warp-balancer`，而规则里写的是 `outboundTag: "warp"`；原注释设想"由同名
+  balancer 顶替"，实际**不成立**。用真机 Xray 26.3.27 做矩阵实测确认两条事实：①规则的
+  `outboundTag` **只在 `outbounds` 里查 tag，绝不落到 balancer**（把 balancer 改名叫
+  `warp` 也一样不通），走 balancer 的唯一途径是规则字段 `balancerTag`；②tag 解析不到时
+  不是"忽略该条规则"，而是 **fail-closed：命中该规则的流量全部阻断且不留显眼日志**，
+  表现为"WARP 分流静默失效"，极难排查。修法是把规则字段的改写 / 还原收在两个幂等函数里
+  （`_warp_rules_use_balancer` / `_warp_rules_use_outbound`），由 `_xray_apply_warp_balancer`
+  单点负责 —— 该函数在三条路径上都会被调用（配置生成链 / 开 WARP / 重置出口），因此
+  `add_rule` 与存量规则都不必改，下次生成配置时自动迁移；权威副本
+  `SCRIPT_CONFIG.rules` 仍存 `outboundTag` 形态，避免副本随"当次探测结果"漂移。同时修掉
+  关闭 WARP 时只匹配 `outboundTag` 的漏删（漏掉的就是 `balancerTag` 那份）。
+- **探测临时文件漏 `.json` 后缀，三处能力被静默降级**：xray 按扩展名判断配置格式，漏后缀
+  直接 `exit 23` 拒绝整份配置，被上层误判成"本机不支持"，`observatory` / `dns` /
+  `sniffing.routeOnly` 三项能力白白降级。三处喂给 xray 的临时配置全部补上后缀。
+- **`share.sh` 的 `_error` 未定义崩溃**：`share.sh` 由 `bash share.sh` 拉起、拿不到父进程
+  函数，表现为"未找到命令" + 127。把 `_error` / `_warn` / `_info` / `_pass` 下沉到
+  `_common.sh` 作为单一真源（刻意不统一的部分由 `output_helper_sink_test.sh` 守护）。
+- **`check.sh` 分派臂退出码语义**：把分派臂放进条件上下文，"检查不通过"不再被 ERR trap
+  报成"意外失败"。
+- **TLS 探测补 `-servername`（SNI）**：修正按 SNI 分流站点的误拒。
+- **Nginx 更新分支按退出码分流**：消除"无需更新"路径上的假报错。
+- **`ci-local` 门禁漏扫未跟踪的新文件**：`shellcheck` 主门禁补 `--others`，否则本地绿、
+  CI 红（新增测试文件不被扫描）。
+- **备份成员表补 `warp.json`**：迁移后可直接复用 WARP 凭据，不必重新注册。
+- **`acme.sh` 自动续期定时任务丢失**：`acme.sh` 会吞掉 cron 安装失败（3.1.6 的
+  `installcronjob` 无 `|| return`，而它无 crontab 时 `_err` 后 `return 1`），上层无从分辨，
+  表现为"以为在续，实际 90 天后过期"。补 `_ssl_renew_cron_present` / `_ssl_ensure_renew_cron`：
+  缺失先补装，仍失败则明确告警（**不 exit** —— 证书此刻有效，中断会让安装停在半路）。
+  续签失败本身无痕（cron 里那次 `acme.sh --cron` 的输出被丢进 `/dev/null`），只能靠天数
+  反推：体检新增两项 —— ①定时任务是否就位（未装 acme.sh / 无 crontab 则 skip，缺失则 warn）
+  ②剩余 < 21 天判为"跌进续期窗口却未被续掉 = 自动续期疑似未生效"（7 天内仍走"即将到期"）。
+  该判据**不能用"管道 + `grep -q`"** —— `pipefail` 下 `grep -q` 提前退出会让上游收 SIGPIPE
+  (141)，把"已就位"误判成"缺失"，而误判方向恰好是不告警。
+- **`GH_PROXY` 未校验即进 `eval`**：见「安全」。
+- **换端口时随机端口生成失败不再带走整个脚本**；**代理目标格式非法时不再带着空 port 继续
+  往下走**；**两处"jq 输出直接喂给判断"补上兜底**（jq 缺字段会输出字面 `null` 而非空串）。
+- **`install.sh` 直达参数白名单补登 IPv6 四个参数**；**交接子脚本时接住退出码**，消除假
+  「意外失败」噪音。
+- **测试框架自身缺陷**：①NEG 断言依赖 bash 报错文案的 locale；②`printf` 管道判定的 4KB
+  SIGPIPE 竞态（偶发翻红）；③某用例结尾只打印 FAIL 却不 `exit` 非零，而运行器只按退出码
+  计成败 —— 两者叠加使其长期静默假绿。
+
+### 安全 Security
+
+- **`GH_PROXY` 加白名单**：它是唯一一个未校验就进 `eval` 的入参（下载加速前缀）。改为按
+  白名单放行、非法即拒绝并告警，附放行 / 拒绝 / 告警 / 端到端四组断言。
+
+### 移除 Removed
+
+- **Docker / `cloudflare-warp` 容器方案的全部残留**：随 WARP 改原生 WireGuard 一并清掉，
+  并加静态守卫防止回流（含反向边界）。
+- 删除死文案与"白装的 `socat`"（从未被使用却会被安装）。
+
+### 文档 Docs
+
+- **全仓注释审计**：修正与代码事实不符的注释（引用失效 / 计数过时 / 描述与行为不一致三类），
+  覆盖 `core/`、`test/`、`config/` 与文档；中文 README 补依赖清单；`test/http3_test.sh`
+  头注释订正"仓库不入库站点配置"的错误说法（该说法正是三个站点模板缺失被长期掩盖的原因）。
+- **测试体系**：新增 `test/_harness.sh` 共享断言/沙箱/计时库与 `test/config.env` 集中配置；
+  `run_tests.sh` 报告增加通过率、每用例耗时、Top5 慢用例与失败明细；新增
+  `test/README.md`（目录结构 / 依赖 / 约定 / CI 接入）；新增 `test/repo_assets_test.sh`
+  仓库资产完整性守卫（清单 + 源码静态引用双向核对 + 动态引用前缀目录 + NEG 自检）；
+  `http3_test.sh` 增加对**仓库真模板**的同组断言（真模板入库即自动生效）。
+- **handler 分派臂零覆盖清零**：最后 7 条零引用臂（export_config / health / net_status /
+  read_xray_config / subscription / traffic / xray_version）补上用例，至此 54 条臂全部有
+  回归守卫（含 NEG）。
+- **钉死"存量用例刻意不迁 harness"的边界**：存量 81 个用例中 78 个刻意保留各自写法，
+  让新库只服务新用例；写下"值得迁的三种情形"（正被大改 / 要接 `config.env` 夹具 /
+  重复定义真造成问题）与"不要为统一而批量迁移"的理由 —— 全量测试只能证明"没变红"，
+  证明不了断言没被改成恒绿。
+
+---
+
 ## [v2026-09-23]
 
 回归项目"临时产物统一进 `.workbuddy`"约定：测试临时目录由 `test/.tmp/` 迁回

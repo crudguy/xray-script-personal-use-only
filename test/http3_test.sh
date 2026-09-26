@@ -114,8 +114,11 @@ for tpl in domain cdn custom-site; do
         "$(grep -c '^[[:space:]]*listen[[:space:]]*443 quic' "${conf}" | tr -d '[:space:]')"
     ck "T1 ${tpl} 有 IPv6 UDP 443 监听" '1' \
         "$(grep -c '^[[:space:]]*listen[[:space:]]*\[::\]:443 quic' "${conf}" | tr -d '[:space:]')"
+    # 空白用 [[:space:]] 而非字面空格: nginx 不在意 add_header 与 Alt-Svc 之间有几个
+    # 空格, 写死一个空格会把"对齐排版的合法模板"误判成缺 Alt-Svc (BRE, 故用
+    # [[:space:]][[:space:]]* 表达"至少一个")。
     ck "T1 ${tpl} 通告 Alt-Svc (含 always, 404 也广告)" '1' \
-        "$(grep -c 'add_header Alt-Svc.*always;' "${conf}" | tr -d '[:space:]')"
+        "$(grep -c 'add_header[[:space:]][[:space:]]*Alt-Svc.*always;' "${conf}" | tr -d '[:space:]')"
     ck "T3 ${tpl} 声明了 server_name" '1' \
         "$(grep -c '^[[:space:]]*server_name' "${conf}" | tr -d '[:space:]')"
 done
@@ -138,6 +141,14 @@ ck "T2 全库 reuseport 仅 2 处 (不会触发 duplicate listen options)" '2' \
 #     缺失时由 test/repo_assets_test.sh 以 PEND 高亮。
 # ---------------------------------------------------------------------------
 REAL_SITES="${REPO}/config/nginx/conf/sites-available"
+# 判据是"占位符存在"而不是"恰好出现一次": 占位域名同时出现在 server_name 与证书
+# 路径里 (ssl.sh 按 ${SSL_CERT_PATH}/${DOMAIN}/ 安装证书), 计数必然 >1。
+# 用 grep -c 数不得 0 即可 —— 少一个占位符, _replace_in_file 就是空转。
+tpl_has() { # tpl_has <文件> <BRE 模式> -> yes/no
+    local n
+    n="$(grep -c -- "$2" "$1" 2>/dev/null | tr -d '[:space:]')"
+    [[ "${n:-0}" -ge 1 ]] && printf 'yes' || printf 'no'
+}
 if [[ -d "${REAL_SITES}" ]]; then
     for tpl in domain cdn custom-site; do
         conf="${REAL_SITES}/${tpl}.example.com.conf"
@@ -150,7 +161,7 @@ if [[ -d "${REAL_SITES}" ]]; then
         ck "T1r ${tpl} 真模板有 IPv6 UDP 443 监听" '1' \
             "$(grep -c '^[[:space:]]*listen[[:space:]]*\[::\]:443 quic' "${conf}" | tr -d '[:space:]')"
         ck "T1r ${tpl} 真模板通告 Alt-Svc (含 always)" '1' \
-            "$(grep -c 'add_header Alt-Svc.*always;' "${conf}" | tr -d '[:space:]')"
+            "$(grep -c 'add_header[[:space:]][[:space:]]*Alt-Svc.*always;' "${conf}" | tr -d '[:space:]')"
         ck "T3r ${tpl} 真模板声明了 server_name" '1' \
             "$(grep -c '^[[:space:]]*server_name' "${conf}" | tr -d '[:space:]')"
     done
@@ -160,14 +171,17 @@ if [[ -d "${REAL_SITES}" ]]; then
         "$(grep -h 'quic reuseport;' "${REAL_SITES}"/*.conf | wc -l | tr -d '[:space:]')"
     # T13: 渲染契约的占位符必须真的写在模板里 —— 少一个, _replace_in_file 就是空转,
     #      产出的站点配置里域名 / XHTTP 路径 / socket / 代理目标会全错。
-    ck "T13r domain 真模板含 example.com 占位符" '1' \
-        "$(grep -c 'example\.com' "${REAL_SITES}/domain.example.com.conf" | tr -d '[:space:]')"
-    ck "T13r domain 真模板含 /yourpath 占位符 (XHTTP 路径)" '1' \
-        "$(grep -c '/yourpath' "${REAL_SITES}/domain.example.com.conf" | tr -d '[:space:]')"
-    ck "T13r custom-site 真模板含 PROXY_TARGET 占位符" '1' \
-        "$(grep -c 'PROXY_TARGET' "${REAL_SITES}/custom-site.example.com.conf" | tr -d '[:space:]')"
-    ck "T13r custom-site 真模板含 custom_site.sock 占位符" '1' \
-        "$(grep -c 'unix:/dev/shm/nginx/custom_site\.sock' "${REAL_SITES}/custom-site.example.com.conf" | tr -d '[:space:]')"
+    ck "T13r domain 真模板含 example.com 占位符" 'yes' \
+        "$(tpl_has "${REAL_SITES}/domain.example.com.conf" 'example\.com')"
+    ck "T13r domain 真模板含 /yourpath 占位符 (XHTTP 路径)" 'yes' \
+        "$(tpl_has "${REAL_SITES}/domain.example.com.conf" '/yourpath')"
+    ck "T13r custom-site 真模板含 PROXY_TARGET 占位符" 'yes' \
+        "$(tpl_has "${REAL_SITES}/custom-site.example.com.conf" 'PROXY_TARGET')"
+    ck "T13r custom-site 真模板含 custom_site.sock 占位符" 'yes' \
+        "$(tpl_has "${REAL_SITES}/custom-site.example.com.conf" 'unix:/dev/shm/nginx/custom_site\.sock')"
+    # 负向自检: 抽取/判据不能恒真 —— 拿一个必然不存在的字面量必须得到 no
+    ck "T13r 判据负向自检 (不存在的占位符必须为 no)" 'no' \
+        "$(tpl_has "${REAL_SITES}/domain.example.com.conf" 'NO_SUCH_PLACEHOLDER_ZZZ')"
 else
     printf '  skip T1r/T2r/T3r/T13r: 仓库尚无真模板 %s (P0 未收, 见 test/repo_assets_test.sh)\n' \
         "${REAL_SITES#"${REPO}/"}"

@@ -19,6 +19,8 @@
 #   T1 静态守卫: 三个站点模板都有 UDP 443 监听与 Alt-Svc
 #   T2 静态守卫: `quic reuseport` 全库只出现在主域名模板 (且 IPv4/IPv6 各一次)
 #   T3 静态守卫: 三个模板都声明了 server_name (UDP 443 靠它选站)
+#   T1r/T2r/T3r/T13r 同一组约束 + 渲染占位符对**仓库真模板**再跑一遍 (真模板存在才跑;
+#      夹具只能守住约束的形状, 真模板缺失这件事由 test/repo_assets_test.sh 兜底)
 #   T4 _nginx_supports_http3: 有模块 -> 0, 无模块 -> 1, 路径不存在 -> 1
 #   T5 align_site_http3: 支持时原样保留; 不支持时剥离 quic 与 Alt-Svc 行
 #   T6 防火墙: UDP 判据与 TCP 判据互不串台 (只有 443/tcp 时查 udp 必须为未放行)
@@ -55,7 +57,11 @@ ck() { # ck <描述> <期望> <实得>
     if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (期望 [$2] 实得 [$3])"; fi
 }
 
-# 自带 sites-available 夹具: 仓库不入库真实站点配置 (属部署期产物), 这里重建以满足 T1/T2/T3/T5 静态守卫
+# 自带 sites-available 夹具: 让 T1/T2/T3/T5 在真模板缺失的机器上也能跑。
+# 注意: 夹具**不能**替代真模板 —— config/nginx/conf/sites-available/ 下的真模板必须入库,
+#       因为 render_custom_site_config (handler.sh:1000) 与 _change_domain_render
+#       (handler.sh:4860) 都是直接 cp 它来用。夹具只负责让"约束本身"有守卫, 1b 段
+#       再对真模板跑一遍同一组断言 (真模板在, 约束才真正生效)。
 SITES="${SB}/sites-available"
 mkdir -p "${SITES}"
 
@@ -123,6 +129,49 @@ ck "T2 custom-site 模板不带 reuseport" '0' \
     "$(grep -c 'quic reuseport;' "${SITES}/custom-site.example.com.conf" | tr -d '[:space:]')"
 ck "T2 全库 reuseport 仅 2 处 (不会触发 duplicate listen options)" '2' \
     "$(grep -h 'quic reuseport;' "${SITES}"/*.conf | wc -l | tr -d '[:space:]')"
+
+# ---------------------------------------------------------------------------
+# 1b. 同一组约束对**仓库真模板**再跑一遍 (模板存在才跑)
+#     上面的夹具是自造的, 只能守住"约束长什么样"; 真模板缺失时它照样全绿 ——
+#     config/nginx/conf/sites-available/ 下三个模板从未入库这件事就是这样被掩盖的
+#     (2026-09-26 生产就绪度审计才发现)。真模板一旦入库即自动落到同一组断言下;
+#     缺失时由 test/repo_assets_test.sh 以 PEND 高亮。
+# ---------------------------------------------------------------------------
+REAL_SITES="${REPO}/config/nginx/conf/sites-available"
+if [[ -d "${REAL_SITES}" ]]; then
+    for tpl in domain cdn custom-site; do
+        conf="${REAL_SITES}/${tpl}.example.com.conf"
+        if [[ ! -f "${conf}" ]]; then
+            bad "T1r 仓库缺真模板 ${tpl}.example.com.conf (依赖它的功能必然失败)"
+            continue
+        fi
+        ck "T1r ${tpl} 真模板有 IPv4 UDP 443 监听" '1' \
+            "$(grep -c '^[[:space:]]*listen[[:space:]]*443 quic' "${conf}" | tr -d '[:space:]')"
+        ck "T1r ${tpl} 真模板有 IPv6 UDP 443 监听" '1' \
+            "$(grep -c '^[[:space:]]*listen[[:space:]]*\[::\]:443 quic' "${conf}" | tr -d '[:space:]')"
+        ck "T1r ${tpl} 真模板通告 Alt-Svc (含 always)" '1' \
+            "$(grep -c 'add_header Alt-Svc.*always;' "${conf}" | tr -d '[:space:]')"
+        ck "T3r ${tpl} 真模板声明了 server_name" '1' \
+            "$(grep -c '^[[:space:]]*server_name' "${conf}" | tr -d '[:space:]')"
+    done
+    ck "T2r 真模板 reuseport 仅主域名持有 (IPv4+IPv6 共 2 行)" '2' \
+        "$(grep -c 'quic reuseport;' "${REAL_SITES}/domain.example.com.conf" | tr -d '[:space:]')"
+    ck "T2r 真模板全库 reuseport 仅 2 处" '2' \
+        "$(grep -h 'quic reuseport;' "${REAL_SITES}"/*.conf | wc -l | tr -d '[:space:]')"
+    # T13: 渲染契约的占位符必须真的写在模板里 —— 少一个, _replace_in_file 就是空转,
+    #      产出的站点配置里域名 / XHTTP 路径 / socket / 代理目标会全错。
+    ck "T13r domain 真模板含 example.com 占位符" '1' \
+        "$(grep -c 'example\.com' "${REAL_SITES}/domain.example.com.conf" | tr -d '[:space:]')"
+    ck "T13r domain 真模板含 /yourpath 占位符 (XHTTP 路径)" '1' \
+        "$(grep -c '/yourpath' "${REAL_SITES}/domain.example.com.conf" | tr -d '[:space:]')"
+    ck "T13r custom-site 真模板含 PROXY_TARGET 占位符" '1' \
+        "$(grep -c 'PROXY_TARGET' "${REAL_SITES}/custom-site.example.com.conf" | tr -d '[:space:]')"
+    ck "T13r custom-site 真模板含 custom_site.sock 占位符" '1' \
+        "$(grep -c 'unix:/dev/shm/nginx/custom_site\.sock' "${REAL_SITES}/custom-site.example.com.conf" | tr -d '[:space:]')"
+else
+    printf '  skip T1r/T2r/T3r/T13r: 仓库尚无真模板 %s (P0 未收, 见 test/repo_assets_test.sh)\n' \
+        "${REAL_SITES#"${REPO}/"}"
+fi
 
 # ---------------------------------------------------------------------------
 # 2. 抽取生产函数 (源码同步, 不手抄)

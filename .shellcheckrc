@@ -1,0 +1,17 @@
+# ShellCheck 配置 —— 本地与 CI (.github/workflows/shellcheck.yml) 共用。
+# 复核方式:
+#   docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.10.0 -S warning <files>
+#
+# 门禁等级 warning: style / info 不参与门禁 (例如 SC1091 "Not following: /etc/os-release"
+# 属 info, 本工程三处 `source /etc/os-release && os="${ID}"` 均按预期工作)。
+
+severity=warning
+shell=bash
+
+# ---------------------------------------------------------------------------
+# 登记例外: 当前为空 —— 门禁 (-S warning) 对全部规则全量生效, CI 棘轮基线锁 0,
+# 任一条回潮都会被直接拦下。
+# 例外只允许在这里增加, 每条须写明根因与拆除条件, 避免例外变成黑洞 ——
+# 改动本文件会在 CI diff 里显式暴露。
+# ---------------------------------------------------------------------------
+disable=
